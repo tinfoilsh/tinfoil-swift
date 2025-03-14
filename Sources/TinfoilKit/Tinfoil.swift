@@ -1,18 +1,10 @@
 import Foundation
 import OpenAIKit
-import AsyncHTTPClient
-import NIOCore
-import NIOPosix
-import NIOSSL
-import NIOHTTP1
-import Logging
-import CryptoKit
 
 /// Main entry point for the Tinfoil secure AI client library
 public final class TinfoilAI {
     public let client: OpenAIKit.Client
     private let secureOpenAIClient: SecureOpenAIClient?
-    private let eventLoopGroup: EventLoopGroup?
     
     /// Creates a new secure OpenAI client
     /// - Parameters:
@@ -32,6 +24,11 @@ public final class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
         
+        // Validate enclave URL
+        guard URL(string: enclaveURL) != nil else {
+            throw TinfoilError.invalidConfiguration("Invalid enclave URL: \(enclaveURL)")
+        }
+        
         // First verify the enclave
         let verifier = SecureClient(
             githubOrg: githubOrg,
@@ -42,17 +39,11 @@ public final class TinfoilAI {
         
         let verificationResult = try await verifier.verify()
         
-        // Create event loop group
-        self.eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let logger = Logger(label: "com.tinfoil.client")
-        
         // Create secure OpenAI client with certificate fingerprint verification
         let secureClient = try SecureOpenAIClient.create(
             apiKey: finalApiKey,
             enclaveURL: enclaveURL,
-            expectedFingerprint: verificationResult.certFingerprint,
-            eventLoopGroup: self.eventLoopGroup!,
-            logger: logger
+            expectedFingerprint: verificationResult.certFingerprint
         )
         
         self.secureOpenAIClient = secureClient
@@ -61,8 +52,17 @@ public final class TinfoilAI {
     
     deinit {
         // Clean up resources
-        try? self.secureOpenAIClient?.shutdown()
-        try? self.eventLoopGroup?.syncShutdownGracefully()
+        self.secureOpenAIClient?.shutdown()
+    }
+    
+    /// Test the connection to the enclave
+    /// - Returns: A result with success message or detailed error
+    public func testConnection() async -> Result<String, Error> {
+        guard let secureClient = self.secureOpenAIClient else {
+            return .failure(TinfoilError.invalidConfiguration("Secure client not initialized"))
+        }
+        
+        return await secureClient.testConnection()
     }
 }
 
@@ -70,4 +70,5 @@ public final class TinfoilAI {
 public enum TinfoilError: Error {
     case missingAPIKey
     case invalidConfiguration(String)
+    case connectionError(String)
 } 
