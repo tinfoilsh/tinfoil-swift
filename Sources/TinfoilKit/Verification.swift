@@ -69,24 +69,20 @@ public struct VerificationResult {
 
 /// A client for securely verifying code integrity through remote attestation
 public class SecureClient {
-    private let githubOrg: String
     private let githubRepo: String
     private let enclaveURL: String
     private let callbacks: VerificationCallbacks
     
     /// Initialize a secure client with required configuration
     /// - Parameters:
-    ///   - githubOrg: GitHub organization name
-    ///   - githubRepo: GitHub repository name
+    ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - enclaveURL: URL for the enclave attestation endpoint
     ///   - callbacks: Optional callbacks for verification progress
     public init(
-        githubOrg: String,
         githubRepo: String,
         enclaveURL: String,
         callbacks: VerificationCallbacks = VerificationCallbacks()
     ) {
-        self.githubOrg = githubOrg
         self.githubRepo = githubRepo
         self.enclaveURL = enclaveURL
         self.callbacks = callbacks
@@ -96,7 +92,7 @@ public class SecureClient {
     /// - Returns: A verification result or throws an error
     public func verify() async throws -> VerificationResult {
         // Get the full repo name
-        let repo = "\(githubOrg)/\(githubRepo)"
+        let repo = githubRepo
         
         // STEP 1: Verify code with GitHub and Sigstore
         let codeDigest = try await verifyCodeWithGitHub(repo: repo)

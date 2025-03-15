@@ -1,7 +1,7 @@
 import Foundation
 
 /// A utility class for parsing OpenAI API URLs into their components
-public struct OpenAIURLParser {
+public struct URLParser {
     /// Represents the components of a parsed OpenAI API URL
     public struct URLComponents {
         public let scheme: String
@@ -33,9 +33,8 @@ public struct OpenAIURLParser {
     /// Parse an OpenAI API URL into its components
     /// - Parameters:
     ///   - url: The URL string to parse
-    ///   - logger: Optional logger for debug information
     /// - Returns: The parsed URL components
-    public static func parse(url: String, logger: PinningLogger? = nil) -> URLComponents {
+    public static func parse(url: String) -> URLComponents {
         var scheme = "https"
         var host = url
         var port: Int? = nil
@@ -60,13 +59,8 @@ public struct OpenAIURLParser {
                 
                 // Verify that path is not the same as host
                 if path == host || path == components.host {
-                    logger?.debug("Path appears to be the same as host, ignoring path")
                     path = nil
-                } else {
-                    logger?.debug("Found path in URL: \(path ?? "nil")")
                 }
-            } else {
-                logger?.debug("No path found in URL")
             }
         } else {
             // Fallback to manual parsing if URLComponents fails
@@ -88,13 +82,8 @@ public struct OpenAIURLParser {
                 
                 // Verify that path is not the same as host
                 if path == host {
-                    logger?.debug("Manual parsing - path appears to be the same as host, ignoring path")
                     path = nil
-                } else {
-                    logger?.debug("Manual parsing - found path: \(path ?? "nil")")
                 }
-            } else {
-                logger?.debug("Manual parsing - no path found")
             }
             
             // Extract port if present
@@ -104,8 +93,6 @@ public struct OpenAIURLParser {
                 host = String(host[..<portIndex])
             }
         }
-        
-        logger?.debug("Parsed URL - scheme: \(scheme), host: \(host), port: \(port?.description ?? "default"), path: \(path ?? "nil")")
         
         return URLComponents(scheme: scheme, host: host, port: port, path: path)
     }
