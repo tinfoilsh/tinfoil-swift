@@ -26,136 +26,26 @@ public class SecureOpenAIClient {
             logger: logger
         )
         
-        // Parse the URL components from the enclave URL
-        var scheme = "https"
-        var host = enclaveURL
-        var port: Int? = nil
-        var path: String? = nil
-        
-        // Use URLComponents for more robust URL parsing
-        if let url = URL(string: enclaveURL), let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-            if let urlScheme = components.scheme {
-                scheme = urlScheme
-            }
-            
-            if let urlHost = components.host {
-                host = urlHost
-            }
-            
-            port = components.port
-            
-            // Extract path (remove leading slash for pathPrefix)
-            if !components.path.isEmpty && components.path != "/" {
-                let urlPath = components.path
-                path = urlPath.hasPrefix("/") ? String(urlPath.dropFirst()) : urlPath
-                
-                // Verify that path is not the same as host (which would be incorrect)
-                if path == host || path == components.host {
-                    logger.debug("Path appears to be the same as host, ignoring path")
-                    path = nil
-                } else {
-                    logger.debug("Found path in URL: \(path ?? "nil")")
-                }
-            } else {
-                logger.debug("No path found in URL, will use default 'v1'")
-            }
-        } else {
-            // Fallback to manual parsing if URLComponents fails
-            if host.hasPrefix("https://") {
-                host = String(host.dropFirst(8))
-                scheme = "https"
-            } else if host.hasPrefix("http://") {
-                host = String(host.dropFirst(7))
-                scheme = "http"
-            }
-            
-            // Extract path if present, and separate it from host
-            if let pathIndex = host.firstIndex(of: "/") {
-                let fullPath = String(host[pathIndex...])
-                host = String(host[..<pathIndex])
-                
-                // Remove leading slash for pathPrefix
-                path = fullPath.hasPrefix("/") ? String(fullPath.dropFirst()) : fullPath
-                
-                // Verify that path is not the same as host (which would be incorrect)
-                if path == host {
-                    logger.debug("Manual parsing - path appears to be the same as host, ignoring path")
-                    path = nil
-                } else {
-                    logger.debug("Manual parsing - found path: \(path ?? "nil")")
-                }
-            } else {
-                logger.debug("Manual parsing - no path found, will use default 'v1'")
-            }
-            
-            // Extract port if present
-            if let portIndex = host.firstIndex(of: ":") {
-                let portString = String(host[host.index(after: portIndex)...])
-                port = Int(portString)
-                host = String(host[..<portIndex])
-            }
-        }
-        
-        logger.debug("Parsed URL - scheme: \(scheme), host: \(host), port: \(port?.description ?? "default"), path: \(path ?? "nil")")
+        // Parse the URL components using the dedicated parser
+        let urlComponents = OpenAIURLParser.parse(url: enclaveURL, logger: logger)
         
         // Create custom API configuration with the parsed URL components
-        let apiScheme: OpenAIKit.API.Scheme = scheme == "https" ? .https : .http
+        let apiScheme: OpenAIKit.API.Scheme = urlComponents.scheme == "https" ? .https : .http
         
-        // Include port in host if specified
-        let finalHost: String
-        if let port = port {
-            finalHost = "\(host):\(port)"
-        } else {
-            finalHost = host
-        }
-        
-        // Ensure we're using a valid path prefix
-        var pathPrefix: String
-        if let extractedPath = path {
-            // Final safety check to ensure path is not the same as host
-            if extractedPath == host || extractedPath == finalHost {
-                logger.debug("Final check - path appears to be the same as host, using default path")
-                // Try empty path first as some APIs expect this
-                pathPrefix = ""
-            } else {
-                pathPrefix = extractedPath
-            }
-        } else {
-            // For OpenAI-compatible APIs, the default is often an empty string or "v1"
-            // Try empty string first
-            pathPrefix = ""
-        }
-        
-        // Log a note about the path prefix choice
-        logger.debug("Using pathPrefix: \"\(pathPrefix)\" (empty string if shown blank)")
-        
-        // Create API configuration
-        let api = OpenAIKit.API(
-            scheme: apiScheme,
-            host: finalHost,
-            pathPrefix: pathPrefix
-        )
-        
-        // Create client configuration with custom API
-        let configuration = OpenAIKit.Configuration(
-            apiKey: apiKey,
-            organization: nil,
-            api: api
-        )
-        
+        // Log API configuration details
         logger.debug("Creating OpenAIKit.Client with API configuration:")
-        logger.debug("- Scheme: \(scheme)")  // Use the original scheme string
-        logger.debug("- Host: \(finalHost)")
-        logger.debug("- Path prefix: \(pathPrefix)")
+        logger.debug("- Scheme: \(urlComponents.scheme)")
+        logger.debug("- Host: \(urlComponents.finalHost)")
+        logger.debug("- Path prefix: \(urlComponents.pathPrefix)")
         logger.debug("- API key length: \(apiKey.count) characters")
         
         // Log the expected API base URL for debugging
         let apiBaseURLString: String
-        if pathPrefix.isEmpty {
-            apiBaseURLString = "\(scheme)://\(finalHost)"
+        if urlComponents.pathPrefix.isEmpty {
+            apiBaseURLString = "\(urlComponents.scheme)://\(urlComponents.finalHost)"
             logger.debug("- Expected API base URL: \(apiBaseURLString) (no path prefix)")
         } else {
-            apiBaseURLString = "\(scheme)://\(finalHost)/\(pathPrefix)"
+            apiBaseURLString = "\(urlComponents.scheme)://\(urlComponents.finalHost)/\(urlComponents.pathPrefix)"
             logger.debug("- Expected API base URL: \(apiBaseURLString)")
         }
         
@@ -166,6 +56,20 @@ public class SecureOpenAIClient {
                           code: 1001, 
                           userInfo: [NSLocalizedDescriptionKey: "Invalid URL generated: \(apiBaseURLString)"])
         }
+        
+        // Create API configuration
+        let api = OpenAIKit.API(
+            scheme: apiScheme,
+            host: urlComponents.finalHost,
+            pathPrefix: urlComponents.pathPrefix
+        )
+        
+        // Create client configuration with custom API
+        let configuration = OpenAIKit.Configuration(
+            apiKey: apiKey,
+            organization: nil,
+            api: api
+        )
         
         let openAIClient = OpenAIKit.Client(session: urlSession, configuration: configuration)
         
