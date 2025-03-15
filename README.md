@@ -10,7 +10,6 @@
 ```swift
 dependencies: [
     .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", from: "0.0.1"),
-    .package(url: "https://github.com/dylanshine/openai-kit.git", from: "1.0.0")
 ]
 ```
 
@@ -27,7 +26,7 @@ Xcode will automatically resolve and include the OpenAI-Kit dependency when you 
 
 ## Quick Start
 
-The Tinfoil Swift client is a wrapper around the [OpenAIKit](https://github.com/dylanshine/openai-kit) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAIKit client, with additional security features:
+The Tinfoil Swift client is a wrapper around the [OpenAI-Kit](https://github.com/dylanshine/openai-kit) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI-Kit client, with additional security features:
 
 - Automatic verification that the endpoint is running in a secure Tinfoil enclave
 - TLS certificate pinning to prevent man-in-the-middle attacks
@@ -38,16 +37,15 @@ import TinfoilKit
 import OpenAIKit
 
 // Create a secure client for a specific enclave and model repository
-let tinfoilClient = try await TinfoilAI(
-    apiKey: "your-api-key", // Optional, will use OPENAI_API_KEY env var if not provided
-    githubOrg: "tinfoilsh",
-    githubRepo: "model-repo",
+let tinfoil = try await TinfoilAI(
+    apiKey: "api-key", // Optional, will use TINFOIL_API_KEY env var if not provided
+    githubRepo: "tinfoilsh/model-repo",
     enclaveURL: "enclave.example.com"
 )
 
 // Access the OpenAIKit client through the client property
 // Note: enclave verification happens automatically during initialization
-let chatResponse = try await tinfoilClient.client.chats.create(
+let chatResponse = try await tinfoil.client.chats.create(
     model: "llama3.2:1b",
     messages: [
         Chat.Message(role: .user, content: "Say this is a test")
@@ -63,16 +61,15 @@ print(chatResponse.choices.first?.message.content ?? "No response")
 
 ```swift
 // 1. Create a TinfoilAI client
-let tinfoilClient = try await TinfoilAI(
-    apiKey: "your-api-key", // Optional, will use OPENAI_API_KEY env var if not provided
-    githubOrg: "tinfoilsh",
-    githubRepo: "model-repo",
+let tinfoil= try await TinfoilAI(
+    apiKey: "api-key", // Optional, will use TINFOIL_API_KEY env var if not provided
+    githubRepo: "tinfoilsh/model-repo",
     enclaveURL: "enclave.example.com"
 )
 
-// 2. Use the underlying OpenAIKit client
+// 2. Use the underlying OpenAI-Kit client
 // See https://github.com/dylanshine/openai-kit for API documentation
-let openAIClient = tinfoilClient.client
+let openAIClient = tinfoil.client
 
 // Example: Create a chat completion
 let response = try await openAIClient.chats.create(
@@ -122,8 +119,7 @@ let verificationCallbacks = VerificationCallbacks(
 )
 
 let secureClient = SecureClient(
-    githubOrg: "tinfoilsh",
-    githubRepo: "model-repo",
+    githubRepo: "tinfoilsh/model-repo",
     enclaveURL: "enclave.example.com",
     callbacks: verificationCallbacks
 )
@@ -141,7 +137,7 @@ if verificationResult.isMatch {
 
 ## API Documentation
 
-This library is a secure wrapper around [OpenAIKit](https://github.com/dylanshine/openai-kit) that can be used with Tinfoil. Once you have created a `TinfoilAI` instance, you can access the underlying OpenAIKit client through the `client` property. See the [OpenAIKit documentation](https://github.com/dylanshine/openai-kit) for complete API usage and documentation.
+This library is a secure wrapper around [OpenAI-Kit](https://github.com/dylanshine/openai-kit) that can be used with Tinfoil. Once you have created a `TinfoilAI` instance, you can access the underlying OpenAIKit client through the `client` property. See the [OpenAI-Kit documentation](https://github.com/dylanshine/openai-kit) for complete API usage and documentation.
 
 ## Requirements
 

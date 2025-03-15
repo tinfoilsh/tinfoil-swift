@@ -1,40 +1,40 @@
 import Foundation
 import OpenAIKit
-import AsyncHTTPClient
-import NIOCore
-import NIOPosix
-import NIOSSL
-import NIOHTTP1
-import Logging
-import CryptoKit
 
 /// Main entry point for the Tinfoil secure AI client library
 public final class TinfoilAI {
     public let client: OpenAIKit.Client
-    private let secureOpenAIClient: SecureOpenAIClient?
-    private let eventLoopGroup: EventLoopGroup?
+    private let tinfoilClient: TinfoilClient?
     
-    /// Creates a new secure OpenAI client
+    /// Creates a new Tinfoil client wrapping the OpenAI-Kit client
     /// - Parameters:
-    ///   - apiKey: Optional API key. If not provided, will be read from OPENAI_API_KEY environment variable
-    ///   - githubOrg: GitHub organization name for verification
-    ///   - githubRepo: GitHub repository name for verification
+    ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
+    ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - enclaveURL: URL for the enclave attestation endpoint
     public init(
         apiKey: String? = nil,
-        githubOrg: String,
         githubRepo: String,
         enclaveURL: String
     ) async throws {
         // Get API key from parameter or environment
-        let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
+        let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
         guard let finalApiKey = finalApiKey else {
             throw TinfoilError.missingAPIKey
         }
         
+        // Validate enclave URL
+        guard URL(string: enclaveURL) != nil else {
+            throw TinfoilError.invalidConfiguration("Invalid enclave URL: \(enclaveURL)")
+        }
+        
+        // Parse the GitHub repo string to extract org and repo
+        let repoComponents = githubRepo.split(separator: "/")
+        guard repoComponents.count == 2, !repoComponents[0].isEmpty, !repoComponents[1].isEmpty else {
+            throw TinfoilError.invalidConfiguration("Invalid GitHub repository format. Expected 'org/repo' but got '\(githubRepo)'")
+        }
+        
         // First verify the enclave
         let verifier = SecureClient(
-            githubOrg: githubOrg,
             githubRepo: githubRepo,
             enclaveURL: enclaveURL,
             callbacks: VerificationCallbacks()
@@ -42,27 +42,19 @@ public final class TinfoilAI {
         
         let verificationResult = try await verifier.verify()
         
-        // Create event loop group
-        self.eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let logger = Logger(label: "com.tinfoil.client")
-        
-        // Create secure OpenAI client with certificate fingerprint verification
-        let secureClient = try SecureOpenAIClient.create(
+        let tinfoilClient = try TinfoilClient.create(
             apiKey: finalApiKey,
             enclaveURL: enclaveURL,
-            expectedFingerprint: verificationResult.certFingerprint,
-            eventLoopGroup: self.eventLoopGroup!,
-            logger: logger
+            expectedFingerprint: verificationResult.certFingerprint
         )
         
-        self.secureOpenAIClient = secureClient
-        self.client = secureClient.underlyingClient
+        self.tinfoilClient = tinfoilClient
+        self.client = tinfoilClient.underlyingClient
     }
     
     deinit {
         // Clean up resources
-        try? self.secureOpenAIClient?.shutdown()
-        try? self.eventLoopGroup?.syncShutdownGracefully()
+        self.tinfoilClient?.shutdown()
     }
 }
 
@@ -70,4 +62,5 @@ public final class TinfoilAI {
 public enum TinfoilError: Error {
     case missingAPIKey
     case invalidConfiguration(String)
+    case connectionError(String)
 } 
