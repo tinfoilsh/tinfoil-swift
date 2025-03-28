@@ -14,14 +14,17 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/dylanshine/openai-kit.git", from: "1.0.0"),
-        .package(url: "https://github.com/tinfoilsh/verifier-swift.git", exact: "0.0.22")
     ],
     targets: [
+        .binaryTarget(
+            name: "TinfoilVerifier",
+            url: "https://github.com/tinfoilsh/verifier/releases/download/v0.0.22/TinfoilVerifier.xcframework.zip",
+            checksum: "6436a708ecb9b332869d2fa5e8ec2a4a48d3397411bcffeba1dc29c12dcc6c7a"),
         .target(
             name: "TinfoilKit",
             dependencies: [
                 .product(name: "OpenAIKit", package: "openai-kit"),
-                .product(name: "TinfoilVerifier", package: "verifier-swift")
+                "TinfoilVerifier"
             ],
             path: "Sources/TinfoilKit")
     ]
