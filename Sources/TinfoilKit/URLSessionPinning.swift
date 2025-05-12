@@ -47,8 +47,6 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
                                                .map { String(format: "%02x", $0) }
                                                .joined()
 
-        print("Server public key fingerprint: \(serverPublicKeyFingerprint)")
-        print("Expected fingerprint: \(expectedFingerprint)")
         if serverPublicKeyFingerprint == expectedFingerprint {
             completionHandler(.useCredential, URLCredential(trust: serverTrust))
         } else {
