@@ -4,3 +4,4 @@ verifier-*.zip
 *.zip
 .build/
 .DS_Store
+.swiftpm

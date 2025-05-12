@@ -45,7 +45,7 @@ public final class TinfoilAI {
         let tinfoilClient = try TinfoilClient.create(
             apiKey: finalApiKey,
             enclaveURL: enclaveURL,
-            expectedFingerprint: verificationResult.certFingerprint
+            expectedFingerprint: verificationResult.publicKeyFP
         )
         
         self.tinfoilClient = tinfoilClient

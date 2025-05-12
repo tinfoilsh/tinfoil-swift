@@ -134,15 +134,6 @@
         "revision" : "a34201439c74b53f0fd71ef11741af7e7caf01e1",
         "version" : "1.4.2"
       }
-    },
-    {
-      "identity" : "verifier-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/tinfoilsh/verifier-swift.git",
-      "state" : {
-        "revision" : "f557e19f9db9a75525c6fcfe5571634069787713",
-        "version" : "0.0.22"
-      }
     }
   ],
   "version" : 2
