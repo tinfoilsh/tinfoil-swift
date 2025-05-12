@@ -23,6 +23,7 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         // Ensure this is a server trust challenge
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let serverTrust = challenge.protectionSpace.serverTrust,
+              // Get the server's certificate data (we only check the leaf certificate)
               let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0)
         else {
             completionHandler(.cancelAuthenticationChallenge, nil)
