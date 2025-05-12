@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Security
 
 /// Custom error type for certificate verification failures
 public enum CertificateVerificationError: Error {
@@ -21,32 +22,34 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         
         // Ensure this is a server trust challenge
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let serverTrust = challenge.protectionSpace.serverTrust else {
-            // If not, reject the challenge
+              let serverTrust = challenge.protectionSpace.serverTrust,
+              let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0)
+        else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
-        
-        // Get the server's certificate data (we only check the leaf certificate)
-        guard let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else {
+
+        guard let publicKey = SecCertificateCopyKey(serverCertificate),
+              let x963Data  = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
-        
-        // Get the certificate data
-        let serverCertificateData = SecCertificateCopyData(serverCertificate) as Data
-        
-        // Calculate the fingerprint
-        let serverFingerprint = SHA256.hash(data: serverCertificateData).compactMap {
-            String(format: "%02x", $0)
-        }.joined()
-        
-        // Verify that the fingerprints match
-        if serverFingerprint == expectedFingerprint {
-            // If they match, accept the server's certificate
+
+        // Build P-384 key from the raw ANSI X9.63 bytes
+        guard let p384Public = try? P384.Signing.PublicKey(x963Representation: x963Data) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        let spkiData = p384Public.derRepresentation
+
+        let serverPublicKeyFingerprint = SHA256.hash(data: spkiData)
+                                               .map { String(format: "%02x", $0) }
+                                               .joined()
+
+        if serverPublicKeyFingerprint == expectedFingerprint {
             completionHandler(.useCredential, URLCredential(trust: serverTrust))
         } else {
-            // If they don't match, reject the challenge
             completionHandler(.cancelAuthenticationChallenge, nil)
         }
     }

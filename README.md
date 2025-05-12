@@ -129,7 +129,7 @@ if verificationResult.isMatch {
     print("Verification successful!")
     print("Code digest: \(verificationResult.codeDigest)")
     print("Runtime digest: \(verificationResult.runtimeDigest)")
-    print("Certificate fingerprint: \(verificationResult.certFingerprint)")
+    print("Key fingerprint: \(verificationResult.publicKeyFP)")
 } else {
     print("Verification failed: Code and runtime digests do not match")
 }
