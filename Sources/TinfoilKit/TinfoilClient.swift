@@ -1,13 +1,13 @@
 import Foundation
-import OpenAIKit
+import OpenAI
 
-/// A secure wrapper for OpenAI-Kit client that uses certificate pinning
+/// A secure wrapper for OpenAI client that uses certificate pinning
 /// to validate the enclave connection.
 public class TinfoilClient {
-    private let client: OpenAIKit.Client
+    private let client: OpenAI
     private let urlSession: URLSession
     
-    private init(client: OpenAIKit.Client, urlSession: URLSession) {
+    private init(client: OpenAI, urlSession: URLSession) {
         self.client = client
         self.urlSession = urlSession
     }
@@ -17,39 +17,37 @@ public class TinfoilClient {
         enclaveURL: String,
         expectedFingerprint: String
     ) throws -> TinfoilClient {
-        // Create the secure URLSession with certificate pinning
+        // Create the secure URLSession with certificate pinning and extraction
         let urlSession = SecureURLSessionFactory.createSession(
             expectedFingerprint: expectedFingerprint
         )
         
-        // Parse the URL components using the dedicated parser
-        let urlComponents = URLParser.parse(url: enclaveURL)
-    
-        // Construct the base URL string
-        let apiBaseURLString = "https://\(urlComponents.finalHost)\(urlComponents.pathPrefix)"
-        
-        // Additional verification to ensure we have a valid URL
-        guard URL(string: apiBaseURLString) != nil else {
+        // Parse the enclave URL
+        guard let url = URL(string: enclaveURL),
+              let host = url.host else {
             throw NSError(domain: "sh.tinfoil.secure-urlsession", 
                           code: 1001, 
-                          userInfo: [NSLocalizedDescriptionKey: "Invalid URL generated: \(apiBaseURLString)"])
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(enclaveURL)"])
         }
         
-        // Create API configuration
-        let api = OpenAIKit.API(
-            scheme: .https,
-            host: urlComponents.finalHost,
-            pathPrefix: urlComponents.pathPrefix
+        // Extract components from URL
+        let scheme = url.scheme ?? "https"
+        let port = url.port
+        
+        // Build host string with port if needed
+        let hostWithPort = port != nil ? "\(host):\(port!)" : host
+        
+        // Create OpenAI configuration with custom host and session
+        let configuration = OpenAI.Configuration(
+            token: apiKey,
+            host: hostWithPort,
+            scheme: scheme
         )
         
-        // Create client configuration with custom API
-        let configuration = OpenAIKit.Configuration(
-            apiKey: apiKey,
-            organization: nil,
-            api: api
+        let openAIClient = OpenAI(
+            configuration: configuration,
+            session: urlSession
         )
-        
-        let openAIClient = OpenAIKit.Client(session: urlSession, configuration: configuration)
         
         // Create and return the secure wrapper
         return TinfoilClient(
@@ -58,8 +56,8 @@ public class TinfoilClient {
         )
     }
     
-    /// Forwards requests to the underlying OpenAIKit.Client
-    public var underlyingClient: OpenAIKit.Client {
+    /// Forwards requests to the underlying OpenAI client
+    public var underlyingClient: OpenAI {
         return self.client
     }
     

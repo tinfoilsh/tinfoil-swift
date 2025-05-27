@@ -13,7 +13,7 @@ let package = Package(
             targets: ["TinfoilKit"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/dylanshine/openai-kit.git", from: "1.0.0"),
+        .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main"),
     ],
     targets: [
         .binaryTarget(
@@ -23,7 +23,7 @@ let package = Package(
         .target(
             name: "TinfoilKit",
             dependencies: [
-                .product(name: "OpenAIKit", package: "openai-kit"),
+                .product(name: "OpenAI", package: "OpenAI"),
                 "TinfoilVerifier"
             ],
             path: "Sources/TinfoilKit")

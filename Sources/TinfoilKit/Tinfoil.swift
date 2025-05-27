@@ -1,12 +1,12 @@
 import Foundation
-import OpenAIKit
+import OpenAI
 
-/// Main entry point for the Tinfoil secure AI client library
+/// Main entry point for the Tinfoil client library
 public final class TinfoilAI {
-    public let client: OpenAIKit.Client
+    public let client: OpenAI
     private let tinfoilClient: TinfoilClient?
     
-    /// Creates a new Tinfoil client wrapping the OpenAI-Kit client
+    /// Creates a new Tinfoil client wrapping the OpenAI client
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - githubRepo: GitHub repository in the format "org/repo"

@@ -13,7 +13,7 @@ dependencies: [
 ]
 ```
 
-Note: Tinfoil Swift requires OpenAI-Kit as a dependency. When you add Tinfoil Swift through Swift Package Manager, OpenAI-Kit will be automatically included as a dependency.
+Note: Tinfoil Swift requires the MacPaw OpenAI SDK as a dependency. When you add Tinfoil Swift through Swift Package Manager, the OpenAI SDK will be automatically included as a dependency.
 
 Or in Xcode:
 
@@ -22,11 +22,11 @@ Or in Xcode:
 3. Select the version you want to use
 4. Click "Add Package"
 
-Xcode will automatically resolve and include the OpenAI-Kit dependency when you add the Tinfoil Swift package.
+Xcode will automatically resolve and include the OpenAI SDK dependency when you add the Tinfoil Swift package.
 
 ## Quick Start
 
-The Tinfoil Swift client is a wrapper around the [OpenAI-Kit](https://github.com/dylanshine/openai-kit) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI-Kit client, with additional security features:
+The Tinfoil Swift client is a wrapper around the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI SDK, with additional security features:
 
 - Automatic verification that the endpoint is running in a secure Tinfoil enclave
 - TLS certificate pinning to prevent man-in-the-middle attacks
@@ -34,7 +34,7 @@ The Tinfoil Swift client is a wrapper around the [OpenAI-Kit](https://github.com
 
 ```swift
 import TinfoilKit
-import OpenAIKit
+import OpenAI
 
 // Create a secure client for a specific enclave and model repository
 let tinfoil = try await TinfoilAI(
@@ -43,15 +43,16 @@ let tinfoil = try await TinfoilAI(
     enclaveURL: "enclave.example.com"
 )
 
-// Access the OpenAIKit client through the client property
+// Access the OpenAI client through the client property
 // Note: enclave verification happens automatically during initialization
-let chatResponse = try await tinfoil.client.chats.create(
-    model: "llama3.2:1b",
+let chatQuery = ChatQuery(
+    model: "llama3-3-70b",
     messages: [
-        Chat.Message(role: .user, content: "Say this is a test")
+        Chat(role: .user, content: "Say this is a test")
     ]
 )
 
+let chatResponse = try await tinfoil.client.chats(query: chatQuery)
 print(chatResponse.choices.first?.message.content ?? "No response")
 
 // Resources are automatically cleaned up when tinfoilClient is deallocated
@@ -67,18 +68,19 @@ let tinfoil= try await TinfoilAI(
     enclaveURL: "enclave.example.com"
 )
 
-// 2. Use the underlying OpenAI-Kit client
-// See https://github.com/dylanshine/openai-kit for API documentation
+// 2. Use the underlying OpenAI client
+// See https://github.com/MacPaw/OpenAI for API documentation
 let openAIClient = tinfoil.client
 
 // Example: Create a chat completion
-let response = try await openAIClient.chats.create(
-    model: "gpt-4",
+let query = ChatQuery(
+    model: "llama3-3-70b",
     messages: [
-        Chat.Message(role: .system, content: "You are a helpful assistant."),
-        Chat.Message(role: .user, content: "Hello, how are you?")
+        Chat(role: .system, content: "You are a helpful assistant."),
+        Chat(role: .user, content: "Hello, how are you?")
     ]
 )
+let response = try await openAIClient.chats(query: query)
 ```
 
 ### Advanced functionality
@@ -137,7 +139,7 @@ if verificationResult.isMatch {
 
 ## API Documentation
 
-This library is a secure wrapper around [OpenAI-Kit](https://github.com/dylanshine/openai-kit) that can be used with Tinfoil. Once you have created a `TinfoilAI` instance, you can access the underlying OpenAIKit client through the `client` property. See the [OpenAI-Kit documentation](https://github.com/dylanshine/openai-kit) for complete API usage and documentation.
+This library is a secure wrapper around the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) that can be used with Tinfoil. Once you have created a `TinfoilAI` instance, you can access the underlying OpenAI client through the `client` property. See the [MacPaw OpenAI SDK documentation](https://github.com/MacPaw/OpenAI) for complete API usage and documentation.
 
 ## Requirements
 

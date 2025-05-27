@@ -9,7 +9,7 @@ public enum CertificateVerificationError: Error {
     case verificationFailed(Error)
 }
 
-/// A URLSession delegate that performs certificate pinning
+/// A URLSession delegate that performs certificate pinning and extraction
 public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
     private let expectedFingerprint: String
     
@@ -22,14 +22,32 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         
         // Ensure this is a server trust challenge
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let serverTrust = challenge.protectionSpace.serverTrust,
-              let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0)
-        else {
+              let serverTrust = challenge.protectionSpace.serverTrust else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 
-        guard let publicKey = SecCertificateCopyKey(serverCertificate),
+        // Use the modern API to get certificate chain
+        guard let certificateChain = SecTrustCopyCertificateChain(serverTrust),
+              CFArrayGetCount(certificateChain) > 0,
+              let serverCertificate = CFArrayGetValueAtIndex(certificateChain, 0) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        
+        let certificate = unsafeBitCast(serverCertificate, to: SecCertificate.self)
+
+        // Extract certificate data for all requests (streaming + non-streaming)
+        print("Certificate extracted for all requests")
+        
+        // Extract certificate data if needed for further processing
+        let certificateData = SecCertificateCopyData(certificate)
+        let certificateLength = CFDataGetLength(certificateData)
+        
+        // Log certificate extraction (you can extend this for actual processing)
+        print("Certificate data extracted: \(certificateLength) bytes")
+
+        guard let publicKey = SecCertificateCopyKey(certificate),
               let x963Data  = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
@@ -55,10 +73,10 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
     }
 }
 
-/// Factory for creating URLSessions with certificate pinning
+/// Factory for creating URLSessions with certificate pinning and extraction
 public class SecureURLSessionFactory {
     
-    /// Creates a URLSession with certificate pinning
+    /// Creates a URLSession with certificate pinning and extraction
     public static func createSession(expectedFingerprint: String) -> URLSession {
         let delegate = CertificatePinningDelegate(expectedFingerprint: expectedFingerprint)
         
