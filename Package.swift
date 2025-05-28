@@ -26,6 +26,13 @@ let package = Package(
                 .product(name: "OpenAI", package: "OpenAI"),
                 "TinfoilVerifier"
             ],
-            path: "Sources/TinfoilKit")
+            path: "Sources/TinfoilKit"),
+        .testTarget(
+            name: "TinfoilKitTests",
+            dependencies: [
+                "TinfoilKit",
+                .product(name: "OpenAI", package: "OpenAI")
+            ],
+            path: "Tests")
     ]
 )
