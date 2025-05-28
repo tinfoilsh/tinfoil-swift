@@ -184,15 +184,18 @@ public class SecureClient {
         var error: NSError?
         
         do {
-            // Extract the host from the enclave URL for attestation
-            guard let url = URL(string: enclaveURL), let attestationHost = url.host else {
+            // Parse the enclave URL to extract the host
+            let urlComponents: (url: URL, host: String, scheme: String, port: Int?)
+            do {
+                urlComponents = try URLHelpers.parseURL(enclaveURL)
+            } catch {
                 let verificationError = VerificationError.enclaveAttestationFailed("Invalid enclave URL: \(enclaveURL)")
                 callbacks.onRuntimeVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
             
-            // Fetch attestation from enclave
-            guard let enclaveAttestation = TinfoilVerifier.AttestationFetch(attestationHost, &error) else {
+            // Fetch attestation from enclave using the host
+            guard let enclaveAttestation = TinfoilVerifier.AttestationFetch(urlComponents.host, &error) else {
                 let verificationError = VerificationError.enclaveAttestationFailed(error?.localizedDescription ?? "Failed to fetch attestation")
                 callbacks.onRuntimeVerificationComplete(.failure(verificationError))
                 throw verificationError

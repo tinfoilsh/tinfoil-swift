@@ -42,26 +42,17 @@ public class TinfoilClient {
         let sslDelegate = StreamingSSLDelegate(expectedFingerprint: expectedFingerprint)
         
         // Parse the enclave URL
-        guard let url = URL(string: enclaveURL),
-              let host = url.host else {
-            throw NSError(domain: "sh.tinfoil.secure-urlsession", 
-                          code: 1001, 
-                          userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(enclaveURL)"])
-        }
-        
-        // Extract components from URL
-        let scheme = url.scheme ?? "https"
-        let port = url.port
+        let urlComponents = try URLHelpers.parseURL(enclaveURL)
         
         // Build host string with port if needed
-        let hostWithPort = port != nil ? "\(host):\(port!)" : host
+        let hostWithPort = URLHelpers.buildHostWithPort(host: urlComponents.host, port: urlComponents.port)
         
         // Create OpenAI configuration with custom host, session, and parsing options
         // Using .relaxed parsing to support non OpenAI models
         let configuration = OpenAI.Configuration(
             token: apiKey,
             host: hostWithPort,
-            scheme: scheme,
+            scheme: urlComponents.scheme,
             parsingOptions: parsingOptions
         )
         

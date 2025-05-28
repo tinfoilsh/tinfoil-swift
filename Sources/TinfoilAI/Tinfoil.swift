@@ -24,8 +24,10 @@ public final class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
         
-        // Validate enclave URL
-        guard URL(string: enclaveURL) != nil else {
+        // Validate enclave URL by attempting to parse it
+        do {
+            _ = try URLHelpers.parseURL(enclaveURL)
+        } catch {
             throw TinfoilError.invalidConfiguration("Invalid enclave URL: \(enclaveURL)")
         }
         

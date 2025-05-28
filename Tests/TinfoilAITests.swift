@@ -11,6 +11,51 @@ final class TinfoilAITests: XCTestCase {
     
     // MARK: - Essential Tests
     
+    func testURLNormalization() async throws {
+        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
+        
+        // Test URL without protocol prefix
+        let urlWithoutProtocol = "llama3-3-70b.model.tinfoil.sh"
+        
+        // Create TinfoilAI client with URL without protocol
+        let tinfoilWithoutProtocol = try await TinfoilAI(
+            apiKey: apiKey,
+            githubRepo: testGithubRepo,
+            enclaveURL: urlWithoutProtocol
+        )
+        
+        // Test that client can make a successful request
+        let chatQuery = ChatQuery(
+            messages: [
+                .user(.init(content: .string("Say 'Hello' and nothing else.")))
+            ],
+            model: "llama3-3-70b"
+        )
+        
+        let response = try await tinfoilWithoutProtocol.client.chats(query: chatQuery)
+        
+        // Verify response
+        XCTAssertFalse(response.choices.isEmpty, "Response should contain at least one choice")
+        XCTAssertNotNil(response.choices.first?.message.content, "Response should have content")
+        
+        // Test URL with protocol prefix (already tested in other tests, but let's be explicit)
+        let urlWithProtocol = "https://llama3-3-70b.model.tinfoil.sh"
+        
+        // Create TinfoilAI client with URL with protocol
+        let tinfoilWithProtocol = try await TinfoilAI(
+            apiKey: apiKey,
+            githubRepo: testGithubRepo,
+            enclaveURL: urlWithProtocol
+        )
+        
+        // Test that client can make a successful request
+        let response2 = try await tinfoilWithProtocol.client.chats(query: chatQuery)
+        
+        // Verify response
+        XCTAssertFalse(response2.choices.isEmpty, "Response should contain at least one choice")
+        XCTAssertNotNil(response2.choices.first?.message.content, "Response should have content")
+    }
+    
     func testClientSucceedsWhenVerificationSucceeds() async throws {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
