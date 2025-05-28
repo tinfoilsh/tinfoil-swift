@@ -24,17 +24,18 @@ public final class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
         
-        // Validate enclave URL by attempting to parse it
         do {
+            // Validate enclave URL by attempting to parse it
             _ = try URLHelpers.parseURL(enclaveURL)
         } catch {
             throw TinfoilError.invalidConfiguration("Invalid enclave URL: \(enclaveURL)")
         }
         
-        // Parse the GitHub repo string to extract org and repo
-        let repoComponents = githubRepo.split(separator: "/")
-        guard repoComponents.count == 2, !repoComponents[0].isEmpty, !repoComponents[1].isEmpty else {
-            throw TinfoilError.invalidConfiguration("Invalid GitHub repository format. Expected 'org/repo' but got '\(githubRepo)'")
+        // Parse and validate the GitHub repo string
+        guard let (org, repo) = parseGitHubRepo(githubRepo) else {
+            throw TinfoilError.invalidConfiguration(
+                "Invalid GitHub repository format. Expected 'org/repo', got '\(githubRepo)'"
+            )
         }
         
         // First verify the enclave
@@ -44,8 +45,10 @@ public final class TinfoilAI {
             callbacks: VerificationCallbacks()
         )
         
+        // get the verification result + cert fingerprint
         let verificationResult = try await verifier.verify()
         
+        // create the tinfoil client
         let tinfoilClient = try TinfoilClient.create(
             apiKey: finalApiKey,
             enclaveURL: enclaveURL,
@@ -60,6 +63,19 @@ public final class TinfoilAI {
     deinit {
         // Clean up resources
         self.tinfoilClient?.shutdown()
+    }
+    
+    /// Parses a GitHub repository string into org and repo components
+    /// - Parameter githubRepo: Repository string in format "org/repo"
+    /// - Returns: Tuple of (org, repo) if valid, nil otherwise
+    private func parseGitHubRepo(_ githubRepo: String) -> (org: String, repo: String)? {
+        let components = githubRepo.split(separator: "/")
+        guard components.count == 2,
+              !components[0].isEmpty,
+              !components[1].isEmpty else {
+            return nil
+        }
+        return (org: String(components[0]), repo: String(components[1]))
     }
 }
 

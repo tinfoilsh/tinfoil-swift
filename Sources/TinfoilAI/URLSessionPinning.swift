@@ -18,7 +18,10 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         super.init()
     }
     
-    public func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+    public func urlSession(
+        _ session: URLSession, 
+        didReceive challenge: URLAuthenticationChallenge, 
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         
         // Ensure this is a server trust challenge
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
@@ -37,16 +40,10 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         
         let certificate = unsafeBitCast(serverCertificate, to: SecCertificate.self)
 
-        // Extract certificate data for all requests (streaming + non-streaming)
-        print("Certificate extracted for all requests")
-        
         // Extract certificate data if needed for further processing
         let certificateData = SecCertificateCopyData(certificate)
         let certificateLength = CFDataGetLength(certificateData)
         
-        // Log certificate extraction (you can extend this for actual processing)
-        print("Certificate data extracted: \(certificateLength) bytes")
-
         guard let publicKey = SecCertificateCopyKey(certificate),
               let x963Data  = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
             completionHandler(.cancelAuthenticationChallenge, nil)

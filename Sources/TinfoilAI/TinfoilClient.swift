@@ -20,11 +20,9 @@ final class StreamingSSLDelegate: SSLDelegateProtocol {
 /// to validate the enclave connection.
 public class TinfoilClient {
     private let client: OpenAI
-    private let urlSession: URLSession
     
-    private init(client: OpenAI, urlSession: URLSession) {
+    private init(client: OpenAI) {
         self.client = client
-        self.urlSession = urlSession
     }
     
     public static func create(
@@ -48,7 +46,9 @@ public class TinfoilClient {
         let hostWithPort = URLHelpers.buildHostWithPort(host: urlComponents.host, port: urlComponents.port)
         
         // Create OpenAI configuration with custom host, session, and parsing options
-        // Using .relaxed parsing to support non OpenAI models
+        // Using .relaxed parsing to support non OpenAI models.
+        // See https://github.com/MacPaw/OpenAI?tab=readme-ov-file#support-for-other-providers
+        // for info on the .relaxed parsing option.
         let configuration = OpenAI.Configuration(
             token: apiKey,
             host: hostWithPort,
@@ -58,26 +58,21 @@ public class TinfoilClient {
         
         let openAIClient = OpenAI(
             configuration: configuration,
-            session: urlSession,
             middlewares: [],
-            sslStreamingDelegate: sslDelegate
+            // cert pinning for non-streaming requests
+            session: urlSession, 
+            // cert pinning for streaming requests.
+            sslStreamingDelegate: sslDelegate 
         )
         
         // Create and return the secure wrapper
         return TinfoilClient(
-            client: openAIClient,
-            urlSession: urlSession
+            client: openAIClient
         )
     }
     
     /// Forwards requests to the underlying OpenAI client
     public var underlyingClient: OpenAI {
         return self.client
-    }
-    
-    /// Shuts down the client
-    public func shutdown() {
-        // Cancel all tasks and invalidate the URLSession
-        self.urlSession.invalidateAndCancel()
     }
 } 
