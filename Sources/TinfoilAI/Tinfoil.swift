@@ -16,7 +16,7 @@ public final class TinfoilAI {
         apiKey: String? = nil,
         githubRepo: String,
         enclaveURL: String,
-        parsingOptions: OpenAI.Configuration.ParsingOptions = .relaxed
+        parsingOptions: ParsingOptions = .relaxed
     ) async throws {
         // Get API key from parameter or environment
         let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]

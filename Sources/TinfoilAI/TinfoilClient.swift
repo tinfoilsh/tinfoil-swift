@@ -1,6 +1,21 @@
 import Foundation
 import OpenAI
 
+/// SSL delegate for streaming certificate pinning
+final class StreamingSSLDelegate: SSLDelegateProtocol {
+    private let expectedFingerprint: String
+    
+    init(expectedFingerprint: String) {
+        self.expectedFingerprint = expectedFingerprint
+    }
+    
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        // Reuse the same certificate validation logic as CertificatePinningDelegate
+        let delegate = CertificatePinningDelegate(expectedFingerprint: expectedFingerprint)
+        delegate.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+    }
+}
+
 /// A secure wrapper for OpenAI client that uses certificate pinning
 /// to validate the enclave connection.
 public class TinfoilClient {
@@ -16,12 +31,15 @@ public class TinfoilClient {
         apiKey: String,
         enclaveURL: String,
         expectedFingerprint: String,
-        parsingOptions: OpenAI.Configuration.ParsingOptions = .relaxed
+        parsingOptions: ParsingOptions = .relaxed
     ) throws -> TinfoilClient {
         // Create the secure URLSession with certificate pinning and extraction
         let urlSession = SecureURLSessionFactory.createSession(
             expectedFingerprint: expectedFingerprint
         )
+        
+        // Create SSL delegate for streaming certificate pinning
+        let sslDelegate = StreamingSSLDelegate(expectedFingerprint: expectedFingerprint)
         
         // Parse the enclave URL
         guard let url = URL(string: enclaveURL),
@@ -49,7 +67,9 @@ public class TinfoilClient {
         
         let openAIClient = OpenAI(
             configuration: configuration,
-            session: urlSession
+            session: urlSession,
+            middlewares: [],
+            sslStreamingDelegate: sslDelegate
         )
         
         // Create and return the secure wrapper
