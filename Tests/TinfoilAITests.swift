@@ -1,6 +1,6 @@
 import XCTest
 import OpenAI
-@testable import TinfoilKit
+@testable import TinfoilAI
 
 final class TinfoilAITests: XCTestCase {
     

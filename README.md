@@ -33,7 +33,7 @@ The Tinfoil Swift client is a wrapper around the [MacPaw OpenAI SDK](https://git
 - Attestation validation to ensure enclave integrity
 
 ```swift
-import TinfoilKit
+import TinfoilAI
 import OpenAI
 
 // Create a secure client for a specific enclave and model repository
