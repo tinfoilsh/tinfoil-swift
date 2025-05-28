@@ -11,10 +11,12 @@ public final class TinfoilAI {
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - enclaveURL: URL for the enclave attestation endpoint
+    ///   - parsingOptions: Parsing options for handling different providers. 
     public init(
         apiKey: String? = nil,
         githubRepo: String,
-        enclaveURL: String
+        enclaveURL: String,
+        parsingOptions: OpenAI.Configuration.ParsingOptions = .relaxed
     ) async throws {
         // Get API key from parameter or environment
         let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
@@ -45,7 +47,8 @@ public final class TinfoilAI {
         let tinfoilClient = try TinfoilClient.create(
             apiKey: finalApiKey,
             enclaveURL: enclaveURL,
-            expectedFingerprint: verificationResult.publicKeyFP
+            expectedFingerprint: verificationResult.publicKeyFP,
+            parsingOptions: parsingOptions
         )
         
         self.tinfoilClient = tinfoilClient

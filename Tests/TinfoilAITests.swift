@@ -48,11 +48,12 @@ final class TinfoilAITests: XCTestCase {
         let verificationResult = try await secureClient.verify()
         let expectedFingerprint = verificationResult.publicKeyFP
         
-        // Create client with correct fingerprint
+        // Create client with correct fingerprint and relaxed parsing
         let tinfoilClient = try TinfoilClient.create(
             apiKey: apiKey,
             enclaveURL: testEnclaveURL,
-            expectedFingerprint: expectedFingerprint
+            expectedFingerprint: expectedFingerprint,
+            parsingOptions: .relaxed
         )
         
         // Test that request succeeds

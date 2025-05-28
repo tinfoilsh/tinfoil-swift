@@ -15,7 +15,8 @@ public class TinfoilClient {
     public static func create(
         apiKey: String,
         enclaveURL: String,
-        expectedFingerprint: String
+        expectedFingerprint: String,
+        parsingOptions: OpenAI.Configuration.ParsingOptions = .relaxed
     ) throws -> TinfoilClient {
         // Create the secure URLSession with certificate pinning and extraction
         let urlSession = SecureURLSessionFactory.createSession(
@@ -37,11 +38,13 @@ public class TinfoilClient {
         // Build host string with port if needed
         let hostWithPort = port != nil ? "\(host):\(port!)" : host
         
-        // Create OpenAI configuration with custom host and session
+        // Create OpenAI configuration with custom host, session, and parsing options
+        // Using .relaxed parsing to support non OpenAI models
         let configuration = OpenAI.Configuration(
             token: apiKey,
             host: hostWithPort,
-            scheme: scheme
+            scheme: scheme,
+            parsingOptions: parsingOptions
         )
         
         let openAIClient = OpenAI(
