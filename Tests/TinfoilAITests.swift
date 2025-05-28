@@ -316,4 +316,89 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertTrue(hasChoices, "Streaming response should have choices")
         XCTAssertTrue(hasFinishReason, "Streaming response should eventually have a finish reason")
     }
+    
+    // MARK: - Non-blocking Verification Tests
+    
+    func testNonblockingVerificationWithCorrectFingerprint() async throws {
+        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
+        
+        // Set up verification callback expectation
+        var verificationResult: Bool?
+        let verificationExpectation = expectation(description: "Verification callback should be called")
+        
+        let nonblockingCallback: NonblockingVerification = { passed in
+            verificationResult = passed
+            verificationExpectation.fulfill()
+        }
+        
+        // Create TinfoilAI client with non-blocking verification
+        let tinfoil = try await TinfoilAI(
+            apiKey: apiKey,
+            githubRepo: testGithubRepo,
+            enclaveURL: testEnclaveURL,
+            nonblockingVerification: nonblockingCallback
+        )
+        
+        // Test that request succeeds
+        let chatQuery = ChatQuery(
+            messages: [
+                .user(.init(content: .string("Say 'Success' and nothing else.")))
+            ],
+            model: "llama3-3-70b"
+        )
+        
+        let response = try await tinfoil.client.chats(query: chatQuery)
+        
+        // Wait for verification callback
+        await fulfillment(of: [verificationExpectation], timeout: 10.0)
+        
+        // Verify response and callback result
+        XCTAssertFalse(response.choices.isEmpty, "Request should succeed")
+        XCTAssertNotNil(verificationResult, "Verification callback should have been called")
+        XCTAssertTrue(verificationResult!, "Verification should pass with correct fingerprint")
+    }
+    
+    func testNonblockingVerificationWithIncorrectFingerprint() async throws {
+        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
+        
+        // Set up verification callback expectation  
+        var verificationResult: Bool?
+        let verificationExpectation = expectation(description: "Verification callback should be called")
+        
+        let nonblockingCallback: NonblockingVerification = { passed in
+            verificationResult = passed
+            verificationExpectation.fulfill()
+        }
+        
+        // Create client with wrong fingerprint but non-blocking verification
+        let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
+        
+        let tinfoilClient = try TinfoilClient.create(
+            apiKey: apiKey,
+            enclaveURL: testEnclaveURL,
+            expectedFingerprint: wrongFingerprint,
+            nonblockingVerification: nonblockingCallback
+        )
+        
+        // Test that request succeeds even with wrong fingerprint (non-blocking mode)
+        let chatQuery = ChatQuery(
+            messages: [
+                .user(.init(content: .string("This should succeed in non-blocking mode")))
+            ],
+            model: "llama3-3-70b"
+        )
+        
+        let response = try await tinfoilClient.underlyingClient.chats(query: chatQuery)
+        
+        // Wait for verification callback
+        await fulfillment(of: [verificationExpectation], timeout: 10.0)
+        
+        // Verify response and callback result
+        XCTAssertFalse(response.choices.isEmpty, "Request should succeed in non-blocking mode")
+        XCTAssertNotNil(verificationResult, "Verification callback should have been called")
+        XCTAssertFalse(verificationResult!, "Verification should fail with incorrect fingerprint")
+        
+        // Clean up
+        tinfoilClient.shutdown()
+    }
 } 

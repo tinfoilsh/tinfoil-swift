@@ -11,12 +11,14 @@ public final class TinfoilAI {
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - enclaveURL: URL for the enclave attestation endpoint
-    ///   - parsingOptions: Parsing options for handling different providers. 
+    ///   - parsingOptions: Parsing options for handling different providers.
+    ///   - nonblockingVerification: Optional callback for non-blocking certificate verification results
     public init(
         apiKey: String? = nil,
         githubRepo: String,
         enclaveURL: String,
-        parsingOptions: ParsingOptions = .relaxed
+        parsingOptions: ParsingOptions = .relaxed,
+        nonblockingVerification: NonblockingVerification? = nil
     ) async throws {
         // Get API key from parameter or environment
         let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
@@ -32,7 +34,7 @@ public final class TinfoilAI {
         }
         
         // Parse and validate the GitHub repo string
-        guard let (org, repo) = parseGitHubRepo(githubRepo) else {
+        guard let (_, _) = TinfoilAI.parseGitHubRepo(githubRepo) else {
             throw TinfoilError.invalidConfiguration(
                 "Invalid GitHub repository format. Expected 'org/repo', got '\(githubRepo)'"
             )
@@ -53,7 +55,8 @@ public final class TinfoilAI {
             apiKey: finalApiKey,
             enclaveURL: enclaveURL,
             expectedFingerprint: verificationResult.publicKeyFP,
-            parsingOptions: parsingOptions
+            parsingOptions: parsingOptions,
+            nonblockingVerification: nonblockingVerification
         )
         
         self.tinfoilClient = tinfoilClient
@@ -68,7 +71,7 @@ public final class TinfoilAI {
     /// Parses a GitHub repository string into org and repo components
     /// - Parameter githubRepo: Repository string in format "org/repo"
     /// - Returns: Tuple of (org, repo) if valid, nil otherwise
-    private func parseGitHubRepo(_ githubRepo: String) -> (org: String, repo: String)? {
+    private static func parseGitHubRepo(_ githubRepo: String) -> (org: String, repo: String)? {
         let components = githubRepo.split(separator: "/")
         guard components.count == 2,
               !components[0].isEmpty,
