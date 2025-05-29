@@ -13,7 +13,7 @@ dependencies: [
 ]
 ```
 
-Note: Tinfoil Swift requires OpenAI-Kit as a dependency. When you add Tinfoil Swift through Swift Package Manager, OpenAI-Kit will be automatically included as a dependency.
+Note: Tinfoil Swift requires the MacPaw OpenAI SDK as a dependency. When you add Tinfoil Swift through Swift Package Manager, the OpenAI SDK will be automatically included as a dependency.
 
 Or in Xcode:
 
@@ -22,66 +22,150 @@ Or in Xcode:
 3. Select the version you want to use
 4. Click "Add Package"
 
-Xcode will automatically resolve and include the OpenAI-Kit dependency when you add the Tinfoil Swift package.
+Xcode will automatically resolve and include the OpenAI SDK dependency when you add the Tinfoil Swift package.
 
 ## Quick Start
 
-The Tinfoil Swift client is a wrapper around the [OpenAI-Kit](https://github.com/dylanshine/openai-kit) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI-Kit client, with additional security features:
+The Tinfoil Swift client is a wrapper around the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI SDK, with additional security features:
 
 - Automatic verification that the endpoint is running in a secure Tinfoil enclave
 - TLS certificate pinning to prevent man-in-the-middle attacks
 - Attestation validation to ensure enclave integrity
 
 ```swift
-import TinfoilKit
-import OpenAIKit
+import TinfoilAI
+import OpenAI
 
-// Create a secure client for a specific enclave and model repository
-let tinfoil = try await TinfoilAI(
-    apiKey: "api-key", // Optional, will use TINFOIL_API_KEY env var if not provided
+// Create a secure OpenAI client
+let client = try await TinfoilAI.create(
+    apiKey: "YOUR_API_KEY", // Optional, will use TINFOIL_API_KEY env var if not provided
     githubRepo: "tinfoilsh/model-repo",
     enclaveURL: "enclave.example.com"
 )
 
-// Access the OpenAIKit client through the client property
-// Note: enclave verification happens automatically during initialization
-let chatResponse = try await tinfoil.client.chats.create(
-    model: "llama3.2:1b",
+// Use the client directly - it's a standard OpenAI client with security built-in
+let chatQuery = ChatQuery(
+    model: "model-name",
     messages: [
-        Chat.Message(role: .user, content: "Say this is a test")
+        .user(.init(content: .string("Say this is a test")))
     ]
 )
 
+let chatResponse = try await client.chats(query: chatQuery)
 print(chatResponse.choices.first?.message.content ?? "No response")
-
-// Resources are automatically cleaned up when tinfoilClient is deallocated
 ```
 
 ### Usage
 
+The `TinfoilAI.create()` method returns a standard OpenAI client that's been configured with:
+- Secure enclave verification
+- Certificate pinning
+- Automatic TLS validation
+
+Once created, you can use it exactly like the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI):
+
 ```swift
-// 1. Create a TinfoilAI client
-let tinfoil= try await TinfoilAI(
-    apiKey: "api-key", // Optional, will use TINFOIL_API_KEY env var if not provided
+// Create the secure client
+let client = try await TinfoilAI.create(
+    apiKey: "YOUR_API_KEY", // Optional, will use TINFOIL_API_KEY env var if not provided
     githubRepo: "tinfoilsh/model-repo",
     enclaveURL: "enclave.example.com"
 )
 
-// 2. Use the underlying OpenAI-Kit client
-// See https://github.com/dylanshine/openai-kit for API documentation
-let openAIClient = tinfoil.client
-
 // Example: Create a chat completion
-let response = try await openAIClient.chats.create(
-    model: "gpt-4",
+let query = ChatQuery(
+    model: "model-name",
     messages: [
-        Chat.Message(role: .system, content: "You are a helpful assistant."),
-        Chat.Message(role: .user, content: "Hello, how are you?")
+        .system(.init(content: "You are a helpful assistant.")),
+        .user(.init(content: "Hello, how are you?"))
     ]
 )
+let response = try await client.chats(query: query)
 ```
 
-### Advanced functionality
+## Advanced Features
+
+### Streaming Chat Completions
+
+Tinfoil Swift supports streaming chat completions, allowing you to receive responses as they are generated in real-time. This is particularly useful for longer responses or when you want to display content as it's being generated.
+
+```swift
+let client = try await TinfoilAI.create(
+    apiKey: "YOUR_API_KEY",
+    githubRepo: "tinfoilsh/model-repo", 
+    enclaveURL: "enclave.example.com"
+)
+
+let chatQuery = ChatQuery(
+    messages: [
+        .user(.init(content: .string("Tell me a story about AI safety")))
+    ],
+    model: "model-name"
+)
+
+var accumulatedContent = ""
+
+// Stream the response
+for try await result in client.chatsStream(query: chatQuery) {
+    if let choice = result.choices.first,
+       let delta = choice.delta.content {
+        accumulatedContent += delta
+        print("Received: \(delta)")
+    }
+    
+    // Check for completion
+    if let finishReason = result.choices.first?.finishReason {
+        print("Stream finished with reason: \(finishReason)")
+        break
+    }
+}
+
+print("Complete response: \(accumulatedContent)")
+```
+
+### Non-Blocking Verification
+
+By default, Tinfoil Swift enforces strict security by failing requests when enclave verification or certificate pinning fails. With non-blocking verification, you can allow requests to proceed even if verification fails, while still being notified of the verification status through a callback. This prioritizes availability over security.
+
+```swift
+// Set up a callback to handle verification results
+let verificationCallback: NonblockingVerification = { verificationPassed in
+    if verificationPassed {
+        print("✅ Enclave verification passed - connection is secure")
+    } else {
+        print("❌ Enclave verification failed - connection may not be secure")
+        // Handle verification failure (log, alert user, etc.)
+    }
+}
+
+// Create client with non-blocking verification
+let client = try await TinfoilAI.create(
+    apiKey: "YOUR_API_KEY",
+    githubRepo: "tinfoilsh/model-repo",
+    enclaveURL: "enclave.example.com",
+    nonblockingVerification: verificationCallback
+)
+
+// Requests will proceed even if certificate verification fails
+let chatQuery = ChatQuery(
+    messages: [
+        .user(.init(content: .string("Hello, I need a quick response!")))
+    ],
+    model: "model-name"
+)
+
+// This request will go through regardless of verification status
+let response = try await client.chats(query: chatQuery)
+print(response.choices.first?.message.content ?? "No response")
+
+// The verification callback will notify you whether verification passed or failed
+```
+
+**Important Security Warning**: When using non-blocking verification, requests will proceed even if enclave verification or certificate pinning fails. This means your requests may be sent to an unverified endpoint. The verification callback will inform you of the failure, but the connection continues regardless. Only use this mode when availability is more important than security guarantees.
+
+### Manual Verification and Certificate Pinning
+
+For advanced use cases, you can perform manual verification and use certificate pinning directly:
 
 ```swift
 // Manual verification with progress callbacks
@@ -135,9 +219,45 @@ if verificationResult.isMatch {
 }
 ```
 
+### Certificate Pinning
+
+**Note**: Certificate pinning is performed automatically when you use `TinfoilAI.create()`. The following example shows how to use certificate pinning manually for advanced use cases.
+
+For additional control, you can use certificate pinning directly to ensure you're connecting to the exact expected enclave:
+
+```swift
+// First, get the expected fingerprint through verification
+let secureClient = SecureClient(
+    githubRepo: "tinfoilsh/model-repo",
+    enclaveURL: "enclave.example.com"
+)
+
+let verificationResult = try await secureClient.verify()
+let expectedFingerprint = verificationResult.publicKeyFP
+
+// Create a client with certificate pinning
+let tinfoilClient = try TinfoilClient.create(
+    apiKey: "YOUR_API_KEY",
+    enclaveURL: "enclave.example.com",
+    expectedFingerprint: expectedFingerprint,
+    parsingOptions: .relaxed
+)
+
+// Now all requests will use certificate pinning for maximum security
+let chatQuery = ChatQuery(
+    messages: [.user(.init(content: .string("Secure message")))],
+    model: "model-name"
+)
+
+let response = try await tinfoilClient.underlyingClient.chats(query: chatQuery)
+
+// Clean up when done
+tinfoilClient.shutdown()
+```
+
 ## API Documentation
 
-This library is a secure wrapper around [OpenAI-Kit](https://github.com/dylanshine/openai-kit) that can be used with Tinfoil. Once you have created a `TinfoilAI` instance, you can access the underlying OpenAIKit client through the `client` property. See the [OpenAI-Kit documentation](https://github.com/dylanshine/openai-kit) for complete API usage and documentation.
+This library is a secure wrapper around the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) that can be used with Tinfoil. The `TinfoilAI.create()` method returns a standard OpenAI client with built-in security features. See the [MacPaw OpenAI SDK documentation](https://github.com/MacPaw/OpenAI) for complete API usage and documentation.
 
 ## Requirements
 

@@ -156,17 +156,16 @@ public class SecureClient {
                 throw verificationError
             }
             
+            callbacks.onCodeVerificationComplete(.success(digest: digest))
+            
             // Extract fingerprint from measurement
-            guard let measurementObj = measurement as? NSObject,
-                  let fingerprint = measurementObj.value(forKey: "fingerprint") as? String,
+            guard let fingerprint = measurement.value(forKey: "fingerprint") as? String,
                   !fingerprint.isEmpty else {
-                let verificationError = VerificationError.attestationVerificationFailed("Could not extract code fingerprint")
+                let verificationError = VerificationError.attestationVerificationFailed("Missing fingerprint in measurement")
                 callbacks.onCodeVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
             
-            // Report success
-            callbacks.onCodeVerificationComplete(.success(digest: fingerprint))
             return fingerprint
             
         } catch let verificationError as VerificationError {
@@ -184,8 +183,18 @@ public class SecureClient {
         var error: NSError?
         
         do {
-            // Fetch attestation from enclave
-            guard let enclaveAttestation = TinfoilVerifier.AttestationFetch(enclaveURL, &error) else {
+            // Parse the enclave URL to extract the host
+            let urlComponents: (url: URL, host: String, scheme: String, port: Int?)
+            do {
+                urlComponents = try URLHelpers.parseURL(enclaveURL)
+            } catch {
+                let verificationError = VerificationError.enclaveAttestationFailed("Invalid enclave URL: \(enclaveURL)")
+                callbacks.onRuntimeVerificationComplete(.failure(verificationError))
+                throw verificationError
+            }
+            
+            // Fetch attestation from enclave using the host
+            guard let enclaveAttestation = TinfoilVerifier.AttestationFetch(urlComponents.host, &error) else {
                 let verificationError = VerificationError.enclaveAttestationFailed(error?.localizedDescription ?? "Failed to fetch attestation")
                 callbacks.onRuntimeVerificationComplete(.failure(verificationError))
                 throw verificationError
@@ -201,21 +210,21 @@ public class SecureClient {
                 throw verificationError
             }
             
+            callbacks.onRuntimeVerificationComplete(.inProgress())
+            
             // Extract fingerprint from verification result
-            guard let verificationObj = verification as? NSObject,
-                  let measurementProperty = verificationObj.value(forKey: "measurement") as? NSObject,
+            guard let measurementProperty = verification.value(forKey: "measurement") as? NSObject,
                   let fingerprint = measurementProperty.value(forKey: "fingerprint") as? String, // Fingerprint is the hash of all runtime measurements
                   !fingerprint.isEmpty else {
-                let verificationError = VerificationError.enclaveAttestationFailed("Could not extract runtime fingerprint")
+                let verificationError = VerificationError.enclaveAttestationFailed("Missing fingerprint in measurement")
                 callbacks.onRuntimeVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
 
             // Extract the public key fingerprint
-            guard let verificationObj = verification as? NSObject,
-                  let publicKey = verificationObj.value(forKey: "publicKeyFP") as? String,
+            guard let publicKey = verification.value(forKey: "publicKeyFP") as? String,
                   !publicKey.isEmpty else {
-                let verificationError = VerificationError.enclaveAttestationFailed("Could not extract public key fingerprint")
+                let verificationError = VerificationError.enclaveAttestationFailed("Missing public key fingerprint")
                 callbacks.onRuntimeVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
