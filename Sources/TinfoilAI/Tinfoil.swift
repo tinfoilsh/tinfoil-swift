@@ -2,24 +2,23 @@ import Foundation
 import OpenAI
 
 /// Main entry point for the Tinfoil client library
-public final class TinfoilAI {
-    public let client: OpenAI
-    private let tinfoilClient: TinfoilClient?
+public enum TinfoilAI {
     
-    /// Creates a new Tinfoil client wrapping the OpenAI client
+    /// Creates a new secure OpenAI client configured for communication with a Tinfoil enclave
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - enclaveURL: URL for the enclave attestation endpoint
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - nonblockingVerification: Optional callback for non-blocking certificate verification results
-    public init(
+    /// - Returns: An OpenAI client configured for secure communication with the Tinfoil enclave
+    public static func create(
         apiKey: String? = nil,
         githubRepo: String,
         enclaveURL: String,
         parsingOptions: ParsingOptions = .relaxed,
         nonblockingVerification: NonblockingVerification? = nil
-    ) async throws {
+    ) async throws -> OpenAI {
         // Get API key from parameter or environment
         let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
         guard let finalApiKey = finalApiKey else {
@@ -34,7 +33,7 @@ public final class TinfoilAI {
         }
         
         // Parse and validate the GitHub repo string
-        guard let (_, _) = TinfoilAI.parseGitHubRepo(githubRepo) else {
+        guard let (_, _) = parseGitHubRepo(githubRepo) else {
             throw TinfoilError.invalidConfiguration(
                 "Invalid GitHub repository format. Expected 'org/repo', got '\(githubRepo)'"
             )
@@ -59,13 +58,10 @@ public final class TinfoilAI {
             nonblockingVerification: nonblockingVerification
         )
         
-        self.tinfoilClient = tinfoilClient
-        self.client = tinfoilClient.underlyingClient
-    }
-    
-    deinit {
-        // Clean up resources
-        self.tinfoilClient?.shutdown()
+        // Return the underlying OpenAI client directly
+        // Note: The URLSession with certificate pinning is held by the OpenAI client
+        // and will be cleaned up when the OpenAI client is deallocated
+        return tinfoilClient.underlyingClient
     }
     
     /// Parses a GitHub repository string into org and repo components

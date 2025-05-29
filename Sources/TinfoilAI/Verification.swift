@@ -156,17 +156,16 @@ public class SecureClient {
                 throw verificationError
             }
             
+            callbacks.onCodeVerificationComplete(.success(digest: digest))
+            
             // Extract fingerprint from measurement
-            guard let measurementObj = measurement as? NSObject,
-                  let fingerprint = measurementObj.value(forKey: "fingerprint") as? String,
+            guard let fingerprint = measurement.value(forKey: "fingerprint") as? String,
                   !fingerprint.isEmpty else {
-                let verificationError = VerificationError.attestationVerificationFailed("Could not extract code fingerprint")
+                let verificationError = VerificationError.attestationVerificationFailed("Missing fingerprint in measurement")
                 callbacks.onCodeVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
             
-            // Report success
-            callbacks.onCodeVerificationComplete(.success(digest: fingerprint))
             return fingerprint
             
         } catch let verificationError as VerificationError {
@@ -211,21 +210,21 @@ public class SecureClient {
                 throw verificationError
             }
             
+            callbacks.onRuntimeVerificationComplete(.inProgress())
+            
             // Extract fingerprint from verification result
-            guard let verificationObj = verification as? NSObject,
-                  let measurementProperty = verificationObj.value(forKey: "measurement") as? NSObject,
+            guard let measurementProperty = verification.value(forKey: "measurement") as? NSObject,
                   let fingerprint = measurementProperty.value(forKey: "fingerprint") as? String, // Fingerprint is the hash of all runtime measurements
                   !fingerprint.isEmpty else {
-                let verificationError = VerificationError.enclaveAttestationFailed("Could not extract runtime fingerprint")
+                let verificationError = VerificationError.enclaveAttestationFailed("Missing fingerprint in measurement")
                 callbacks.onRuntimeVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
 
             // Extract the public key fingerprint
-            guard let verificationObj = verification as? NSObject,
-                  let publicKey = verificationObj.value(forKey: "publicKeyFP") as? String,
+            guard let publicKey = verification.value(forKey: "publicKeyFP") as? String,
                   !publicKey.isEmpty else {
-                let verificationError = VerificationError.enclaveAttestationFailed("Could not extract public key fingerprint")
+                let verificationError = VerificationError.enclaveAttestationFailed("Missing public key fingerprint")
                 callbacks.onRuntimeVerificationComplete(.failure(verificationError))
                 throw verificationError
             }

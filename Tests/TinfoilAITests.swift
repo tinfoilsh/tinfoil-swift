@@ -17,8 +17,8 @@ final class TinfoilAITests: XCTestCase {
         // Test URL without protocol prefix
         let urlWithoutProtocol = "llama3-3-70b.model.tinfoil.sh"
         
-        // Create TinfoilAI client with URL without protocol
-        let tinfoilWithoutProtocol = try await TinfoilAI(
+        // Create client with URL without protocol
+        let clientWithoutProtocol = try await TinfoilAI.create(
             apiKey: apiKey,
             githubRepo: testGithubRepo,
             enclaveURL: urlWithoutProtocol
@@ -32,7 +32,7 @@ final class TinfoilAITests: XCTestCase {
             model: "llama3-3-70b"
         )
         
-        let response = try await tinfoilWithoutProtocol.client.chats(query: chatQuery)
+        let response = try await clientWithoutProtocol.chats(query: chatQuery)
         
         // Verify response
         XCTAssertFalse(response.choices.isEmpty, "Response should contain at least one choice")
@@ -41,15 +41,15 @@ final class TinfoilAITests: XCTestCase {
         // Test URL with protocol prefix (already tested in other tests, but let's be explicit)
         let urlWithProtocol = "https://llama3-3-70b.model.tinfoil.sh"
         
-        // Create TinfoilAI client with URL with protocol
-        let tinfoilWithProtocol = try await TinfoilAI(
+        // Create client with URL with protocol
+        let clientWithProtocol = try await TinfoilAI.create(
             apiKey: apiKey,
             githubRepo: testGithubRepo,
             enclaveURL: urlWithProtocol
         )
         
         // Test that client can make a successful request
-        let response2 = try await tinfoilWithProtocol.client.chats(query: chatQuery)
+        let response2 = try await clientWithProtocol.chats(query: chatQuery)
         
         // Verify response
         XCTAssertFalse(response2.choices.isEmpty, "Response should contain at least one choice")
@@ -59,8 +59,8 @@ final class TinfoilAITests: XCTestCase {
     func testClientSucceedsWhenVerificationSucceeds() async throws {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
-        // Create TinfoilAI client - this will perform verification internally
-        let tinfoil = try await TinfoilAI(
+        // Create client - this will perform verification internally
+        let client = try await TinfoilAI.create(
             apiKey: apiKey,
             githubRepo: testGithubRepo,
             enclaveURL: testEnclaveURL
@@ -74,7 +74,7 @@ final class TinfoilAITests: XCTestCase {
             model: "llama3-3-70b"
         )
         
-        let response = try await tinfoil.client.chats(query: chatQuery)
+        let response = try await client.chats(query: chatQuery)
         
         // Verify response
         XCTAssertFalse(response.choices.isEmpty, "Response should contain at least one choice")
@@ -153,8 +153,8 @@ final class TinfoilAITests: XCTestCase {
     func testStreamingChatCompletion() async throws {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
-        // Create TinfoilAI client - this will perform verification internally
-        let tinfoil = try await TinfoilAI(
+        // Create client - this will perform verification internally
+        let client = try await TinfoilAI.create(
             apiKey: apiKey,
             githubRepo: testGithubRepo,
             enclaveURL: testEnclaveURL
@@ -171,7 +171,7 @@ final class TinfoilAITests: XCTestCase {
         var receivedChunks: [ChatStreamResult] = []
         var accumulatedContent = ""
         
-        for try await result in tinfoil.client.chatsStream(query: chatQuery) {
+        for try await result in client.chatsStream(query: chatQuery) {
             receivedChunks.append(result)
             
             // Accumulate content from delta
@@ -271,7 +271,7 @@ final class TinfoilAITests: XCTestCase {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Create TinfoilAI client
-        let tinfoil = try await TinfoilAI(
+        let client = try await TinfoilAI.create(
             apiKey: apiKey,
             githubRepo: testGithubRepo,
             enclaveURL: testEnclaveURL
@@ -290,7 +290,7 @@ final class TinfoilAITests: XCTestCase {
         var hasChoices = false
         var hasFinishReason = false
         
-        for try await result in tinfoil.client.chatsStream(query: chatQuery) {
+        for try await result in client.chatsStream(query: chatQuery) {
             // Check for required fields in streaming response
             if !result.id.isEmpty {
                 hasId = true
@@ -323,16 +323,19 @@ final class TinfoilAITests: XCTestCase {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Set up verification callback expectation
-        var verificationResult: Bool?
+        class VerificationResultWrapper {
+            var result: Bool?
+        }
+        let wrapper = VerificationResultWrapper()
         let verificationExpectation = expectation(description: "Verification callback should be called")
         
         let nonblockingCallback: NonblockingVerification = { passed in
-            verificationResult = passed
+            wrapper.result = passed
             verificationExpectation.fulfill()
         }
         
         // Create TinfoilAI client with non-blocking verification
-        let tinfoil = try await TinfoilAI(
+        let client = try await TinfoilAI.create(
             apiKey: apiKey,
             githubRepo: testGithubRepo,
             enclaveURL: testEnclaveURL,
@@ -347,26 +350,29 @@ final class TinfoilAITests: XCTestCase {
             model: "llama3-3-70b"
         )
         
-        let response = try await tinfoil.client.chats(query: chatQuery)
+        let response = try await client.chats(query: chatQuery)
         
         // Wait for verification callback
         await fulfillment(of: [verificationExpectation], timeout: 10.0)
         
         // Verify response and callback result
         XCTAssertFalse(response.choices.isEmpty, "Request should succeed")
-        XCTAssertNotNil(verificationResult, "Verification callback should have been called")
-        XCTAssertTrue(verificationResult!, "Verification should pass with correct fingerprint")
+        XCTAssertNotNil(wrapper.result, "Verification callback should have been called")
+        XCTAssertTrue(wrapper.result!, "Verification should pass with correct fingerprint")
     }
     
     func testNonblockingVerificationWithIncorrectFingerprint() async throws {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Set up verification callback expectation  
-        var verificationResult: Bool?
+        class VerificationResultWrapper {
+            var result: Bool?
+        }
+        let wrapper = VerificationResultWrapper()
         let verificationExpectation = expectation(description: "Verification callback should be called")
         
         let nonblockingCallback: NonblockingVerification = { passed in
-            verificationResult = passed
+            wrapper.result = passed
             verificationExpectation.fulfill()
         }
         
@@ -395,10 +401,10 @@ final class TinfoilAITests: XCTestCase {
         
         // Verify response and callback result
         XCTAssertFalse(response.choices.isEmpty, "Request should succeed in non-blocking mode")
-        XCTAssertNotNil(verificationResult, "Verification callback should have been called")
-        XCTAssertFalse(verificationResult!, "Verification should fail with incorrect fingerprint")
+        XCTAssertNotNil(wrapper.result, "Verification callback should have been called")
+        XCTAssertFalse(wrapper.result!, "Verification should fail with incorrect fingerprint")
         
         // Clean up
         tinfoilClient.shutdown()
     }
-} 
+}
