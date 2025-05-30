@@ -9,7 +9,7 @@
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", from: "0.0.1"),
+    .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", branch: "main")
 ]
 ```
 
@@ -45,10 +45,10 @@ let client = try await TinfoilAI.create(
 
 // Use the client directly - it's a standard OpenAI client with security built-in
 let chatQuery = ChatQuery(
-    model: "model-name",
     messages: [
         .user(.init(content: .string("Say this is a test")))
-    ]
+    ],
+    model: "model-name"
 )
 
 let chatResponse = try await client.chats(query: chatQuery)
@@ -74,11 +74,11 @@ let client = try await TinfoilAI.create(
 
 // Example: Create a chat completion
 let query = ChatQuery(
-    model: "model-name",
     messages: [
-        .system(.init(content: "You are a helpful assistant.")),
-        .user(.init(content: "Hello, how are you?"))
-    ]
+        .system(.init(content: .string("You are a helpful assistant."))),
+        .user(.init(content: .string("Hello, how are you?")))
+    ],
+    model: "model-name"
 )
 let response = try await client.chats(query: query)
 ```
