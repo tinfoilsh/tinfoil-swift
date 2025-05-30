@@ -9,7 +9,7 @@
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", from: "0.0.1"),
+    .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", branch: "main")
 ]
 ```
 
