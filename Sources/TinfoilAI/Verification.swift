@@ -156,8 +156,6 @@ public class SecureClient {
                 throw verificationError
             }
             
-            callbacks.onCodeVerificationComplete(.success(digest: digest))
-            
             // Extract fingerprint from measurement
             guard let fingerprint = measurement.value(forKey: "fingerprint") as? String,
                   !fingerprint.isEmpty else {
@@ -165,6 +163,8 @@ public class SecureClient {
                 callbacks.onCodeVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
+
+            callbacks.onCodeVerificationComplete(.success(digest: fingerprint))
             
             return fingerprint
             
