@@ -1,0 +1,70 @@
+name: Update Verifier
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-verifier:
+    runs-on: ubuntu-latest
+    steps:
+      # Generate token for GitHub App
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # Checkout with the app token
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.generate_token.outputs.token }}
+          persist-credentials: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq wget
+
+      - name: Update verifier dependency
+        run: |
+          # Use Verifier Release Bot for commits
+          git config --local user.email "1461927+verifier-release-bot[bot]@users.noreply.github.com"
+          git config --local user.name "verifier-release-bot[bot]"
+
+          # Get latest tag from GitHub API
+          LATEST_TAG=$(curl -sL https://api.github.com/repos/tinfoilsh/verifier/releases/latest | jq -r ".tag_name")
+          echo "Latest verifier tag: $LATEST_TAG"
+
+          # Download the zip file
+          ZIP_FILE="verifier-$LATEST_TAG.zip"
+          wget -O "$ZIP_FILE" "https://github.com/tinfoilsh/verifier/releases/download/$LATEST_TAG/TinfoilVerifier.xcframework.zip"
+
+          # Calculate checksum
+          CHECKSUM=$(sha256sum "$ZIP_FILE" | cut -d ' ' -f 1)
+          echo "Verifier framework $LATEST_TAG checksum: $CHECKSUM"
+
+          # Update Package.swift with new URL and checksum
+          sed -i -E "s|(url: \"https://github.com/tinfoilsh/verifier/releases/download/)v[0-9]+\.[0-9]+\.[0-9]+(/TinfoilVerifier.xcframework.zip\")|\1$LATEST_TAG\2|" Package.swift
+          sed -i -E "s/(checksum: \")[a-f0-9]+(\")/\1$CHECKSUM\2/" Package.swift
+
+          # Update README.md with new version
+          sed -i -E "s|\.package\(url: \"https://github\.com/tinfoilsh/verifier-swift\", exact: \"[0-9]+\.[0-9]+\.[0-9]+\"|\.package\(url: \"https://github\.com/tinfoilsh/verifier-swift\", exact: \"${LATEST_TAG#v}\"|" README.md
+
+          # Clean up downloaded file
+          rm "$ZIP_FILE"
+
+          # Check if there are any changes to commit
+          if git diff --exit-code Package.swift README.md; then
+            echo "No changes to verifier dependency"
+          else
+            git add Package.swift README.md
+            git commit -m "chore: bump verifier to $LATEST_TAG"
+            git push origin main
+            echo "Update completed and pushed to main"
+          fi
