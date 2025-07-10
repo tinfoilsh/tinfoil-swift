@@ -38,9 +38,7 @@ import OpenAI
 
 // Create a secure OpenAI client
 let client = try await TinfoilAI.create(
-    apiKey: "YOUR_API_KEY", // Optional, will use TINFOIL_API_KEY env var if not provided
-    githubRepo: "tinfoilsh/model-repo",
-    enclaveURL: "enclave.example.com"
+    apiKey: "YOUR_API_KEY" // Optional, will use TINFOIL_API_KEY env var if not provided
 )
 
 // Use the client directly - it's a standard OpenAI client with security built-in
@@ -67,9 +65,7 @@ Once created, you can use it exactly like the [MacPaw OpenAI SDK](https://github
 ```swift
 // Create the secure client
 let client = try await TinfoilAI.create(
-    apiKey: "YOUR_API_KEY", // Optional, will use TINFOIL_API_KEY env var if not provided
-    githubRepo: "tinfoilsh/model-repo",
-    enclaveURL: "enclave.example.com"
+    apiKey: "YOUR_API_KEY" // Optional, will use TINFOIL_API_KEY env var if not provided
 )
 
 // Example: Create a chat completion
@@ -91,9 +87,7 @@ Tinfoil Swift supports streaming chat completions, allowing you to receive respo
 
 ```swift
 let client = try await TinfoilAI.create(
-    apiKey: "YOUR_API_KEY",
-    githubRepo: "tinfoilsh/model-repo", 
-    enclaveURL: "enclave.example.com"
+    apiKey: "YOUR_API_KEY"
 )
 
 let chatQuery = ChatQuery(
@@ -141,8 +135,6 @@ let verificationCallback: NonblockingVerification = { verificationPassed in
 // Create client with non-blocking verification
 let client = try await TinfoilAI.create(
     apiKey: "YOUR_API_KEY",
-    githubRepo: "tinfoilsh/model-repo",
-    enclaveURL: "enclave.example.com",
     nonblockingVerification: verificationCallback
 )
 
@@ -202,11 +194,7 @@ let verificationCallbacks = VerificationCallbacks(
     }
 )
 
-let secureClient = SecureClient(
-    githubRepo: "tinfoilsh/model-repo",
-    enclaveURL: "enclave.example.com",
-    callbacks: verificationCallbacks
-)
+let secureClient = SecureClient(callbacks: verificationCallbacks)
 
 let verificationResult = try await secureClient.verify()
 if verificationResult.isMatch {
@@ -227,10 +215,7 @@ For additional control, you can use certificate pinning directly to ensure you'r
 
 ```swift
 // First, get the expected fingerprint through verification
-let secureClient = SecureClient(
-    githubRepo: "tinfoilsh/model-repo",
-    enclaveURL: "enclave.example.com"
-)
+let secureClient = SecureClient()
 
 let verificationResult = try await secureClient.verify()
 let expectedFingerprint = verificationResult.publicKeyFP
@@ -238,7 +223,6 @@ let expectedFingerprint = verificationResult.publicKeyFP
 // Create a client with certificate pinning
 let tinfoilClient = try TinfoilClient.create(
     apiKey: "YOUR_API_KEY",
-    enclaveURL: "enclave.example.com",
     expectedFingerprint: expectedFingerprint,
     parsingOptions: .relaxed
 )
