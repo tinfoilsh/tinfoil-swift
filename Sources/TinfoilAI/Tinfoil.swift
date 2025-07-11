@@ -7,12 +7,15 @@ public enum TinfoilAI {
     /// Creates a new secure OpenAI client configured for communication with a Tinfoil enclave
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
-
+    ///   - enclaveURL: URL of the Tinfoil enclave
+    ///   - githubRepo: GitHub repository containing the enclave config
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - nonblockingVerification: Optional callback for non-blocking certificate verification results
     /// - Returns: An OpenAI client configured for secure communication with the Tinfoil enclave
     public static func create(
         apiKey: String? = nil,
+        enclaveURL: String = TinfoilConstants.defaultEnclaveURL,
+        githubRepo: String = TinfoilConstants.defaultGithubRepo,
         parsingOptions: ParsingOptions = .relaxed,
         nonblockingVerification: NonblockingVerification? = nil
     ) async throws -> OpenAI {
@@ -23,8 +26,12 @@ public enum TinfoilAI {
         }
         
         
-        // Create SecureClient with no parameters since Go function is now NewSecureClient()
-        let verifier = SecureClient()
+        // Create SecureClient with enclave URL and GitHub repo
+        let verifier = SecureClient(
+            githubRepo: githubRepo,
+            enclaveURL: enclaveURL,
+            callbacks: VerificationCallbacks()
+        )
         
         // get the verification result + cert fingerprint
         let verificationResult = try await verifier.verify()
@@ -32,6 +39,7 @@ public enum TinfoilAI {
         // create the tinfoil client
         let tinfoilClient = try TinfoilClient.create(
             apiKey: finalApiKey,
+            enclaveURL: enclaveURL,
             expectedFingerprint: verificationResult.publicKeyFP,
             parsingOptions: parsingOptions,
             nonblockingVerification: nonblockingVerification
