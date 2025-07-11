@@ -5,66 +5,13 @@ import OpenAI
 final class TinfoilAITests: XCTestCase {
     
     // MARK: - Test Configuration
-    
-    private let testEnclaveURL = "https://llama3-3-70b.model.tinfoil.sh"
-    private let testGithubRepo = "tinfoilsh/confidential-llama3-3-70b"
-    
-    // MARK: - Essential Tests
-    
-    func testURLNormalization() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
-        // Test URL without protocol prefix
-        let urlWithoutProtocol = "llama3-3-70b.model.tinfoil.sh"
-        
-        // Create client with URL without protocol
-        let clientWithoutProtocol = try await TinfoilAI.create(
-            apiKey: apiKey,
-            githubRepo: testGithubRepo,
-            enclaveURL: urlWithoutProtocol
-        )
-        
-        // Test that client can make a successful request
-        let chatQuery = ChatQuery(
-            messages: [
-                .user(.init(content: .string("Say 'Hello' and nothing else.")))
-            ],
-            model: "llama3-3-70b"
-        )
-        
-        let response = try await clientWithoutProtocol.chats(query: chatQuery)
-        
-        // Verify response
-        XCTAssertFalse(response.choices.isEmpty, "Response should contain at least one choice")
-        XCTAssertNotNil(response.choices.first?.message.content, "Response should have content")
-        
-        // Test URL with protocol prefix (already tested in other tests, but let's be explicit)
-        let urlWithProtocol = "https://llama3-3-70b.model.tinfoil.sh"
-        
-        // Create client with URL with protocol
-        let clientWithProtocol = try await TinfoilAI.create(
-            apiKey: apiKey,
-            githubRepo: testGithubRepo,
-            enclaveURL: urlWithProtocol
-        )
-        
-        // Test that client can make a successful request
-        let response2 = try await clientWithProtocol.chats(query: chatQuery)
-        
-        // Verify response
-        XCTAssertFalse(response2.choices.isEmpty, "Response should contain at least one choice")
-        XCTAssertNotNil(response2.choices.first?.message.content, "Response should have content")
-    }
-    
+
     func testClientSucceedsWhenVerificationSucceeds() async throws {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
-        // Create client - this will perform verification internally
-        let client = try await TinfoilAI.create(
-            apiKey: apiKey,
-            githubRepo: testGithubRepo,
-            enclaveURL: testEnclaveURL
-        )
+        // Create client using defaults - this will perform verification internally
+        let client = try await TinfoilAI.create(apiKey: apiKey)
         
         // Test that client can make a successful request
         let chatQuery = ChatQuery(
@@ -84,11 +31,8 @@ final class TinfoilAITests: XCTestCase {
     func testCertificatePinningSuccess() async throws {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
-        // Get the correct fingerprint from verification
-        let secureClient = SecureClient(
-            githubRepo: testGithubRepo,
-            enclaveURL: testEnclaveURL
-        )
+        // Get the correct fingerprint from verification using defaults
+        let secureClient = SecureClient()
         
         let verificationResult = try await secureClient.verify()
         let expectedFingerprint = verificationResult.publicKeyFP
@@ -96,7 +40,6 @@ final class TinfoilAITests: XCTestCase {
         // Create client with correct fingerprint and relaxed parsing
         let tinfoilClient = try TinfoilClient.create(
             apiKey: apiKey,
-            enclaveURL: testEnclaveURL,
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
@@ -124,7 +67,6 @@ final class TinfoilAITests: XCTestCase {
         
         let tinfoilClient = try TinfoilClient.create(
             apiKey: apiKey,
-            enclaveURL: testEnclaveURL,
             expectedFingerprint: wrongFingerprint
         )
         
@@ -153,12 +95,8 @@ final class TinfoilAITests: XCTestCase {
     func testStreamingChatCompletion() async throws {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
-        // Create client - this will perform verification internally
-        let client = try await TinfoilAI.create(
-            apiKey: apiKey,
-            githubRepo: testGithubRepo,
-            enclaveURL: testEnclaveURL
-        )
+        // Create client using defaults - this will perform verification internally
+        let client = try await TinfoilAI.create(apiKey: apiKey)
         
         // Test streaming chat completion
         let chatQuery = ChatQuery(
@@ -195,11 +133,8 @@ final class TinfoilAITests: XCTestCase {
     func testStreamingWithCertificatePinning() async throws {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
-        // Get the correct fingerprint from verification
-        let secureClient = SecureClient(
-            githubRepo: testGithubRepo,
-            enclaveURL: testEnclaveURL
-        )
+        // Get the correct fingerprint from verification using defaults
+        let secureClient = SecureClient()
         
         let verificationResult = try await secureClient.verify()
         let expectedFingerprint = verificationResult.publicKeyFP
@@ -207,7 +142,6 @@ final class TinfoilAITests: XCTestCase {
         // Create client with correct fingerprint and relaxed parsing
         let tinfoilClient = try TinfoilClient.create(
             apiKey: apiKey,
-            enclaveURL: testEnclaveURL,
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
@@ -241,7 +175,6 @@ final class TinfoilAITests: XCTestCase {
         
         let tinfoilClient = try TinfoilClient.create(
             apiKey: apiKey,
-            enclaveURL: testEnclaveURL,
             expectedFingerprint: wrongFingerprint
         )
         
@@ -270,12 +203,8 @@ final class TinfoilAITests: XCTestCase {
     func testStreamingResponseStructure() async throws {
         let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
-        // Create TinfoilAI client
-        let client = try await TinfoilAI.create(
-            apiKey: apiKey,
-            githubRepo: testGithubRepo,
-            enclaveURL: testEnclaveURL
-        )
+        // Create TinfoilAI client using defaults
+        let client = try await TinfoilAI.create(apiKey: apiKey)
         
         // Test streaming response structure
         let chatQuery = ChatQuery(
@@ -334,11 +263,9 @@ final class TinfoilAITests: XCTestCase {
             verificationExpectation.fulfill()
         }
         
-        // Create TinfoilAI client with non-blocking verification
+        // Create TinfoilAI client with non-blocking verification using defaults
         let client = try await TinfoilAI.create(
             apiKey: apiKey,
-            githubRepo: testGithubRepo,
-            enclaveURL: testEnclaveURL,
             nonblockingVerification: nonblockingCallback
         )
         
@@ -381,7 +308,6 @@ final class TinfoilAITests: XCTestCase {
         
         let tinfoilClient = try TinfoilClient.create(
             apiKey: apiKey,
-            enclaveURL: testEnclaveURL,
             expectedFingerprint: wrongFingerprint,
             nonblockingVerification: nonblockingCallback
         )
