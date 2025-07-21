@@ -34,13 +34,13 @@ public enum TinfoilAI {
         )
         
         // get the verification result + cert fingerprint
-        let verificationResult = try await verifier.verify()
+        let groundTruth = try await verifier.verify()
         
         // create the tinfoil client
         let tinfoilClient = try TinfoilClient.create(
             apiKey: finalApiKey,
             enclaveURL: enclaveURL,
-            expectedFingerprint: verificationResult.publicKeyFP,
+            expectedFingerprint: groundTruth.publicKey,
             parsingOptions: parsingOptions,
             nonblockingVerification: nonblockingVerification
         )
