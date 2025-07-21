@@ -162,81 +162,60 @@ For advanced use cases, you can perform manual verification and use certificate 
 ```swift
 // Manual verification with progress callbacks
 let verificationCallbacks = VerificationCallbacks(
-    onCodeVerificationComplete: { result in
-        switch result.status {
-        case .success(let digest):
-            print("Code verification successful: \(digest)")
-        case .failure(let error):
-            print("Code verification failed: \(error)")
-        default:
-            break
-        }
+    onVerificationStart: {
+        print("Starting enclave verification...")
     },
-    onRuntimeVerificationComplete: { result in
-        switch result.status {
-        case .success(let digest):
-            print("Runtime verification successful: \(digest)")
+    onVerificationComplete: { result in
+        switch result {
+        case .success(let groundTruth):
+            print("Verification successful!")
+            print("Public key fingerprint: \(groundTruth.publicKeyFP)")
+            print("Digest: \(groundTruth.digest)")
+            if let codeMeasurement = groundTruth.codeMeasurement {
+                print("Code measurement type: \(codeMeasurement.type)")
+                print("Code registers: \(codeMeasurement.registers)")
+            }
+            if let enclaveMeasurement = groundTruth.enclaveMeasurement {
+                print("Enclave measurement type: \(enclaveMeasurement.type)")
+                print("Enclave registers: \(enclaveMeasurement.registers)")
+            }
         case .failure(let error):
-            print("Runtime verification failed: \(error)")
-        default:
-            break
-        }
-    },
-    onSecurityCheckComplete: { result in
-        switch result.status {
-        case .success:
-            print("Security check passed: Code and runtime match")
-        case .failure(let error):
-            print("Security check failed: \(error)")
-        default:
-            break
+            print("Verification failed: \(error)")
         }
     }
 )
 
-let secureClient = SecureClient(callbacks: verificationCallbacks)
+// The SecureClient is created internally by TinfoilAI.create()
+// This example shows the verification process for advanced use cases
+let client = try await TinfoilAI.create(
+    apiKey: "YOUR_API_KEY"
+)
 
-let verificationResult = try await secureClient.verify()
-if verificationResult.isMatch {
-    print("Verification successful!")
-    print("Code digest: \(verificationResult.codeDigest)")
-    print("Runtime digest: \(verificationResult.runtimeDigest)")
-    print("Key fingerprint: \(verificationResult.publicKeyFP)")
-} else {
-    print("Verification failed: Code and runtime digests do not match")
-}
+// The verification happens automatically during client creation
+// The ground truth data includes all verification results
 ```
 
 ### Certificate Pinning
 
-**Note**: Certificate pinning is performed automatically when you use `TinfoilAI.create()`. The following example shows how to use certificate pinning manually for advanced use cases.
+**Note**: Certificate pinning is performed automatically when you use `TinfoilAI.create()`. The verification process ensures that all requests are sent only to the verified Tinfoil enclave.
 
-For additional control, you can use certificate pinning directly to ensure you're connecting to the exact expected enclave:
+The library handles all security aspects internally:
+- Enclave attestation verification
+- Certificate fingerprint validation
+- TLS pinning for all requests (both streaming and non-streaming)
 
 ```swift
-// First, get the expected fingerprint through verification
-let secureClient = SecureClient()
-
-let verificationResult = try await secureClient.verify()
-let expectedFingerprint = verificationResult.publicKeyFP
-
-// Create a client with certificate pinning
-let tinfoilClient = try TinfoilClient.create(
-    apiKey: "YOUR_API_KEY",
-    expectedFingerprint: expectedFingerprint,
-    parsingOptions: .relaxed
+let client = try await TinfoilAI.create(
+    apiKey: "YOUR_API_KEY"
 )
 
-// Now all requests will use certificate pinning for maximum security
+// All requests are secured with certificate pinning
 let chatQuery = ChatQuery(
     messages: [.user(.init(content: .string("Secure message")))],
     model: "model-name"
 )
 
-let response = try await tinfoilClient.underlyingClient.chats(query: chatQuery)
-
-// Clean up when done
-tinfoilClient.shutdown()
+let response = try await client.chats(query: chatQuery)
 ```
 
 ## API Documentation

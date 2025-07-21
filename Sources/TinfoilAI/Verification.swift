@@ -11,12 +11,8 @@ public enum VerificationStatus {
 
 /// Errors that can occur during verification
 public enum VerificationError: Error {
-    case githubDigestFetchFailed(String)
-    case attestationBundleFetchFailed(String)
-    case sigstoreRootFetchFailed(String)
-    case attestationVerificationFailed(String)
-    case enclaveAttestationFailed(String)
-    case digestMismatch(String)
+    case verificationFailed(String)
+    case jsonDecodingFailed(String)
     case unknown(Error)
 }
 
@@ -44,27 +40,44 @@ public struct StepResult {
 
 /// Progress callbacks for verification steps
 public struct VerificationCallbacks {
-    public let onCodeVerificationComplete: (StepResult) -> Void
-    public let onRuntimeVerificationComplete: (StepResult) -> Void
-    public let onSecurityCheckComplete: (StepResult) -> Void
+    public let onVerificationStart: () -> Void
+    public let onVerificationComplete: (Result<GroundTruth, Error>) -> Void
     
     public init(
-        onCodeVerificationComplete: @escaping (StepResult) -> Void = { _ in },
-        onRuntimeVerificationComplete: @escaping (StepResult) -> Void = { _ in },
-        onSecurityCheckComplete: @escaping (StepResult) -> Void = { _ in }
+        onVerificationStart: @escaping () -> Void = { },
+        onVerificationComplete: @escaping (Result<GroundTruth, Error>) -> Void = { _ in }
     ) {
-        self.onCodeVerificationComplete = onCodeVerificationComplete
-        self.onRuntimeVerificationComplete = onRuntimeVerificationComplete
-        self.onSecurityCheckComplete = onSecurityCheckComplete
+        self.onVerificationStart = onVerificationStart
+        self.onVerificationComplete = onVerificationComplete
     }
 }
 
-/// Final verification result
-public struct VerificationResult {
-    public let codeDigest: String
-    public let runtimeDigest: String
-    public let isMatch: Bool
+/// Measurement structure matching Go's attestation.Measurement
+public struct Measurement: Codable {
+    public let type: String
+    public let registers: [String]
+    
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case registers
+    }
+}
+
+/// Ground truth structure matching Go's client.GroundTruth
+public struct GroundTruth: Codable {
     public let publicKeyFP: String
+    public let digest: String
+    public let codeMeasurement: Measurement?
+    public let enclaveMeasurement: Measurement?
+    public let hardwarePlatform: String?
+    
+    private enum CodingKeys: String, CodingKey {
+        case publicKeyFP = "public_key"
+        case digest
+        case codeMeasurement = "code_measurement"
+        case enclaveMeasurement = "enclave_measurement"
+        case hardwarePlatform = "hardware_platform"
+    }
 }
 
 /// A client for securely verifying code integrity through remote attestation
@@ -72,6 +85,7 @@ public class SecureClient {
     private let githubRepo: String
     private let enclaveURL: String
     private let callbacks: VerificationCallbacks
+    private var groundTruth: GroundTruth?
     
     /// Initialize a secure client with required configuration
     /// - Parameters:
@@ -88,158 +102,70 @@ public class SecureClient {
         self.callbacks = callbacks
     }
     
+    /// Returns the last verified ground truth
+    public func getGroundTruth() -> GroundTruth? {
+        return groundTruth
+    }
+    
     /// Verifies the committed code and runtime binaries using remote attestation
-    /// - Returns: A verification result or throws an error
-    public func verify() async throws -> VerificationResult {
-        // Get the full repo name
-        let repo = githubRepo
-        
-        // STEP 1: Verify code with GitHub and Sigstore
-        let codeDigest = try await verifyCodeWithGitHub(repo: repo)
-        
-        // STEP 2: Verify runtime with enclave attestation
-        let (runtimeDigest, publicKeyFP) = try await verifyRuntimeWithEnclave()
-        
-        // STEP 3: Compare the digests
-        let isMatch = codeDigest == runtimeDigest
-        
-        // Report security check result
-        if isMatch {
-            callbacks.onSecurityCheckComplete(.success(digest: "Digests match"))
-        } else {
-            let error = VerificationError.digestMismatch("Code digest does not match runtime digest")
-            callbacks.onSecurityCheckComplete(.failure(error))
-            throw error
-        }
-        
-        return VerificationResult(
-            codeDigest: codeDigest,
-            runtimeDigest: runtimeDigest,
-            isMatch: isMatch,
-            publicKeyFP: publicKeyFP
-        )
-    }
-    
-    // MARK: - Private Methods
-    
-    private func verifyCodeWithGitHub(repo: String) async throws -> String {
-        var error: NSError?
-        
-        do {
-            // Fetch latest binary digest from GitHub
-            let digest = TinfoilVerifier.GithubFetchLatestDigest(repo, &error)
-            
-            guard !digest.isEmpty else {
-                let verificationError = VerificationError.githubDigestFetchFailed(error?.localizedDescription ?? "Unknown error")
-                callbacks.onCodeVerificationComplete(.failure(verificationError))
-                throw verificationError
-            }
-            
-            // Fetch attestation bundle from GitHub
-            guard let sigstoreBundle = TinfoilVerifier.GithubFetchAttestationBundle(repo, digest, &error) else {
-                let verificationError = VerificationError.attestationBundleFetchFailed(error?.localizedDescription ?? "Unknown error")
-                callbacks.onCodeVerificationComplete(.failure(verificationError))
-                throw verificationError
-            }
-            
-            // Fetch Sigstore root certificate
-            guard let sigstoreRoot = TinfoilVerifier.SigstoreFetchTrustRoot(&error) else {
-                let verificationError = VerificationError.sigstoreRootFetchFailed(error?.localizedDescription ?? "Unknown error")
-                callbacks.onCodeVerificationComplete(.failure(verificationError))
-                throw verificationError
-            }
-            
-            // Verify the bundle from GitHub was stored on Sigstore
-            guard let measurement = TinfoilVerifier.SigstoreVerifyAttestation(sigstoreRoot, sigstoreBundle, digest, repo, &error) else {
-                let verificationError = VerificationError.attestationVerificationFailed(error?.localizedDescription ?? "Unknown error")
-                callbacks.onCodeVerificationComplete(.failure(verificationError))
-                throw verificationError
-            }
-            
-            // Extract fingerprint from measurement
-            guard let fingerprint = measurement.value(forKey: "fingerprint") as? String,
-                  !fingerprint.isEmpty else {
-                let verificationError = VerificationError.attestationVerificationFailed("Missing fingerprint in measurement")
-                callbacks.onCodeVerificationComplete(.failure(verificationError))
-                throw verificationError
-            }
-
-            callbacks.onCodeVerificationComplete(.success(digest: fingerprint))
-            
-            return fingerprint
-            
-        } catch let verificationError as VerificationError {
-            // Already reported above, just rethrow
-            throw verificationError
-        } catch {
-            // Handle unexpected errors
-            let wrappedError = VerificationError.unknown(error)
-            callbacks.onCodeVerificationComplete(.failure(wrappedError))
-            throw wrappedError
-        }
-    }
-    
-    private func verifyRuntimeWithEnclave() async throws -> (String, String) {
-        var error: NSError?
+    /// - Returns: The ground truth containing all verification results
+    public func verify() async throws -> GroundTruth {
+        callbacks.onVerificationStart()
         
         do {
             // Parse the enclave URL to extract the host
-            let urlComponents: (url: URL, host: String, scheme: String, port: Int?)
+            let urlComponents = try URLHelpers.parseURL(enclaveURL)
+            
+            // Create a new TinfoilVerifier secure client
+            guard let client = TinfoilVerifier.ClientNewSecureClient(urlComponents.host, githubRepo) else {
+                let error = VerificationError.verificationFailed("Failed to create secure client")
+                callbacks.onVerificationComplete(.failure(error))
+                throw error
+            }
+            
+            // Run verification - this returns the GroundTruth object from Go
             do {
-                urlComponents = try URLHelpers.parseURL(enclaveURL)
+                let groundTruthResult = try client.verify()
             } catch {
-                let verificationError = VerificationError.enclaveAttestationFailed("Invalid enclave URL: \(enclaveURL)")
-                callbacks.onRuntimeVerificationComplete(.failure(verificationError))
+                let verificationError = VerificationError.verificationFailed("Verification failed: \(error.localizedDescription)")
+                callbacks.onVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
             
-            // Fetch attestation from enclave using the host
-            guard let enclaveAttestation = TinfoilVerifier.AttestationFetch(urlComponents.host, &error) else {
-                let verificationError = VerificationError.enclaveAttestationFailed(error?.localizedDescription ?? "Failed to fetch attestation")
-                callbacks.onRuntimeVerificationComplete(.failure(verificationError))
+            // Get the ground truth as JSON string from the client
+            var jsonError: NSError?
+            let jsonString = client.groundTruthJSON(&jsonError)
+            
+            if let error = jsonError {
+                let verificationError = VerificationError.jsonDecodingFailed(error.localizedDescription)
+                callbacks.onVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
             
-            // Verify the attestation document
-            let verification: AttestationVerification
+            guard let jsonData = jsonString.data(using: .utf8) else {
+                let verificationError = VerificationError.jsonDecodingFailed("Failed to convert JSON string to data")
+                callbacks.onVerificationComplete(.failure(verificationError))
+                throw verificationError
+            }
+            
+            // Decode the ground truth JSON
+            let decoder = JSONDecoder()
             do {
-                verification = try enclaveAttestation.verify()
+                let groundTruth = try decoder.decode(GroundTruth.self, from: jsonData)
+                self.groundTruth = groundTruth
+                callbacks.onVerificationComplete(.success(groundTruth))
+                return groundTruth
             } catch {
-                let verificationError = VerificationError.enclaveAttestationFailed(error.localizedDescription)
-                callbacks.onRuntimeVerificationComplete(.failure(verificationError))
-                throw verificationError
+                let decodingError = VerificationError.jsonDecodingFailed(error.localizedDescription)
+                callbacks.onVerificationComplete(.failure(decodingError))
+                throw decodingError
             }
-            
-            callbacks.onRuntimeVerificationComplete(.inProgress())
-            
-            // Extract fingerprint from verification result
-            guard let measurementProperty = verification.value(forKey: "measurement") as? NSObject,
-                  let fingerprint = measurementProperty.value(forKey: "fingerprint") as? String, // Fingerprint is the hash of all runtime measurements
-                  !fingerprint.isEmpty else {
-                let verificationError = VerificationError.enclaveAttestationFailed("Missing fingerprint in measurement")
-                callbacks.onRuntimeVerificationComplete(.failure(verificationError))
-                throw verificationError
-            }
-
-            // Extract the public key fingerprint
-            guard let publicKey = verification.value(forKey: "publicKeyFP") as? String,
-                  !publicKey.isEmpty else {
-                let verificationError = VerificationError.enclaveAttestationFailed("Missing public key fingerprint")
-                callbacks.onRuntimeVerificationComplete(.failure(verificationError))
-                throw verificationError
-            }
-
-            // Report success
-            callbacks.onRuntimeVerificationComplete(.success(digest: fingerprint))
-            return (fingerprint, publicKey)
             
         } catch let verificationError as VerificationError {
-            // Already reported above, just rethrow
             throw verificationError
         } catch {
-            // Handle unexpected errors
             let wrappedError = VerificationError.unknown(error)
-            callbacks.onRuntimeVerificationComplete(.failure(wrappedError))
+            callbacks.onVerificationComplete(.failure(wrappedError))
             throw wrappedError
         }
     }
