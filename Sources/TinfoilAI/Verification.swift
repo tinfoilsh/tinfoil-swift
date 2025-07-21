@@ -65,14 +65,14 @@ public struct Measurement: Codable {
 
 /// Ground truth structure matching Go's client.GroundTruth
 public struct GroundTruth: Codable {
-    public let publicKey: String
+    public let publicKeyFP: String
     public let digest: String
     public let codeMeasurement: Measurement?
     public let enclaveMeasurement: Measurement?
     public let hardwarePlatform: String?
     
     private enum CodingKeys: String, CodingKey {
-        case publicKey = "public_key"
+        case publicKeyFP = "public_key"
         case digest
         case codeMeasurement = "code_measurement"
         case enclaveMeasurement = "enclave_measurement"

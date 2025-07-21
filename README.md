@@ -169,13 +169,15 @@ let verificationCallbacks = VerificationCallbacks(
         switch result {
         case .success(let groundTruth):
             print("Verification successful!")
-            print("Public key: \(groundTruth.publicKey)")
+            print("Public key fingerprint: \(groundTruth.publicKeyFP)")
             print("Digest: \(groundTruth.digest)")
             if let codeMeasurement = groundTruth.codeMeasurement {
-                print("Code fingerprint: \(codeMeasurement.fingerprint)")
+                print("Code measurement type: \(codeMeasurement.type)")
+                print("Code registers: \(codeMeasurement.registers)")
             }
             if let enclaveMeasurement = groundTruth.enclaveMeasurement {
-                print("Enclave fingerprint: \(enclaveMeasurement.fingerprint)")
+                print("Enclave measurement type: \(enclaveMeasurement.type)")
+                print("Enclave registers: \(enclaveMeasurement.registers)")
             }
         case .failure(let error):
             print("Verification failed: \(error)")
