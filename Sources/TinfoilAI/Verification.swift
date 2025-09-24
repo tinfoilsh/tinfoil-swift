@@ -65,14 +65,16 @@ public struct Measurement: Codable {
 
 /// Ground truth structure matching Go's client.GroundTruth
 public struct GroundTruth: Codable {
-    public let publicKeyFP: String
+    public let tlsPublicKey: String
+    public let hpkePublicKey: String
     public let digest: String
     public let codeMeasurement: Measurement?
     public let enclaveMeasurement: Measurement?
     public let hardwarePlatform: String?
     
     private enum CodingKeys: String, CodingKey {
-        case publicKeyFP = "public_key"
+        case tlsPublicKey = "tls_public_key"
+        case hpkePublicKey = "hpke_public_key"
         case digest
         case codeMeasurement = "code_measurement"
         case enclaveMeasurement = "enclave_measurement"
@@ -135,13 +137,13 @@ public class SecureClient {
             // Get the ground truth as JSON string from the client
             var jsonError: NSError?
             let jsonString = client.groundTruthJSON(&jsonError)
-            
+
             if let error = jsonError {
                 let verificationError = VerificationError.jsonDecodingFailed(error.localizedDescription)
                 callbacks.onVerificationComplete(.failure(verificationError))
                 throw verificationError
             }
-            
+
             guard let jsonData = jsonString.data(using: .utf8) else {
                 let verificationError = VerificationError.jsonDecodingFailed("Failed to convert JSON string to data")
                 callbacks.onVerificationComplete(.failure(verificationError))

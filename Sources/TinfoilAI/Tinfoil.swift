@@ -40,7 +40,7 @@ public enum TinfoilAI {
         let tinfoilClient = try TinfoilClient.create(
             apiKey: finalApiKey,
             enclaveURL: enclaveURL,
-            expectedFingerprint: groundTruth.publicKeyFP,
+            expectedFingerprint: groundTruth.tlsPublicKey,
             parsingOptions: parsingOptions,
             nonblockingVerification: nonblockingVerification
         )
