@@ -7,4 +7,4 @@ public enum TinfoilConstants {
     
     /// Default GitHub repository for the inference proxy
     public static let defaultGithubRepo = "tinfoilsh/confidential-inference-proxy"
-} 
+}
