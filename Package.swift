@@ -13,7 +13,7 @@ let package = Package(
             targets: ["TinfoilAI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main"),
+        .package(url: "https://github.com/MacPaw/OpenAI.git", exact: "0.4.5"),
     ],
     targets: [
         .binaryTarget(
@@ -26,7 +26,10 @@ let package = Package(
                 .product(name: "OpenAI", package: "OpenAI"),
                 "TinfoilVerifier"
             ],
-            path: "Sources/TinfoilAI"),
+            path: "Sources/TinfoilAI",
+            linkerSettings: [
+                .linkedLibrary("resolv")
+            ]),
         .testTarget(
             name: "TinfoilAITests",
             dependencies: [
