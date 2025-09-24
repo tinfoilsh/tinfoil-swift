@@ -13,20 +13,23 @@ let package = Package(
             targets: ["TinfoilAI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main"),
+        .package(url: "https://github.com/MacPaw/OpenAI.git", exact: "0.4.5"),
     ],
     targets: [
         .binaryTarget(
             name: "TinfoilVerifier",
-            url: "https://github.com/tinfoilsh/verifier/releases/download/v0.2.2/TinfoilVerifier.xcframework.zip",
-            checksum: "2bbddac259a4a2cbb631db38496923ac0b544da215326660437b5716783fa0b8"),
+            url: "https://github.com/tinfoilsh/verifier/releases/download/v0.2.3/TinfoilVerifier.xcframework.zip",
+            checksum: "206fb8de5bf342a2fd27bfc9893b5907b92c1d52f3e0f9ccb0346fa736679633"),
         .target(
             name: "TinfoilAI",
             dependencies: [
                 .product(name: "OpenAI", package: "OpenAI"),
                 "TinfoilVerifier"
             ],
-            path: "Sources/TinfoilAI"),
+            path: "Sources/TinfoilAI",
+            linkerSettings: [
+                .linkedLibrary("resolv")
+            ]),
         .testTarget(
             name: "TinfoilAITests",
             dependencies: [

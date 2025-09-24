@@ -93,8 +93,8 @@ public class SecureClient {
     ///   - enclaveURL: URL for the enclave attestation endpoint
     ///   - callbacks: Optional callbacks for verification progress
     public init(
-        githubRepo: String,
-        enclaveURL: String,
+        githubRepo: String = TinfoilConstants.defaultGithubRepo,
+        enclaveURL: String = TinfoilConstants.defaultEnclaveURL,
         callbacks: VerificationCallbacks = VerificationCallbacks()
     ) {
         self.githubRepo = githubRepo
@@ -123,9 +123,9 @@ public class SecureClient {
                 throw error
             }
             
-            // Run verification - this returns the GroundTruth object from Go
+            // Run verification
             do {
-                let groundTruthResult = try client.verify()
+                _ = try client.verify()
             } catch {
                 let verificationError = VerificationError.verificationFailed("Verification failed: \(error.localizedDescription)")
                 callbacks.onVerificationComplete(.failure(verificationError))

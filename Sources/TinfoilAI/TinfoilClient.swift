@@ -34,7 +34,7 @@ public class TinfoilClient {
     
     public static func create(
         apiKey: String,
-        enclaveURL: String,
+        enclaveURL: String = TinfoilConstants.defaultEnclaveURL,
         expectedFingerprint: String,
         parsingOptions: ParsingOptions = .relaxed,
         nonblockingVerification: NonblockingVerification? = nil
