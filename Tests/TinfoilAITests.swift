@@ -10,7 +10,7 @@ final class TinfoilAITests: XCTestCase {
     func testClientSucceedsWhenVerificationSucceeds() async throws {
         
         // Create client using defaults - this will perform verification internally
-        let client = try await TinfoilAI.create(apiKey: apiKey)
+        let client = try await TinfoilAI.create(apiKey: "tinfoil")
         
         // Test that client can make a successful request
         let chatQuery = ChatQuery(
@@ -33,11 +33,11 @@ final class TinfoilAITests: XCTestCase {
         let secureClient = SecureClient()
         
         let verificationResult = try await secureClient.verify()
-        let expectedFingerprint = verificationResult.publicKeyFP
+        let expectedFingerprint = verificationResult.tlsPublicKey
         
         // Create client with correct fingerprint and relaxed parsing
         let tinfoilClient = try TinfoilClient.create(
-            apiKey: apiKey,
+            apiKey: "tinfoil",
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
@@ -63,7 +63,7 @@ final class TinfoilAITests: XCTestCase {
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
         
         let tinfoilClient = try TinfoilClient.create(
-            apiKey: apiKey,
+            apiKey: "tinfoil",
             expectedFingerprint: wrongFingerprint
         )
         
@@ -92,7 +92,7 @@ final class TinfoilAITests: XCTestCase {
     func testStreamingChatCompletion() async throws {
         
         // Create client using defaults - this will perform verification internally
-        let client = try await TinfoilAI.create(apiKey: apiKey)
+        let client = try await TinfoilAI.create(apiKey: "tinfoil")
         
         // Test streaming chat completion
         let chatQuery = ChatQuery(
@@ -132,11 +132,11 @@ final class TinfoilAITests: XCTestCase {
         let secureClient = SecureClient()
         
         let verificationResult = try await secureClient.verify()
-        let expectedFingerprint = verificationResult.publicKeyFP
+        let expectedFingerprint = verificationResult.tlsPublicKey
         
         // Create client with correct fingerprint and relaxed parsing
         let tinfoilClient = try TinfoilClient.create(
-            apiKey: apiKey,
+            apiKey: "tinfoil",
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
@@ -168,7 +168,7 @@ final class TinfoilAITests: XCTestCase {
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
         
         let tinfoilClient = try TinfoilClient.create(
-            apiKey: apiKey,
+            apiKey: "tinfoil",
             expectedFingerprint: wrongFingerprint
         )
         
@@ -197,7 +197,7 @@ final class TinfoilAITests: XCTestCase {
     func testStreamingResponseStructure() async throws {
         
         // Create TinfoilAI client using defaults
-        let client = try await TinfoilAI.create(apiKey: apiKey)
+        let client = try await TinfoilAI.create(apiKey: "tinfoil")
         
         // Test streaming response structure
         let chatQuery = ChatQuery(
@@ -257,7 +257,7 @@ final class TinfoilAITests: XCTestCase {
         
         // Create TinfoilAI client with non-blocking verification using defaults
         let client = try await TinfoilAI.create(
-            apiKey: apiKey,
+            apiKey: "tinfoil",
             nonblockingVerification: nonblockingCallback
         )
         
@@ -298,7 +298,7 @@ final class TinfoilAITests: XCTestCase {
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
         
         let tinfoilClient = try TinfoilClient.create(
-            apiKey: apiKey,
+            apiKey: "tinfoil",
             expectedFingerprint: wrongFingerprint,
             nonblockingVerification: nonblockingCallback
         )
