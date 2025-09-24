@@ -8,7 +8,6 @@ final class TinfoilAITests: XCTestCase {
         
 
     func testClientSucceedsWhenVerificationSucceeds() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Create client using defaults - this will perform verification internally
         let client = try await TinfoilAI.create(apiKey: apiKey)
@@ -18,7 +17,7 @@ final class TinfoilAITests: XCTestCase {
             messages: [
                 .user(.init(content: .string("Say 'Hello' and nothing else.")))
             ],
-            model: "llama3-3-70b"
+            model: "llama-free"
         )
         
         let response = try await client.chats(query: chatQuery)
@@ -29,7 +28,6 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testCertificatePinningSuccess() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Get the correct fingerprint from verification using defaults
         let secureClient = SecureClient()
@@ -49,7 +47,7 @@ final class TinfoilAITests: XCTestCase {
             messages: [
                 .user(.init(content: .string("Say 'Success' and nothing else.")))
             ],
-            model: "llama3-3-70b"
+            model: "llama-free"
         )
         
         let response = try await tinfoilClient.underlyingClient.chats(query: chatQuery)
@@ -60,7 +58,6 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testCertificatePinningFailure() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Create client with wrong fingerprint
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -75,7 +72,7 @@ final class TinfoilAITests: XCTestCase {
             messages: [
                 .user(.init(content: .string("This should fail")))
             ],
-            model: "llama3-3-70b"
+            model: "llama-free"
         )
         
         do {
@@ -93,7 +90,6 @@ final class TinfoilAITests: XCTestCase {
     // MARK: - Streaming Tests
     
     func testStreamingChatCompletion() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Create client using defaults - this will perform verification internally
         let client = try await TinfoilAI.create(apiKey: apiKey)
@@ -103,7 +99,7 @@ final class TinfoilAITests: XCTestCase {
             messages: [
                 .user(.init(content: .string("Count from 1 to 5, one number per response.")))
             ],
-            model: "llama3-3-70b"
+            model: "llama-free"
         )
         
         var receivedChunks: [ChatStreamResult] = []
@@ -131,7 +127,6 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testStreamingWithCertificatePinning() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Get the correct fingerprint from verification using defaults
         let secureClient = SecureClient()
@@ -151,7 +146,7 @@ final class TinfoilAITests: XCTestCase {
             messages: [
                 .user(.init(content: .string("Say 'Streaming works!' and nothing else.")))
             ],
-            model: "llama3-3-70b"
+            model: "llama-free"
         )
         
         var receivedChunks: [ChatStreamResult] = []
@@ -168,7 +163,6 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testStreamingFailsWithWrongCertificate() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Create client with wrong fingerprint
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -183,7 +177,7 @@ final class TinfoilAITests: XCTestCase {
             messages: [
                 .user(.init(content: .string("This streaming should fail")))
             ],
-            model: "llama3-3-70b"
+            model: "llama-free"
         )
         
         do {
@@ -201,7 +195,6 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testStreamingResponseStructure() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Create TinfoilAI client using defaults
         let client = try await TinfoilAI.create(apiKey: apiKey)
@@ -211,7 +204,7 @@ final class TinfoilAITests: XCTestCase {
             messages: [
                 .user(.init(content: .string("Say 'Test' exactly once.")))
             ],
-            model: "llama3-3-70b"
+            model: "llama-free"
         )
         
         var hasId = false
@@ -249,7 +242,6 @@ final class TinfoilAITests: XCTestCase {
     // MARK: - Non-blocking Verification Tests
     
     func testNonblockingVerificationWithCorrectFingerprint() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Set up verification callback expectation
         class VerificationResultWrapper {
@@ -274,7 +266,7 @@ final class TinfoilAITests: XCTestCase {
             messages: [
                 .user(.init(content: .string("Say 'Success' and nothing else.")))
             ],
-            model: "llama3-3-70b"
+            model: "llama-free"
         )
         
         let response = try await client.chats(query: chatQuery)
@@ -289,7 +281,6 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testNonblockingVerificationWithIncorrectFingerprint() async throws {
-        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
         
         // Set up verification callback expectation  
         class VerificationResultWrapper {
@@ -317,7 +308,7 @@ final class TinfoilAITests: XCTestCase {
             messages: [
                 .user(.init(content: .string("This should succeed in non-blocking mode")))
             ],
-            model: "llama3-3-70b"
+            model: "llama-free"
         )
         
         let response = try await tinfoilClient.underlyingClient.chats(query: chatQuery)
