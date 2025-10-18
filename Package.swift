@@ -13,7 +13,7 @@ let package = Package(
             targets: ["TinfoilAI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/MacPaw/OpenAI.git", exact: "0.4.5"),
+        .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main"),
     ],
     targets: [
         .binaryTarget(
