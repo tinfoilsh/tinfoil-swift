@@ -66,7 +66,7 @@ public struct Measurement: Codable {
 /// Ground truth structure matching Go's client.GroundTruth
 public struct GroundTruth: Codable {
     public let tlsPublicKey: String
-    public let hpkePublicKey: String
+    public let hpkePublicKey: String?
     public let digest: String
     public let codeMeasurement: Measurement?
     public let enclaveMeasurement: Measurement?
