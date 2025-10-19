@@ -96,7 +96,7 @@ public class SecureClient {
     ///   - callbacks: Optional callbacks for verification progress
     public init(
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
-        enclaveURL: String = TinfoilConstants.defaultEnclaveURL,
+        enclaveURL: String,
         callbacks: VerificationCallbacks = VerificationCallbacks()
     ) {
         self.githubRepo = githubRepo
