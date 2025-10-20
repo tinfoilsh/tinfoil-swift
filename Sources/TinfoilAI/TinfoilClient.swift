@@ -4,19 +4,13 @@ import OpenAI
 /// SSL delegate for streaming certificate pinning
 final class StreamingSSLDelegate: SSLDelegateProtocol {
     private let expectedFingerprint: String
-    private let allowUnverifiedConnections: Bool
 
-    init(expectedFingerprint: String, allowUnverifiedConnections: Bool = false) {
+    init(expectedFingerprint: String) {
         self.expectedFingerprint = expectedFingerprint
-        self.allowUnverifiedConnections = allowUnverifiedConnections
     }
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        // Reuse the same certificate validation logic as CertificatePinningDelegate
-        let delegate = CertificatePinningDelegate(
-            expectedFingerprint: expectedFingerprint,
-            allowUnverifiedConnections: allowUnverifiedConnections
-        )
+        let delegate = CertificatePinningDelegate(expectedFingerprint: expectedFingerprint)
         delegate.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
     }
 }
@@ -36,23 +30,16 @@ public class TinfoilClient {
         apiKey: String,
         enclaveURL: String,
         expectedFingerprint: String,
-        parsingOptions: ParsingOptions = .relaxed,
-        allowUnverifiedConnections: Bool = false
+        parsingOptions: ParsingOptions = .relaxed
     ) throws -> TinfoilClient {
         // Use provided URL
         let finalEnclaveURL = enclaveURL
 
         // Create the secure URLSession with certificate pinning and extraction
-        let urlSession = SecureURLSessionFactory.createSession(
-            expectedFingerprint: expectedFingerprint,
-            allowUnverifiedConnections: allowUnverifiedConnections
-        )
+        let urlSession = SecureURLSessionFactory.createSession(expectedFingerprint: expectedFingerprint)
 
         // Create SSL delegate for streaming certificate pinning
-        let sslDelegate = StreamingSSLDelegate(
-            expectedFingerprint: expectedFingerprint,
-            allowUnverifiedConnections: allowUnverifiedConnections
-        )
+        let sslDelegate = StreamingSSLDelegate(expectedFingerprint: expectedFingerprint)
 
         // Parse the enclave URL
         let urlComponents = try URLHelpers.parseURL(finalEnclaveURL)

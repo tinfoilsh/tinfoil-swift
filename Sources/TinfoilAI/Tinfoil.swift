@@ -10,7 +10,6 @@ public enum TinfoilAI {
     ///   - enclaveURL: Optional URL of the Tinfoil enclave. If not provided, will fetch from router API
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - parsingOptions: Parsing options for handling different providers.
-    ///   - allowUnverifiedConnections: If true, allows connections even if TLS certificate verification fails
     ///   - onVerification: Optional callback for verification results (both attestation and TLS)
     /// - Returns: An OpenAI client configured for secure communication
     public static func create(
@@ -18,7 +17,6 @@ public enum TinfoilAI {
         enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         parsingOptions: ParsingOptions = .relaxed,
-        allowUnverifiedConnections: Bool = false,
         onVerification: VerificationCallback? = nil
     ) async throws -> OpenAI {
         // Get API key from parameter or environment
@@ -58,8 +56,7 @@ public enum TinfoilAI {
                 apiKey: finalApiKey,
                 enclaveURL: finalEnclaveURL,
                 expectedFingerprint: groundTruth.tlsPublicKey,
-                parsingOptions: parsingOptions,
-                allowUnverifiedConnections: allowUnverifiedConnections
+                parsingOptions: parsingOptions
             )
 
             // Return the underlying OpenAI client directly

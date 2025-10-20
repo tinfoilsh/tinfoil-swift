@@ -16,11 +16,9 @@ public enum CertificateVerificationError: Error {
 /// A URLSession delegate that performs certificate pinning and extraction
 public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
     private let expectedFingerprint: String
-    private let allowUnverifiedConnections: Bool
 
-    public init(expectedFingerprint: String, allowUnverifiedConnections: Bool = false) {
+    public init(expectedFingerprint: String) {
         self.expectedFingerprint = expectedFingerprint
-        self.allowUnverifiedConnections = allowUnverifiedConnections
         super.init()
     }
     
@@ -32,11 +30,7 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         // Ensure this is a server trust challenge
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let serverTrust = challenge.protectionSpace.serverTrust else {
-            if allowUnverifiedConnections {
-                completionHandler(.performDefaultHandling, nil)
-            } else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
-            }
+            completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 
@@ -44,11 +38,7 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         guard let certificateChain = SecTrustCopyCertificateChain(serverTrust),
               CFArrayGetCount(certificateChain) > 0,
               let serverCertificate = CFArrayGetValueAtIndex(certificateChain, 0) else {
-            if allowUnverifiedConnections {
-                completionHandler(.useCredential, URLCredential(trust: serverTrust))
-            } else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
-            }
+            completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 
@@ -57,21 +47,13 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
 
         guard let publicKey = SecCertificateCopyKey(certificate),
               let x963Data  = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
-            if allowUnverifiedConnections {
-                completionHandler(.useCredential, URLCredential(trust: serverTrust))
-            } else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
-            }
+            completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 
         // Build P-384 key from the raw ANSI X9.63 bytes
         guard let p384Public = try? P384.Signing.PublicKey(x963Representation: x963Data) else {
-            if allowUnverifiedConnections {
-                completionHandler(.useCredential, URLCredential(trust: serverTrust))
-            } else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
-            }
+            completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 
@@ -86,11 +68,7 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         if verificationPassed {
             completionHandler(.useCredential, URLCredential(trust: serverTrust))
         } else {
-            if allowUnverifiedConnections {
-                completionHandler(.useCredential, URLCredential(trust: serverTrust))
-            } else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
-            }
+            completionHandler(.cancelAuthenticationChallenge, nil)
         }
     }
 }
@@ -101,16 +79,9 @@ public class SecureURLSessionFactory {
     /// Creates a URLSession with certificate pinning and extraction
     /// - Parameters:
     ///   - expectedFingerprint: The expected certificate fingerprint
-    ///   - allowUnverifiedConnections: If true, allows connections even if certificate verification fails
     /// - Returns: A configured URLSession
-    public static func createSession(
-        expectedFingerprint: String,
-        allowUnverifiedConnections: Bool = false
-    ) -> URLSession {
-        let delegate = CertificatePinningDelegate(
-            expectedFingerprint: expectedFingerprint,
-            allowUnverifiedConnections: allowUnverifiedConnections
-        )
+    public static func createSession(expectedFingerprint: String) -> URLSession {
+        let delegate = CertificatePinningDelegate(expectedFingerprint: expectedFingerprint)
         
         let configuration = URLSessionConfiguration.default
         // Disable caching for security

@@ -108,29 +108,6 @@ let client = try await TinfoilAI.create(
 )
 ```
 
-#### Allowing Unverified Connections
-
-By default, Tinfoil Swift enforces strict security - connections fail if certificate verification fails. You can override this behavior to prioritize availability over security:
-
-```swift
-// Allow connections even if TLS certificate verification fails
-let client = try await TinfoilAI.create(
-    apiKey: "YOUR_API_KEY",
-    allowUnverifiedConnections: true,  // Connections proceed even if verification fails
-    onVerification: { doc in
-        if let doc = doc {
-            print("✅ Attestation verified")
-        }
-    }
-)
-
-// Requests will proceed regardless of TLS verification status
-let response = try await client.chats(query: chatQuery)
-```
-
-**Important Security Warning**: When `allowUnverifiedConnections` is true, requests proceed even if TLS certificate verification fails. This means your requests may be sent to an unverified endpoint. Only use this when availability is more important than security guarantees.
-
-
 
 ## Configuration Options
 
@@ -142,7 +119,6 @@ let client = try await TinfoilAI.create(
     enclaveURL: String? = nil,           // Custom enclave URL (auto-selects router if nil)
     githubRepo: String = "example/repo", // GitHub repo for verification (uses default if not provided)
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
-    allowUnverifiedConnections: Bool = false,   // Allow connections if TLS verification fails
     onVerification: ((VerificationDocument?) -> Void)? = nil // Verification callback
 )
 
