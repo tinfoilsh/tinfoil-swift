@@ -34,25 +34,28 @@ public class TinfoilClient {
     
     public static func create(
         apiKey: String,
-        enclaveURL: String = TinfoilConstants.defaultEnclaveURL,
+        enclaveURL: String,
         expectedFingerprint: String,
         parsingOptions: ParsingOptions = .relaxed,
         nonblockingVerification: NonblockingVerification? = nil
     ) throws -> TinfoilClient {
+        // Use provided URL
+        let finalEnclaveURL = enclaveURL
+
         // Create the secure URLSession with certificate pinning and extraction
         let urlSession = SecureURLSessionFactory.createSession(
             expectedFingerprint: expectedFingerprint,
             nonblockingVerification: nonblockingVerification
         )
-        
+
         // Create SSL delegate for streaming certificate pinning
         let sslDelegate = StreamingSSLDelegate(
             expectedFingerprint: expectedFingerprint,
             nonblockingVerification: nonblockingVerification
         )
-        
+
         // Parse the enclave URL
-        let urlComponents = try URLHelpers.parseURL(enclaveURL)
+        let urlComponents = try URLHelpers.parseURL(finalEnclaveURL)
         
         // Build host string with port if needed
         let hostWithPort = URLHelpers.buildHostWithPort(host: urlComponents.host, port: urlComponents.port)

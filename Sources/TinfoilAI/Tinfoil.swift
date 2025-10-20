@@ -7,14 +7,14 @@ public enum TinfoilAI {
     /// Creates a new secure OpenAI client configured for communication with a Tinfoil enclave
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
-    ///   - enclaveURL: URL of the Tinfoil enclave
+    ///   - enclaveURL: Optional URL of the Tinfoil enclave. If not provided, will fetch from router API
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - nonblockingVerification: Optional callback for non-blocking certificate verification results
     /// - Returns: An OpenAI client configured for secure communication with the Tinfoil enclave
     public static func create(
         apiKey: String? = nil,
-        enclaveURL: String = TinfoilConstants.defaultEnclaveURL,
+        enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         parsingOptions: ParsingOptions = .relaxed,
         nonblockingVerification: NonblockingVerification? = nil
@@ -24,12 +24,21 @@ public enum TinfoilAI {
         guard let finalApiKey = finalApiKey else {
             throw TinfoilError.missingAPIKey
         }
-        
-        
+
+        // Determine the enclave URL - fetch from router if not provided
+        let finalEnclaveURL: String
+        if let providedURL = enclaveURL {
+            finalEnclaveURL = providedURL
+        } else {
+            // Fetch router address from ATC API
+            let routerAddress = try await RouterManager.fetchRouter()
+            finalEnclaveURL = "https://\(routerAddress)"
+        }
+
         // Create SecureClient with enclave URL and GitHub repo
         let verifier = SecureClient(
             githubRepo: githubRepo,
-            enclaveURL: enclaveURL,
+            enclaveURL: finalEnclaveURL,
             callbacks: VerificationCallbacks()
         )
         
@@ -39,7 +48,7 @@ public enum TinfoilAI {
         // create the tinfoil client
         let tinfoilClient = try TinfoilClient.create(
             apiKey: finalApiKey,
-            enclaveURL: enclaveURL,
+            enclaveURL: finalEnclaveURL,
             expectedFingerprint: groundTruth.tlsPublicKey,
             parsingOptions: parsingOptions,
             nonblockingVerification: nonblockingVerification
@@ -55,7 +64,7 @@ public enum TinfoilAI {
 }
 
 /// Errors that can occur when using the Tinfoil client
-public enum TinfoilError: Error {
+public enum TinfoilError: Error, Equatable {
     case missingAPIKey
     case invalidConfiguration(String)
     case connectionError(String)

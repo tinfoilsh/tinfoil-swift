@@ -29,8 +29,8 @@ final class TinfoilAITests: XCTestCase {
     
     func testCertificatePinningSuccess() async throws {
         
-        // Get the correct fingerprint from verification using defaults
-        let secureClient = SecureClient()
+        // Get the correct fingerprint from verification using a valid router URL
+        let secureClient = SecureClient(enclaveURL: "router.inf6.tinfoil.sh")
         
         let verificationResult = try await secureClient.verify()
         let expectedFingerprint = verificationResult.tlsPublicKey
@@ -38,6 +38,7 @@ final class TinfoilAITests: XCTestCase {
         // Create client with correct fingerprint and relaxed parsing
         let tinfoilClient = try TinfoilClient.create(
             apiKey: "tinfoil",
+            enclaveURL: "router.inf6.tinfoil.sh",
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
@@ -64,6 +65,7 @@ final class TinfoilAITests: XCTestCase {
         
         let tinfoilClient = try TinfoilClient.create(
             apiKey: "tinfoil",
+            enclaveURL: "router.inf6.tinfoil.sh",
             expectedFingerprint: wrongFingerprint
         )
         
@@ -128,8 +130,8 @@ final class TinfoilAITests: XCTestCase {
     
     func testStreamingWithCertificatePinning() async throws {
         
-        // Get the correct fingerprint from verification using defaults
-        let secureClient = SecureClient()
+        // Get the correct fingerprint from verification using a valid router URL
+        let secureClient = SecureClient(enclaveURL: "router.inf6.tinfoil.sh")
         
         let verificationResult = try await secureClient.verify()
         let expectedFingerprint = verificationResult.tlsPublicKey
@@ -137,6 +139,7 @@ final class TinfoilAITests: XCTestCase {
         // Create client with correct fingerprint and relaxed parsing
         let tinfoilClient = try TinfoilClient.create(
             apiKey: "tinfoil",
+            enclaveURL: "router.inf6.tinfoil.sh",
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
@@ -169,6 +172,7 @@ final class TinfoilAITests: XCTestCase {
         
         let tinfoilClient = try TinfoilClient.create(
             apiKey: "tinfoil",
+            enclaveURL: "router.inf6.tinfoil.sh",
             expectedFingerprint: wrongFingerprint
         )
         
@@ -299,6 +303,7 @@ final class TinfoilAITests: XCTestCase {
         
         let tinfoilClient = try TinfoilClient.create(
             apiKey: "tinfoil",
+            enclaveURL: "router.inf6.tinfoil.sh",
             expectedFingerprint: wrongFingerprint,
             nonblockingVerification: nonblockingCallback
         )
