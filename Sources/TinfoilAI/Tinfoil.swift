@@ -4,20 +4,20 @@ import OpenAI
 /// Main entry point for the Tinfoil client library
 public enum TinfoilAI {
     
-    /// Creates a new secure OpenAI client configured for communication with a Tinfoil enclave
+    /// Creates a new OpenAI client configured for communication with a Tinfoil enclave
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - enclaveURL: Optional URL of the Tinfoil enclave. If not provided, will fetch from router API
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - parsingOptions: Parsing options for handling different providers.
-    ///   - nonblockingVerification: Optional callback for non-blocking certificate verification results
-    /// - Returns: An OpenAI client configured for secure communication with the Tinfoil enclave
+    ///   - onVerification: Optional callback for verification results (both attestation and TLS)
+    /// - Returns: An OpenAI client configured for secure communication
     public static func create(
         apiKey: String? = nil,
         enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         parsingOptions: ParsingOptions = .relaxed,
-        nonblockingVerification: NonblockingVerification? = nil
+        onVerification: VerificationCallback? = nil
     ) async throws -> OpenAI {
         // Get API key from parameter or environment
         let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
@@ -38,26 +38,37 @@ public enum TinfoilAI {
         // Create SecureClient with enclave URL and GitHub repo
         let verifier = SecureClient(
             githubRepo: githubRepo,
-            enclaveURL: finalEnclaveURL,
-            callbacks: VerificationCallbacks()
+            enclaveURL: finalEnclaveURL
         )
-        
+
         // get the verification result + cert fingerprint
-        let groundTruth = try await verifier.verify()
-        
-        // create the tinfoil client
-        let tinfoilClient = try TinfoilClient.create(
-            apiKey: finalApiKey,
-            enclaveURL: finalEnclaveURL,
-            expectedFingerprint: groundTruth.tlsPublicKey,
-            parsingOptions: parsingOptions,
-            nonblockingVerification: nonblockingVerification
-        )
-        
-        // Return the underlying OpenAI client directly
-        // Note: The URLSession with certificate pinning is held by the OpenAI client
-        // and will be cleaned up when the OpenAI client is deallocated
-        return tinfoilClient.underlyingClient
+        do {
+            let groundTruth = try await verifier.verify()
+
+            // Get the verification document
+            let verificationDocument = verifier.getVerificationDocument()
+
+            // Call the verification callback with the attestation result
+            onVerification?(verificationDocument)
+
+            // create the tinfoil client
+            let tinfoilClient = try TinfoilClient.create(
+                apiKey: finalApiKey,
+                enclaveURL: finalEnclaveURL,
+                expectedFingerprint: groundTruth.tlsPublicKey,
+                parsingOptions: parsingOptions
+            )
+
+            // Return the underlying OpenAI client directly
+            return tinfoilClient.underlyingClient
+        } catch {
+            // Verification failed - call the callback with the failure document (if available)
+            let verificationDocument = verifier.getVerificationDocument()
+            onVerification?(verificationDocument)
+
+            // Re-throw the error
+            throw error
+        }
     }
     
 
