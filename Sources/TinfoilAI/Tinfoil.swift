@@ -38,8 +38,7 @@ public enum TinfoilAI {
         // Create SecureClient with enclave URL and GitHub repo
         let verifier = SecureClient(
             githubRepo: githubRepo,
-            enclaveURL: finalEnclaveURL,
-            callbacks: VerificationCallbacks()
+            enclaveURL: finalEnclaveURL
         )
         
         // get the verification result + cert fingerprint

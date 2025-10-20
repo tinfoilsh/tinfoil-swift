@@ -38,19 +38,6 @@ public struct StepResult {
     }
 }
 
-/// Progress callbacks for verification steps
-public struct VerificationCallbacks {
-    public let onVerificationStart: () -> Void
-    public let onVerificationComplete: (Result<GroundTruth, Error>) -> Void
-    
-    public init(
-        onVerificationStart: @escaping () -> Void = { },
-        onVerificationComplete: @escaping (Result<GroundTruth, Error>) -> Void = { _ in }
-    ) {
-        self.onVerificationStart = onVerificationStart
-        self.onVerificationComplete = onVerificationComplete
-    }
-}
 
 /// Measurement structure matching Go's attestation.Measurement
 public struct Measurement: Codable {
@@ -86,23 +73,19 @@ public struct GroundTruth: Codable {
 public class SecureClient {
     private let githubRepo: String
     private let enclaveURL: String
-    private let callbacks: VerificationCallbacks
     private var groundTruth: GroundTruth?
     private var lastVerificationDocument: VerificationDocument?
-    
+
     /// Initialize a secure client with required configuration
     /// - Parameters:
     ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - enclaveURL: URL for the enclave attestation endpoint
-    ///   - callbacks: Optional callbacks for verification progress
     public init(
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
-        enclaveURL: String,
-        callbacks: VerificationCallbacks = VerificationCallbacks()
+        enclaveURL: String
     ) {
         self.githubRepo = githubRepo
         self.enclaveURL = enclaveURL
-        self.callbacks = callbacks
     }
     
     /// Returns the last verified ground truth
@@ -118,8 +101,6 @@ public class SecureClient {
     /// Verifies the committed code and runtime binaries using remote attestation
     /// - Returns: The ground truth containing all verification results
     public func verify() async throws -> GroundTruth {
-        callbacks.onVerificationStart()
-
         // Initialize verification steps
         var steps = VerificationDocument.Steps()
 
@@ -130,7 +111,6 @@ public class SecureClient {
         } catch {
             let verificationError = VerificationError.verificationFailed("Invalid enclave URL: \(error.localizedDescription)")
             buildFailureDocument(error: verificationError, steps: steps)
-            callbacks.onVerificationComplete(.failure(verificationError))
             throw verificationError
         }
 
@@ -138,7 +118,6 @@ public class SecureClient {
         guard let client = TinfoilVerifier.ClientNewSecureClient(urlComponents.host, githubRepo) else {
             let error = VerificationError.verificationFailed("Failed to create secure client")
             buildFailureDocument(error: error, steps: steps)
-            callbacks.onVerificationComplete(.failure(error))
             throw error
         }
 
@@ -175,7 +154,6 @@ public class SecureClient {
             }
 
             buildFailureDocument(error: verificationError, steps: steps)
-            callbacks.onVerificationComplete(.failure(verificationError))
             throw verificationError
         }
 
@@ -193,7 +171,6 @@ public class SecureClient {
                 otherError: .failed("Failed to retrieve verification result: \(error.localizedDescription)")
             )
             buildFailureDocument(error: verificationError, steps: steps)
-            callbacks.onVerificationComplete(.failure(verificationError))
             throw verificationError
         }
 
@@ -207,7 +184,6 @@ public class SecureClient {
                 otherError: .failed("Failed to process verification result")
             )
             buildFailureDocument(error: verificationError, steps: steps)
-            callbacks.onVerificationComplete(.failure(verificationError))
             throw verificationError
         }
 
@@ -250,7 +226,6 @@ public class SecureClient {
                 steps: steps
             )
 
-            callbacks.onVerificationComplete(.success(groundTruth))
             return groundTruth
         } catch {
             let decodingError = VerificationError.jsonDecodingFailed(error.localizedDescription)
@@ -262,7 +237,6 @@ public class SecureClient {
                 otherError: .failed("Failed to decode verification result: \(error.localizedDescription)")
             )
             buildFailureDocument(error: decodingError, steps: steps)
-            callbacks.onVerificationComplete(.failure(decodingError))
             throw decodingError
         }
     }
