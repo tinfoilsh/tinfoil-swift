@@ -2,9 +2,9 @@ import Foundation
 import CryptoKit
 import Security
 
-/// Callback type for non-blocking verification results
-/// - Parameter verificationPassed: true if certificate pinning verification passed, false otherwise
-public typealias NonblockingVerification = @Sendable (Bool) -> Void
+/// Callback type for verification events
+/// - Parameter verificationDocument: The verification document from attestation
+public typealias VerificationCallback = @Sendable (VerificationDocument?) -> Void
 
 /// Custom error type for certificate verification failures
 public enum CertificateVerificationError: Error {
@@ -16,11 +16,11 @@ public enum CertificateVerificationError: Error {
 /// A URLSession delegate that performs certificate pinning and extraction
 public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
     private let expectedFingerprint: String
-    private let nonblockingVerification: NonblockingVerification?
-    
-    public init(expectedFingerprint: String, nonblockingVerification: NonblockingVerification? = nil) {
+    private let allowUnverifiedConnections: Bool
+
+    public init(expectedFingerprint: String, allowUnverifiedConnections: Bool = false) {
         self.expectedFingerprint = expectedFingerprint
-        self.nonblockingVerification = nonblockingVerification
+        self.allowUnverifiedConnections = allowUnverifiedConnections
         super.init()
     }
     
@@ -32,8 +32,11 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         // Ensure this is a server trust challenge
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let serverTrust = challenge.protectionSpace.serverTrust else {
-            nonblockingVerification?(false)
-            completionHandler(.cancelAuthenticationChallenge, nil)
+            if allowUnverifiedConnections {
+                completionHandler(.performDefaultHandling, nil)
+            } else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
             return
         }
 
@@ -41,25 +44,34 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         guard let certificateChain = SecTrustCopyCertificateChain(serverTrust),
               CFArrayGetCount(certificateChain) > 0,
               let serverCertificate = CFArrayGetValueAtIndex(certificateChain, 0) else {
-            nonblockingVerification?(false)
-            completionHandler(.cancelAuthenticationChallenge, nil)
+            if allowUnverifiedConnections {
+                completionHandler(.useCredential, URLCredential(trust: serverTrust))
+            } else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
             return
         }
-        
+
         let certificate = unsafeBitCast(serverCertificate, to: SecCertificate.self)
 
-        
+
         guard let publicKey = SecCertificateCopyKey(certificate),
               let x963Data  = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
-            nonblockingVerification?(false)
-            completionHandler(.cancelAuthenticationChallenge, nil)
+            if allowUnverifiedConnections {
+                completionHandler(.useCredential, URLCredential(trust: serverTrust))
+            } else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
             return
         }
 
         // Build P-384 key from the raw ANSI X9.63 bytes
         guard let p384Public = try? P384.Signing.PublicKey(x963Representation: x963Data) else {
-            nonblockingVerification?(false)
-            completionHandler(.cancelAuthenticationChallenge, nil)
+            if allowUnverifiedConnections {
+                completionHandler(.useCredential, URLCredential(trust: serverTrust))
+            } else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
             return
         }
 
@@ -70,18 +82,13 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
                                                .joined()
 
         let verificationPassed = serverPublicKeyFingerprint == expectedFingerprint
-        
-        // Call the non-blocking verification callback if provided
-        nonblockingVerification?(verificationPassed)
-        
+
         if verificationPassed {
             completionHandler(.useCredential, URLCredential(trust: serverTrust))
         } else {
-            // If non-blocking verification is enabled, proceed with the connection even on mismatch
-            if nonblockingVerification != nil {
+            if allowUnverifiedConnections {
                 completionHandler(.useCredential, URLCredential(trust: serverTrust))
             } else {
-                // Default behavior: cancel on mismatch
                 completionHandler(.cancelAuthenticationChallenge, nil)
             }
         }
@@ -94,15 +101,15 @@ public class SecureURLSessionFactory {
     /// Creates a URLSession with certificate pinning and extraction
     /// - Parameters:
     ///   - expectedFingerprint: The expected certificate fingerprint
-    ///   - nonblockingVerification: Optional callback for non-blocking verification results
+    ///   - allowUnverifiedConnections: If true, allows connections even if certificate verification fails
     /// - Returns: A configured URLSession
     public static func createSession(
-        expectedFingerprint: String, 
-        nonblockingVerification: NonblockingVerification? = nil
+        expectedFingerprint: String,
+        allowUnverifiedConnections: Bool = false
     ) -> URLSession {
         let delegate = CertificatePinningDelegate(
             expectedFingerprint: expectedFingerprint,
-            nonblockingVerification: nonblockingVerification
+            allowUnverifiedConnections: allowUnverifiedConnections
         )
         
         let configuration = URLSessionConfiguration.default

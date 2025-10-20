@@ -4,18 +4,18 @@ import OpenAI
 /// SSL delegate for streaming certificate pinning
 final class StreamingSSLDelegate: SSLDelegateProtocol {
     private let expectedFingerprint: String
-    private let nonblockingVerification: NonblockingVerification?
-    
-    init(expectedFingerprint: String, nonblockingVerification: NonblockingVerification? = nil) {
+    private let allowUnverifiedConnections: Bool
+
+    init(expectedFingerprint: String, allowUnverifiedConnections: Bool = false) {
         self.expectedFingerprint = expectedFingerprint
-        self.nonblockingVerification = nonblockingVerification
+        self.allowUnverifiedConnections = allowUnverifiedConnections
     }
-    
+
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         // Reuse the same certificate validation logic as CertificatePinningDelegate
         let delegate = CertificatePinningDelegate(
-            expectedFingerprint: expectedFingerprint, 
-            nonblockingVerification: nonblockingVerification
+            expectedFingerprint: expectedFingerprint,
+            allowUnverifiedConnections: allowUnverifiedConnections
         )
         delegate.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
     }
@@ -37,7 +37,7 @@ public class TinfoilClient {
         enclaveURL: String,
         expectedFingerprint: String,
         parsingOptions: ParsingOptions = .relaxed,
-        nonblockingVerification: NonblockingVerification? = nil
+        allowUnverifiedConnections: Bool = false
     ) throws -> TinfoilClient {
         // Use provided URL
         let finalEnclaveURL = enclaveURL
@@ -45,13 +45,13 @@ public class TinfoilClient {
         // Create the secure URLSession with certificate pinning and extraction
         let urlSession = SecureURLSessionFactory.createSession(
             expectedFingerprint: expectedFingerprint,
-            nonblockingVerification: nonblockingVerification
+            allowUnverifiedConnections: allowUnverifiedConnections
         )
 
         // Create SSL delegate for streaming certificate pinning
         let sslDelegate = StreamingSSLDelegate(
             expectedFingerprint: expectedFingerprint,
-            nonblockingVerification: nonblockingVerification
+            allowUnverifiedConnections: allowUnverifiedConnections
         )
 
         // Parse the enclave URL
