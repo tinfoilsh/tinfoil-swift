@@ -44,25 +44,34 @@ public enum TinfoilAI {
         )
 
         // get the verification result + cert fingerprint
-        let groundTruth = try await verifier.verify()
+        do {
+            let groundTruth = try await verifier.verify()
 
-        // Get the verification document
-        let verificationDocument = verifier.getVerificationDocument()
+            // Get the verification document
+            let verificationDocument = verifier.getVerificationDocument()
 
-        // Call the verification callback with the attestation result
-        onVerification?(verificationDocument)
+            // Call the verification callback with the attestation result
+            onVerification?(verificationDocument)
 
-        // create the tinfoil client
-        let tinfoilClient = try TinfoilClient.create(
-            apiKey: finalApiKey,
-            enclaveURL: finalEnclaveURL,
-            expectedFingerprint: groundTruth.tlsPublicKey,
-            parsingOptions: parsingOptions,
-            allowUnverifiedConnections: allowUnverifiedConnections
-        )
+            // create the tinfoil client
+            let tinfoilClient = try TinfoilClient.create(
+                apiKey: finalApiKey,
+                enclaveURL: finalEnclaveURL,
+                expectedFingerprint: groundTruth.tlsPublicKey,
+                parsingOptions: parsingOptions,
+                allowUnverifiedConnections: allowUnverifiedConnections
+            )
 
-        // Return the underlying OpenAI client directly
-        return tinfoilClient.underlyingClient
+            // Return the underlying OpenAI client directly
+            return tinfoilClient.underlyingClient
+        } catch {
+            // Verification failed - call the callback with the failure document (if available)
+            let verificationDocument = verifier.getVerificationDocument()
+            onVerification?(verificationDocument)
+
+            // Re-throw the error
+            throw error
+        }
     }
     
 
