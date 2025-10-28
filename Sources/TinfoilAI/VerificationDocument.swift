@@ -57,6 +57,19 @@ public struct AttestationResponse: Codable {
     }
 }
 
+/// Hardware measurement for TDX platforms
+public struct HardwareMeasurement: Codable {
+    public let id: String
+    public let mrtd: String
+    public let rtmr0: String
+
+    public init(id: String, mrtd: String, rtmr0: String) {
+        self.id = id
+        self.mrtd = mrtd
+        self.rtmr0 = rtmr0
+    }
+}
+
 /// Complete verification document containing all verification details
 public struct VerificationDocument: Codable {
     public let configRepo: String
@@ -64,6 +77,12 @@ public struct VerificationDocument: Codable {
     public let releaseDigest: String
     public let codeMeasurement: AttestationMeasurement
     public let enclaveMeasurement: AttestationResponse
+    public let tlsPublicKey: String
+    public let hpkePublicKey: String
+    public let hardwareMeasurement: HardwareMeasurement?
+    public let codeFingerprint: String
+    public let enclaveFingerprint: String
+    public let selectedRouterEndpoint: String
     public let securityVerified: Bool
 
     /// Detailed step-by-step verification status
@@ -103,6 +122,12 @@ public struct VerificationDocument: Codable {
         releaseDigest: String,
         codeMeasurement: AttestationMeasurement,
         enclaveMeasurement: AttestationResponse,
+        tlsPublicKey: String,
+        hpkePublicKey: String,
+        hardwareMeasurement: HardwareMeasurement?,
+        codeFingerprint: String,
+        enclaveFingerprint: String,
+        selectedRouterEndpoint: String,
         securityVerified: Bool,
         steps: Steps
     ) {
@@ -111,6 +136,12 @@ public struct VerificationDocument: Codable {
         self.releaseDigest = releaseDigest
         self.codeMeasurement = codeMeasurement
         self.enclaveMeasurement = enclaveMeasurement
+        self.tlsPublicKey = tlsPublicKey
+        self.hpkePublicKey = hpkePublicKey
+        self.hardwareMeasurement = hardwareMeasurement
+        self.codeFingerprint = codeFingerprint
+        self.enclaveFingerprint = enclaveFingerprint
+        self.selectedRouterEndpoint = selectedRouterEndpoint
         self.securityVerified = securityVerified
         self.steps = steps
     }

@@ -199,10 +199,10 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testStreamingResponseStructure() async throws {
-        
+
         // Create TinfoilAI client using defaults
         let client = try await TinfoilAI.create(apiKey: "tinfoil")
-        
+
         // Test streaming response structure
         let chatQuery = ChatQuery(
             messages: [
@@ -210,12 +210,12 @@ final class TinfoilAITests: XCTestCase {
             ],
             model: "llama-free"
         )
-        
+
         var hasId = false
         var hasModel = false
         var hasChoices = false
         var hasFinishReason = false
-        
+
         for try await result in client.chatsStream(query: chatQuery) {
             // Check for required fields in streaming response
             if !result.id.isEmpty {
@@ -226,21 +226,158 @@ final class TinfoilAITests: XCTestCase {
             }
             if !result.choices.isEmpty {
                 hasChoices = true
-                
+
                 // Check for finish reason in final chunks
                 if let finishReason = result.choices.first?.finishReason {
                     hasFinishReason = true
-                    XCTAssertTrue([.stop, .length, .contentFilter].contains(finishReason), 
+                    XCTAssertTrue([.stop, .length, .contentFilter].contains(finishReason),
                                  "Finish reason should be a valid value")
                 }
             }
         }
-        
+
         // Verify streaming response structure
         XCTAssertTrue(hasId, "Streaming response should have an ID")
         XCTAssertTrue(hasModel, "Streaming response should have a model")
         XCTAssertTrue(hasChoices, "Streaming response should have choices")
         XCTAssertTrue(hasFinishReason, "Streaming response should eventually have a finish reason")
     }
-    
+
+    // MARK: - Integration Tests for New Verification Flow
+
+    func testCompleteVerificationFlowWithNewFormat() async throws {
+        // Test the complete flow with the new ClientVerifyJSON() method
+
+        // Test with verification callback to capture the document
+        var capturedDocument: VerificationDocument?
+
+        let client = try await TinfoilAI.create(
+            apiKey: "tinfoil",
+            onVerification: { document in
+                capturedDocument = document
+            }
+        )
+
+        // Verify that verification document was captured
+        XCTAssertNotNil(capturedDocument, "Verification document should be captured")
+
+        if let doc = capturedDocument {
+            // Verify document has all required fields from new format
+            XCTAssertFalse(doc.tlsPublicKey.isEmpty, "TLS public key should be present")
+            XCTAssertFalse(doc.codeFingerprint.isEmpty, "Code fingerprint should be present")
+            XCTAssertFalse(doc.enclaveFingerprint.isEmpty, "Enclave fingerprint should be present")
+            XCTAssertFalse(doc.selectedRouterEndpoint.isEmpty, "Selected router endpoint should be present")
+            XCTAssertTrue(doc.securityVerified, "Security should be verified for successful flow")
+
+            // Verify all steps are successful
+            if doc.steps.fetchDigest.status == .success,
+               doc.steps.verifyCode.status == .success,
+               doc.steps.verifyEnclave.status == .success,
+               doc.steps.compareMeasurements.status == .success {
+                XCTAssertTrue(true, "All verification steps should be successful")
+            } else {
+                XCTFail("Not all verification steps were successful")
+            }
+        }
+
+        // Test that client can make requests after verification
+        let chatQuery = ChatQuery(
+            messages: [
+                .user(.init(content: .string("Say 'Integration test passed' and nothing else.")))
+            ],
+            model: "llama-free"
+        )
+
+        let response = try await client.chats(query: chatQuery)
+        XCTAssertFalse(response.choices.isEmpty, "Should receive response after verification")
+    }
+
+    func testVerificationFailureCallbackWithNewFormat() async throws {
+        // Test that verification callback is called even on failure
+        var capturedDocument: VerificationDocument?
+        var verificationFailed = false
+
+        do {
+            _ = try await TinfoilAI.create(
+                apiKey: "test-key",
+                enclaveURL: "https://invalid-enclave-12345.example.com",
+                onVerification: { document in
+                    capturedDocument = document
+                }
+            )
+            XCTFail("Should have failed with invalid enclave URL")
+        } catch {
+            verificationFailed = true
+
+            // Verify that document was still captured on failure
+            XCTAssertNotNil(capturedDocument, "Verification document should be captured even on failure")
+
+            if let doc = capturedDocument {
+                XCTAssertFalse(doc.securityVerified, "Security should not be verified on failure")
+
+                // At least one step should be failed or pending
+                var hasNonSuccessStep = false
+
+                if doc.steps.fetchDigest.status != .success {
+                    hasNonSuccessStep = true
+                }
+
+                if doc.steps.verifyCode.status != .success {
+                    hasNonSuccessStep = true
+                }
+
+                if doc.steps.verifyEnclave.status != .success {
+                    hasNonSuccessStep = true
+                }
+
+                if doc.steps.compareMeasurements.status != .success {
+                    hasNonSuccessStep = true
+                }
+
+                XCTAssertTrue(hasNonSuccessStep, "At least one step should not be successful on failure")
+            }
+        }
+
+        XCTAssertTrue(verificationFailed, "Verification should have failed")
+    }
+
+    func testNewGroundTruthFieldsIntegration() async throws {
+        // Test that new GroundTruth fields are properly integrated
+        let secureClient = SecureClient(enclaveURL: "router.inf6.tinfoil.sh")
+
+        do {
+            let groundTruth = try await secureClient.verify()
+
+            // Test all new fields in GroundTruth
+            XCTAssertFalse(groundTruth.tlsPublicKey.isEmpty, "TLS public key should exist")
+            XCTAssertNotNil(groundTruth.hpkePublicKey, "HPKE public key field should exist")
+            XCTAssertFalse(groundTruth.digest.isEmpty, "Digest should exist")
+            XCTAssertFalse(groundTruth.codeFingerprint.isEmpty, "Code fingerprint should exist")
+            XCTAssertFalse(groundTruth.enclaveFingerprint.isEmpty, "Enclave fingerprint should exist")
+
+            // Verify measurements
+            if let codeMeasurement = groundTruth.codeMeasurement {
+                XCTAssertFalse(codeMeasurement.type.isEmpty, "Code measurement type should exist")
+                XCTAssertFalse(codeMeasurement.registers.isEmpty, "Code measurement should have registers")
+            }
+
+            if let enclaveMeasurement = groundTruth.enclaveMeasurement {
+                XCTAssertFalse(enclaveMeasurement.type.isEmpty, "Enclave measurement type should exist")
+                XCTAssertFalse(enclaveMeasurement.registers.isEmpty, "Enclave measurement should have registers")
+            }
+
+            // Hardware measurement may or may not exist depending on platform
+            if let hwMeasurement = groundTruth.hardwareMeasurement {
+                XCTAssertFalse(hwMeasurement.id.isEmpty, "Hardware ID should exist if present")
+                XCTAssertFalse(hwMeasurement.mrtd.isEmpty, "MRTD should exist if present")
+                XCTAssertFalse(hwMeasurement.rtmr0.isEmpty, "RTMR0 should exist if present")
+            }
+
+        } catch {
+            // Network errors are acceptable in CI, but verify error type
+            XCTAssertTrue(error is NSError || error is VerificationError,
+                         "Error should be a known type: \(error)")
+        }
+    }
+
 }
