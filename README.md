@@ -3,6 +3,7 @@
 [![Swift](https://img.shields.io/badge/Swift-5.9-orange.svg)](https://swift.org)
 [![Platforms](https://img.shields.io/badge/Platforms-iOS%20|%20macOS-blue.svg)](https://developer.apple.com)
 [![Tests](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml)
+[![Docs](https://img.shields.io/badge/Docs-Swift%20SDK-blue.svg)](https://docs.tinfoil.sh/sdk/swift-sdk)
 
 A secure Swift SDK for communicating with AI models running in Tinfoil's confidential computing enclaves. This SDK wraps the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with additional security features including automatic enclave verification, certificate pinning, and attestation validation.
 
@@ -118,21 +119,25 @@ let client = try await TinfoilAI.create(
 let client = try await TinfoilAI.create(
     apiKey: String? = nil,              // API key (uses TINFOIL_API_KEY env var if nil)
     enclaveURL: String? = nil,           // Custom enclave URL (auto-selects router if nil)
-    githubRepo: String = "example/repo", // GitHub repo for verification (uses default if not provided)
+    githubRepo: String = "org/repo", // GitHub repo for verification (default: "tinfoilsh/confidential-model-router")
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
     onVerification: ((VerificationDocument?) -> Void)? = nil // Verification callback
 )
 
-// Returns: OpenAI  // The configured OpenAI client
+// Returns: OpenAI - The configured OpenAI client
 ```
 
 ## API Documentation
 
-This library is a secure wrapper around the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) that can be used with Tinfoil. The `TinfoilAI.create()` method returns an OpenAI client configured for secure communication with Tinfoil enclaves. See the [MacPaw OpenAI SDK documentation](https://github.com/MacPaw/OpenAI) for complete API usage and documentation.
+This library is a secure wrapper around the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) that can be used with Tinfoil. The `TinfoilAI.create()` method returns an OpenAI client configured for secure communication with Tinfoil enclaves.
+
+For complete documentation, see:
+- [Swift SDK Documentation](https://docs.tinfoil.sh/sdk/swift-sdk)
+- [MacPaw OpenAI SDK Documentation](https://github.com/MacPaw/OpenAI)
 
 ## Requirements
 
-- iOS 15.0+ / macOS 12.0+
+- iOS 17.0+ / macOS 12.0+
 - Swift 5.9+
 - Xcode 15.0+
 
