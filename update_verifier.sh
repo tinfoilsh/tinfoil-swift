@@ -14,7 +14,6 @@ echo "Verifier framework $LATEST_TAG checksum: $CHECKSUM"
 
 sed -i '.bak' -E "s|(url: \"https://github.com/tinfoilsh/verifier/releases/download/)v[0-9]+\.[0-9]+\.[0-9]+(/TinfoilVerifier.xcframework.zip\")|\1$LATEST_TAG\2|" Package.swift
 sed -i '.bak' -E "s/(checksum: \")[a-f0-9]+(\")/\1$CHECKSUM\2/" Package.swift
-sed -i '.bak' -E "s|\.package\(url: \"https://github\.com/tinfoilsh/verifier-swift\", exact: \"[0-9]+\.[0-9]+\.[0-9]+\"|\.package\(url: \"https://github\.com/tinfoilsh/verifier-swift\", exact: \"${LATEST_TAG#v}\"|" README.md
 
 git add .
 git commit -m "chore: bump verifier "
