@@ -84,11 +84,9 @@ for try await chunk in client.chatsStream(query: chatQuery) {
 }
 ```
 
-### Verification and Security
+### Security Architecture
 
-Tinfoil Swift performs two types of verification:
-1. **Attestation verification**: Validates the enclave is running genuine Tinfoil code
-2. **TLS certificate verification**: Ensures you're connecting to the verified enclave
+Tinfoil Swift combines **remote attestation** and **certificate pinning** to ensure your data only reaches verified enclave code. During setup, the SDK requests an attestation report that cryptographically proves the exact code running in the enclave and includes the enclave's TLS public key fingerprint. On every API request, the SDK validates the server's TLS certificate matches this attested fingerprint. This creates a cryptographic chain from GitHub source code → attestation → TLS connection, preventing man-in-the-middle attacks even if DNS or router selection is compromised.
 
 #### Verification Callback
 
@@ -141,8 +139,6 @@ For complete documentation, see:
 - iOS 17.0+ / macOS 12.0+
 - Swift 5.9+
 - Xcode 15.0+
-
-## Security
 
 ## Reporting Vulnerabilities
 
