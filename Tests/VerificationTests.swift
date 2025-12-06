@@ -7,10 +7,12 @@ final class VerificationTests: XCTestCase {
     // MARK: - New Verification Format Tests
 
     func testNewVerificationFormatFields() async throws {
-        // Test that new fields are properly populated when verification succeeds
+        let routerAddress = try await RouterManager.fetchRouter()
+        let enclaveURL = "https://\(routerAddress)"
+
         let secureClient = SecureClient(
             githubRepo: TinfoilConstants.defaultGithubRepo,
-            enclaveURL: "router.inf6.tinfoil.sh"
+            enclaveURL: enclaveURL
         )
 
         do {
@@ -92,10 +94,12 @@ final class VerificationTests: XCTestCase {
             }
         }
 
-        // Test 3: Invalid GitHub repo that should fail at verifyCode
+        let routerAddress = try await RouterManager.fetchRouter()
+        let enclaveURL = "https://\(routerAddress)"
+
         let invalidRepoClient = SecureClient(
             githubRepo: "invalid-org/non-existent-repo",
-            enclaveURL: "router.inf6.tinfoil.sh"
+            enclaveURL: enclaveURL
         )
 
         do {

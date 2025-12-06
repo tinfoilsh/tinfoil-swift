@@ -28,17 +28,18 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testCertificatePinningSuccess() async throws {
-        
-        // Get the correct fingerprint from verification using a valid router URL
-        let secureClient = SecureClient(enclaveURL: "router.inf6.tinfoil.sh")
-        
+
+        let routerAddress = try await RouterManager.fetchRouter()
+        let enclaveURL = "https://\(routerAddress)"
+
+        let secureClient = SecureClient(enclaveURL: enclaveURL)
+
         let verificationResult = try await secureClient.verify()
         let expectedFingerprint = verificationResult.tlsPublicKey
-        
-        // Create client with correct fingerprint and relaxed parsing
+
         let tinfoilClient = try TinfoilClient.create(
             apiKey: "tinfoil",
-            enclaveURL: "router.inf6.tinfoil.sh",
+            enclaveURL: enclaveURL,
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
@@ -59,13 +60,15 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testCertificatePinningFailure() async throws {
-        
-        // Create client with wrong fingerprint
+
+        let routerAddress = try await RouterManager.fetchRouter()
+        let enclaveURL = "https://\(routerAddress)"
+
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
-        
+
         let tinfoilClient = try TinfoilClient.create(
             apiKey: "tinfoil",
-            enclaveURL: "router.inf6.tinfoil.sh",
+            enclaveURL: enclaveURL,
             expectedFingerprint: wrongFingerprint
         )
         
@@ -129,17 +132,18 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testStreamingWithCertificatePinning() async throws {
-        
-        // Get the correct fingerprint from verification using a valid router URL
-        let secureClient = SecureClient(enclaveURL: "router.inf6.tinfoil.sh")
-        
+
+        let routerAddress = try await RouterManager.fetchRouter()
+        let enclaveURL = "https://\(routerAddress)"
+
+        let secureClient = SecureClient(enclaveURL: enclaveURL)
+
         let verificationResult = try await secureClient.verify()
         let expectedFingerprint = verificationResult.tlsPublicKey
-        
-        // Create client with correct fingerprint and relaxed parsing
+
         let tinfoilClient = try TinfoilClient.create(
             apiKey: "tinfoil",
-            enclaveURL: "router.inf6.tinfoil.sh",
+            enclaveURL: enclaveURL,
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
@@ -166,13 +170,15 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testStreamingFailsWithWrongCertificate() async throws {
-        
-        // Create client with wrong fingerprint
+
+        let routerAddress = try await RouterManager.fetchRouter()
+        let enclaveURL = "https://\(routerAddress)"
+
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
-        
+
         let tinfoilClient = try TinfoilClient.create(
             apiKey: "tinfoil",
-            enclaveURL: "router.inf6.tinfoil.sh",
+            enclaveURL: enclaveURL,
             expectedFingerprint: wrongFingerprint
         )
         
@@ -342,8 +348,10 @@ final class TinfoilAITests: XCTestCase {
     }
 
     func testNewGroundTruthFieldsIntegration() async throws {
-        // Test that new GroundTruth fields are properly integrated
-        let secureClient = SecureClient(enclaveURL: "router.inf6.tinfoil.sh")
+        let routerAddress = try await RouterManager.fetchRouter()
+        let enclaveURL = "https://\(routerAddress)"
+
+        let secureClient = SecureClient(enclaveURL: enclaveURL)
 
         do {
             let groundTruth = try await secureClient.verify()
