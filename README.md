@@ -5,7 +5,7 @@
 [![Tests](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/badge/Docs-Swift%20SDK-blue.svg)](https://docs.tinfoil.sh/sdk/swift-sdk)
 
-A secure Swift SDK for communicating with AI models running in Tinfoil's confidential computing enclaves. This SDK wraps the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with additional security features including automatic enclave verification, certificate pinning, and attestation validation.
+A secure Swift SDK for communicating with AI models running in Tinfoil's confidential computing enclaves. This SDK configures the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with additional security features including automatic enclave attestation verification and certificate pinning for direct-to-enclave encrypted communication.
 
 ## Installation
 
@@ -59,8 +59,7 @@ print(response.choices.first?.message.content ?? "No response")
 - **Automatic Router Selection**: Dynamically selects from available Tinfoil routers
 - **Enclave Verification**: Verifies code integrity via GitHub and Sigstore
 - **Remote Attestation**: Validates the enclave runtime environment (AMD SEV-SNP / Intel TDX)
-- **Certificate Pinning**: Prevents man-in-the-middle attacks
-- **Streaming Support**: Real-time streaming responses
+- **Certificate Pinning**: Ensures direct-to-enclave encrypted communication
 - **OpenAI Compatible**: Drop-in replacement for OpenAI SDK
 
 ## Advanced Features
@@ -99,8 +98,10 @@ You can receive the verification document through an optional callback:
 let verificationCallback: VerificationCallback = { verificationDocument in
     if let doc = verificationDocument {
         print("✅ Attestation verification successful")
-        print("Code measurement: \(doc.codeMeasurement.registers.first ?? "")")
+        print("Code fingerprint: \(doc.codeFingerprint)")
+        print("Enclave fingerprint: \(doc.enclaveFingerprint)")
         print("Security verified: \(doc.securityVerified)")
+        print("All steps succeeded: \(doc.allStepsSucceeded)")
     }
 }
 
@@ -119,9 +120,9 @@ let client = try await TinfoilAI.create(
 let client = try await TinfoilAI.create(
     apiKey: String? = nil,              // API key (uses TINFOIL_API_KEY env var if nil)
     enclaveURL: String? = nil,           // Custom enclave URL (auto-selects router if nil)
-    githubRepo: String = "org/repo", // GitHub repo for verification (default: "tinfoilsh/confidential-model-router")
+    githubRepo: String = "tinfoilsh/confidential-model-router", // GitHub repo for verification
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
-    onVerification: ((VerificationDocument?) -> Void)? = nil // Verification callback
+    onVerification: VerificationCallback? = nil // Verification callback
 )
 
 // Returns: OpenAI - The configured OpenAI client
@@ -143,10 +144,12 @@ For complete documentation, see:
 
 ## Security
 
-### Reporting Vulnerabilities
+## Reporting Vulnerabilities
 
-Please report security vulnerabilities to [security@tinfoil.sh](mailto:security@tinfoil.sh) or by opening an issue on GitHub.
+Please report security vulnerabilities by either:
 
-## License
+- Emailing [security@tinfoil.sh](mailto:security@tinfoil.sh)
 
-GNU Affero General Public License (AGPL) v3.0
+- Opening an issue on GitHub on this repository
+
+We aim to respond to (legitimate) security reports within 24 hours.
