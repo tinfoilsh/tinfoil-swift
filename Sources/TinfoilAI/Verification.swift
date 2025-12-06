@@ -137,8 +137,7 @@ public class SecureClient {
         let jsonString: String
         do {
             var error: NSError?
-            // Pass nil for sigstoreTrustedRootJSON parameter (uses default trusted root)
-            jsonString = TinfoilVerifier.ClientVerifyJSON(nil, urlComponents.host, githubRepo, &error)
+            jsonString = TinfoilVerifier.ClientVerifyJSON(urlComponents.host, githubRepo, nil, &error)
 
             if let error = error {
                 throw error
