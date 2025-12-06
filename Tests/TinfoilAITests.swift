@@ -3,21 +3,29 @@ import OpenAI
 @testable import TinfoilAI
 
 final class TinfoilAITests: XCTestCase {
-    
+
     // MARK: - Test Configuration
-        
+
+    private func getAPIKey() throws -> String? {
+        return ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
+    }
+
+    private func skipIfNoAPIKey() throws {
+        guard try getAPIKey() != nil else {
+            throw XCTSkip("Skipping test: TINFOIL_API_KEY environment variable not set")
+        }
+    }
 
     func testClientSucceedsWhenVerificationSucceeds() async throws {
-        
-        // Create client using defaults - this will perform verification internally
-        let client = try await TinfoilAI.create(apiKey: "tinfoil")
-        
-        // Test that client can make a successful request
+        try skipIfNoAPIKey()
+
+        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
+
         let chatQuery = ChatQuery(
             messages: [
                 .user(.init(content: .string("Say 'Hello' and nothing else.")))
             ],
-            model: "llama-free"
+            model: "gpt-oss-120b"
         )
         
         let response = try await client.chats(query: chatQuery)
@@ -28,6 +36,7 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testCertificatePinningSuccess() async throws {
+        try skipIfNoAPIKey()
 
         let routerAddress = try await RouterManager.fetchRouter()
         let enclaveURL = "https://\(routerAddress)"
@@ -38,18 +47,17 @@ final class TinfoilAITests: XCTestCase {
         let expectedFingerprint = verificationResult.tlsPublicKey
 
         let tinfoilClient = try TinfoilClient.create(
-            apiKey: "tinfoil",
+            apiKey: try getAPIKey()!,
             enclaveURL: enclaveURL,
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
-        
-        // Test that request succeeds
+
         let chatQuery = ChatQuery(
             messages: [
                 .user(.init(content: .string("Say 'Success' and nothing else.")))
             ],
-            model: "llama-free"
+            model: "gpt-oss-120b"
         )
         
         let response = try await tinfoilClient.underlyingClient.chats(query: chatQuery)
@@ -60,6 +68,7 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testCertificatePinningFailure() async throws {
+        try skipIfNoAPIKey()
 
         let routerAddress = try await RouterManager.fetchRouter()
         let enclaveURL = "https://\(routerAddress)"
@@ -67,17 +76,16 @@ final class TinfoilAITests: XCTestCase {
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
 
         let tinfoilClient = try TinfoilClient.create(
-            apiKey: "tinfoil",
+            apiKey: try getAPIKey()!,
             enclaveURL: enclaveURL,
             expectedFingerprint: wrongFingerprint
         )
-        
-        // Test that request fails
+
         let chatQuery = ChatQuery(
             messages: [
                 .user(.init(content: .string("This should fail")))
             ],
-            model: "llama-free"
+            model: "gpt-oss-120b"
         )
         
         do {
@@ -95,16 +103,15 @@ final class TinfoilAITests: XCTestCase {
     // MARK: - Streaming Tests
     
     func testStreamingChatCompletion() async throws {
+        try skipIfNoAPIKey()
+
+        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
         
-        // Create client using defaults - this will perform verification internally
-        let client = try await TinfoilAI.create(apiKey: "tinfoil")
-        
-        // Test streaming chat completion
         let chatQuery = ChatQuery(
             messages: [
                 .user(.init(content: .string("Count from 1 to 5, one number per response.")))
             ],
-            model: "llama-free"
+            model: "gpt-oss-120b"
         )
         
         var receivedChunks: [ChatStreamResult] = []
@@ -132,6 +139,7 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testStreamingWithCertificatePinning() async throws {
+        try skipIfNoAPIKey()
 
         let routerAddress = try await RouterManager.fetchRouter()
         let enclaveURL = "https://\(routerAddress)"
@@ -142,18 +150,17 @@ final class TinfoilAITests: XCTestCase {
         let expectedFingerprint = verificationResult.tlsPublicKey
 
         let tinfoilClient = try TinfoilClient.create(
-            apiKey: "tinfoil",
+            apiKey: try getAPIKey()!,
             enclaveURL: enclaveURL,
             expectedFingerprint: expectedFingerprint,
             parsingOptions: .relaxed
         )
-        
-        // Test streaming with certificate pinning
+
         let chatQuery = ChatQuery(
             messages: [
                 .user(.init(content: .string("Say 'Streaming works!' and nothing else.")))
             ],
-            model: "llama-free"
+            model: "gpt-oss-120b"
         )
         
         var receivedChunks: [ChatStreamResult] = []
@@ -170,6 +177,7 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testStreamingFailsWithWrongCertificate() async throws {
+        try skipIfNoAPIKey()
 
         let routerAddress = try await RouterManager.fetchRouter()
         let enclaveURL = "https://\(routerAddress)"
@@ -177,17 +185,16 @@ final class TinfoilAITests: XCTestCase {
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
 
         let tinfoilClient = try TinfoilClient.create(
-            apiKey: "tinfoil",
+            apiKey: try getAPIKey()!,
             enclaveURL: enclaveURL,
             expectedFingerprint: wrongFingerprint
         )
-        
-        // Test that streaming fails with wrong certificate
+
         let chatQuery = ChatQuery(
             messages: [
                 .user(.init(content: .string("This streaming should fail")))
             ],
-            model: "llama-free"
+            model: "gpt-oss-120b"
         )
         
         do {
@@ -205,16 +212,15 @@ final class TinfoilAITests: XCTestCase {
     }
     
     func testStreamingResponseStructure() async throws {
+        try skipIfNoAPIKey()
 
-        // Create TinfoilAI client using defaults
-        let client = try await TinfoilAI.create(apiKey: "tinfoil")
+        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
 
-        // Test streaming response structure
         let chatQuery = ChatQuery(
             messages: [
                 .user(.init(content: .string("Say 'Test' exactly once.")))
             ],
-            model: "llama-free"
+            model: "gpt-oss-120b"
         )
 
         var hasId = false
@@ -252,13 +258,12 @@ final class TinfoilAITests: XCTestCase {
     // MARK: - Integration Tests for New Verification Flow
 
     func testCompleteVerificationFlowWithNewFormat() async throws {
-        // Test the complete flow with the new ClientVerifyJSON() method
+        try skipIfNoAPIKey()
 
-        // Test with verification callback to capture the document
         var capturedDocument: VerificationDocument?
 
         let client = try await TinfoilAI.create(
-            apiKey: "tinfoil",
+            apiKey: try getAPIKey(),
             onVerification: { document in
                 capturedDocument = document
             }
@@ -286,12 +291,11 @@ final class TinfoilAITests: XCTestCase {
             }
         }
 
-        // Test that client can make requests after verification
         let chatQuery = ChatQuery(
             messages: [
                 .user(.init(content: .string("Say 'Integration test passed' and nothing else.")))
             ],
-            model: "llama-free"
+            model: "gpt-oss-120b"
         )
 
         let response = try await client.chats(query: chatQuery)
