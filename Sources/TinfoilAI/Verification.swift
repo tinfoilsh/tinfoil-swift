@@ -1,43 +1,12 @@
 import Foundation
 import TinfoilVerifier
 
-/// Represents the status of a verification step
-public enum VerificationStatus {
-    case pending
-    case inProgress
-    case success
-    case failure(Error)
-}
-
 /// Errors that can occur during verification
 public enum VerificationError: Error {
     case verificationFailed(String)
     case jsonDecodingFailed(String)
     case unknown(Error)
 }
-
-/// Contains verification result information for a step
-public struct StepResult {
-    public let status: VerificationStatus
-    public let digest: String?
-    
-    public static func pending() -> StepResult {
-        return StepResult(status: .pending, digest: nil)
-    }
-    
-    public static func inProgress() -> StepResult {
-        return StepResult(status: .inProgress, digest: nil)
-    }
-    
-    public static func success(digest: String) -> StepResult {
-        return StepResult(status: .success, digest: digest)
-    }
-    
-    public static func failure(_ error: Error) -> StepResult {
-        return StepResult(status: .failure(error), digest: nil)
-    }
-}
-
 
 /// Measurement structure matching Go's attestation.Measurement
 public struct Measurement: Codable {

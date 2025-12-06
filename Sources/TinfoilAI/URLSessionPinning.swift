@@ -6,13 +6,6 @@ import Security
 /// - Parameter verificationDocument: The verification document from attestation
 public typealias VerificationCallback = @Sendable (VerificationDocument?) -> Void
 
-/// Custom error type for certificate verification failures
-public enum CertificateVerificationError: Error {
-    case fingerprintMismatch(String, String)
-    case noCertificate
-    case verificationFailed(Error)
-}
-
 /// A URLSession delegate that performs certificate pinning and extraction
 public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
     private let expectedFingerprint: String
