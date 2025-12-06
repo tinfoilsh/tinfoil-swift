@@ -45,7 +45,11 @@ final class TinfoilIntegrationTests: XCTestCase {
     }
 
     func testMissingAPIKeyError() async throws {
-        // Test that missing API key throws the correct error
+        let originalValue = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
+        guard originalValue == nil else {
+            throw XCTSkip("Skipping test: TINFOIL_API_KEY is set in environment")
+        }
+
         do {
             _ = try await TinfoilAI.create(
                 apiKey: nil,
@@ -53,7 +57,6 @@ final class TinfoilIntegrationTests: XCTestCase {
             )
             XCTFail("Should have thrown missingAPIKey error")
         } catch TinfoilError.missingAPIKey {
-            // Expected error
             XCTAssertTrue(true)
         } catch {
             XCTFail("Unexpected error: \(error)")
