@@ -2,6 +2,13 @@ import XCTest
 import OpenAI
 @testable import TinfoilAI
 
+final class Box<T>: @unchecked Sendable {
+    var value: T
+    init(value: T) {
+        self.value = value
+    }
+}
+
 final class TinfoilAITests: XCTestCase {
 
     // MARK: - Test Configuration
@@ -260,19 +267,19 @@ final class TinfoilAITests: XCTestCase {
     func testCompleteVerificationFlowWithNewFormat() async throws {
         try skipIfNoAPIKey()
 
-        var capturedDocument: VerificationDocument?
+        let capturedDocument = Box<VerificationDocument?>(value: nil)
 
         let client = try await TinfoilAI.create(
             apiKey: try getAPIKey(),
             onVerification: { document in
-                capturedDocument = document
+                capturedDocument.value = document
             }
         )
 
         // Verify that verification document was captured
-        XCTAssertNotNil(capturedDocument, "Verification document should be captured")
+        XCTAssertNotNil(capturedDocument.value, "Verification document should be captured")
 
-        if let doc = capturedDocument {
+        if let doc = capturedDocument.value {
             // Verify document has all required fields from new format
             XCTAssertFalse(doc.tlsPublicKey.isEmpty, "TLS public key should be present")
             XCTAssertFalse(doc.codeFingerprint.isEmpty, "Code fingerprint should be present")
@@ -303,8 +310,7 @@ final class TinfoilAITests: XCTestCase {
     }
 
     func testVerificationFailureCallbackWithNewFormat() async throws {
-        // Test that verification callback is called even on failure
-        var capturedDocument: VerificationDocument?
+        let capturedDocument = Box<VerificationDocument?>(value: nil)
         var verificationFailed = false
 
         do {
@@ -312,7 +318,7 @@ final class TinfoilAITests: XCTestCase {
                 apiKey: "test-key",
                 enclaveURL: "https://invalid-enclave-12345.example.com",
                 onVerification: { document in
-                    capturedDocument = document
+                    capturedDocument.value = document
                 }
             )
             XCTFail("Should have failed with invalid enclave URL")
@@ -320,9 +326,9 @@ final class TinfoilAITests: XCTestCase {
             verificationFailed = true
 
             // Verify that document was still captured on failure
-            XCTAssertNotNil(capturedDocument, "Verification document should be captured even on failure")
+            XCTAssertNotNil(capturedDocument.value, "Verification document should be captured even on failure")
 
-            if let doc = capturedDocument {
+            if let doc = capturedDocument.value {
                 XCTAssertFalse(doc.securityVerified, "Security should not be verified on failure")
 
                 // At least one step should be failed or pending
@@ -385,10 +391,10 @@ final class TinfoilAITests: XCTestCase {
                 XCTAssertFalse(hwMeasurement.rtmr0.isEmpty, "RTMR0 should exist if present")
             }
 
+        } catch let error as VerificationError {
+            // Verification errors are acceptable (may occur due to network issues in CI)
         } catch {
-            // Network errors are acceptable in CI, but verify error type
-            XCTAssertTrue(error is NSError || error is VerificationError,
-                         "Error should be a known type: \(error)")
+            XCTFail("Unexpected error type: \(error)")
         }
     }
 

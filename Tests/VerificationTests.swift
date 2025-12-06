@@ -45,9 +45,6 @@ final class VerificationTests: XCTestCase {
             XCTAssertFalse(verificationDoc?.selectedRouterEndpoint.isEmpty ?? true, "Router endpoint should be populated")
         } catch {
             // If this fails in CI, it might be due to network issues
-            // We should at least verify the error is a known type
-            XCTAssertTrue(error is NSError || error is VerificationError,
-                         "Error should be a known type: \(error)")
         }
     }
 
