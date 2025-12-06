@@ -37,20 +37,16 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
 
         let certificate = unsafeBitCast(serverCertificate, to: SecCertificate.self)
 
-
         guard let publicKey = SecCertificateCopyKey(certificate),
-              let x963Data  = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
+              let rawKeyData = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 
-        // Build P-384 key from the raw ANSI X9.63 bytes
-        guard let p384Public = try? P384.Signing.PublicKey(x963Representation: x963Data) else {
+        guard let spkiData = Self.convertToSPKI(rawKeyData: rawKeyData) else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
-
-        let spkiData = p384Public.derRepresentation
 
         let serverPublicKeyFingerprint = SHA256.hash(data: spkiData)
                                                .map { String(format: "%02x", $0) }
@@ -63,6 +59,30 @@ public class CertificatePinningDelegate: NSObject, URLSessionDelegate {
         } else {
             completionHandler(.cancelAuthenticationChallenge, nil)
         }
+    }
+
+    /// Converts raw EC key data to SPKI (SubjectPublicKeyInfo) DER format
+    ///
+    /// This method attempts to parse the raw key data as different elliptic curves
+    /// in order of likelihood: P-384, P-256, then P-521. This provides flexibility
+    /// to support different certificate types without hardcoding a specific curve.
+    ///
+    /// - Parameter rawKeyData: Raw X9.63 key bytes from SecKeyCopyExternalRepresentation
+    /// - Returns: SPKI DER-encoded data if successful, or nil if the key type is unsupported
+    private static func convertToSPKI(rawKeyData: Data) -> Data? {
+        if let p384Key = try? P384.Signing.PublicKey(x963Representation: rawKeyData) {
+            return p384Key.derRepresentation
+        }
+
+        if let p256Key = try? P256.Signing.PublicKey(x963Representation: rawKeyData) {
+            return p256Key.derRepresentation
+        }
+
+        if let p521Key = try? P521.Signing.PublicKey(x963Representation: rawKeyData) {
+            return p521Key.derRepresentation
+        }
+
+        return nil
     }
 }
 
