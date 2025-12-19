@@ -391,7 +391,7 @@ final class TinfoilAITests: XCTestCase {
                 XCTAssertFalse(hwMeasurement.rtmr0.isEmpty, "RTMR0 should exist if present")
             }
 
-        } catch let error as VerificationError {
+        } catch is VerificationError {
             // Verification errors are acceptable (may occur due to network issues in CI)
         } catch {
             XCTFail("Unexpected error type: \(error)")
