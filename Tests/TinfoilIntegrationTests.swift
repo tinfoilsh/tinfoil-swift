@@ -64,9 +64,9 @@ final class TinfoilIntegrationTests: XCTestCase {
     }
 
     func testTinfoilClientWithExplicitURL() throws {
-        // Test TinfoilClient.create with explicit URL parameter
+        // Test TinfoilAI with explicit URL parameter
         do {
-            _ = try TinfoilClient.create(
+            _ = try TinfoilAI(
                 apiKey: "test-key",
                 enclaveURL: "test.example.com",
                 expectedFingerprint: "test-fingerprint"
@@ -79,7 +79,7 @@ final class TinfoilIntegrationTests: XCTestCase {
 
         // Test with explicit URL
         do {
-            _ = try TinfoilClient.create(
+            _ = try TinfoilAI(
                 apiKey: "test-key",
                 enclaveURL: "custom.example.com",
                 expectedFingerprint: "test-fingerprint"
