@@ -80,4 +80,8 @@ public class TinfoilClient {
     public func shutdown() {
         urlSession.invalidateAndCancel()
     }
+
+    deinit {
+        urlSession.invalidateAndCancel()
+    }
 } 
