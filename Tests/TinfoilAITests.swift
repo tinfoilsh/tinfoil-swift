@@ -53,7 +53,7 @@ final class TinfoilAITests: XCTestCase {
         let verificationResult = try await secureClient.verify()
         let expectedFingerprint = verificationResult.tlsPublicKey
 
-        let tinfoilClient = try TinfoilClient.create(
+        let tinfoilClient = try TinfoilAI(
             apiKey: try getAPIKey()!,
             enclaveURL: enclaveURL,
             expectedFingerprint: expectedFingerprint,
@@ -67,7 +67,7 @@ final class TinfoilAITests: XCTestCase {
             model: "gpt-oss-120b"
         )
         
-        let response = try await tinfoilClient.underlyingClient.chats(query: chatQuery)
+        let response = try await tinfoilClient.chats(query: chatQuery)
         XCTAssertFalse(response.choices.isEmpty, "Request should succeed with correct fingerprint")
         
         // Clean up
@@ -82,7 +82,7 @@ final class TinfoilAITests: XCTestCase {
 
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
 
-        let tinfoilClient = try TinfoilClient.create(
+        let tinfoilClient = try TinfoilAI(
             apiKey: try getAPIKey()!,
             enclaveURL: enclaveURL,
             expectedFingerprint: wrongFingerprint
@@ -96,7 +96,7 @@ final class TinfoilAITests: XCTestCase {
         )
         
         do {
-            _ = try await tinfoilClient.underlyingClient.chats(query: chatQuery)
+            _ = try await tinfoilClient.chats(query: chatQuery)
             XCTFail("Request should have failed due to certificate pinning mismatch")
         } catch {
             // Expected to fail - certificate pinning should reject the connection
@@ -156,7 +156,7 @@ final class TinfoilAITests: XCTestCase {
         let verificationResult = try await secureClient.verify()
         let expectedFingerprint = verificationResult.tlsPublicKey
 
-        let tinfoilClient = try TinfoilClient.create(
+        let tinfoilClient = try TinfoilAI(
             apiKey: try getAPIKey()!,
             enclaveURL: enclaveURL,
             expectedFingerprint: expectedFingerprint,
@@ -172,7 +172,7 @@ final class TinfoilAITests: XCTestCase {
         
         var receivedChunks: [ChatStreamResult] = []
         
-        for try await result in tinfoilClient.underlyingClient.chatsStream(query: chatQuery) {
+        for try await result in tinfoilClient.chatsStream(query: chatQuery) {
             receivedChunks.append(result)
         }
         
@@ -191,7 +191,7 @@ final class TinfoilAITests: XCTestCase {
 
         let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
 
-        let tinfoilClient = try TinfoilClient.create(
+        let tinfoilClient = try TinfoilAI(
             apiKey: try getAPIKey()!,
             enclaveURL: enclaveURL,
             expectedFingerprint: wrongFingerprint
@@ -205,7 +205,7 @@ final class TinfoilAITests: XCTestCase {
         )
         
         do {
-            for try await _ in tinfoilClient.underlyingClient.chatsStream(query: chatQuery) {
+            for try await _ in tinfoilClient.chatsStream(query: chatQuery) {
                 XCTFail("Streaming should have failed due to certificate pinning mismatch")
                 break
             }

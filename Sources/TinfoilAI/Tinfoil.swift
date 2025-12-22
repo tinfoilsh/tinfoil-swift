@@ -1,24 +1,46 @@
 import Foundation
 import OpenAI
 
-/// Main entry point for the Tinfoil client library
-public enum TinfoilAI {
-    
-    /// Creates a new OpenAI client configured for communication with a Tinfoil enclave
+/// SSL delegate for streaming certificate pinning
+final class StreamingSSLDelegate: SSLDelegateProtocol {
+    private let expectedFingerprint: String
+
+    init(expectedFingerprint: String) {
+        self.expectedFingerprint = expectedFingerprint
+    }
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let delegate = CertificatePinningDelegate(expectedFingerprint: expectedFingerprint)
+        delegate.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+    }
+}
+
+/// Main entry point for the Tinfoil client library.
+/// Provides the same API as OpenAI client with certificate pinning for secure enclave communication.
+public class TinfoilAI {
+    private let openAIClient: OpenAI
+    private let urlSession: URLSession
+
+    private init(client: OpenAI, urlSession: URLSession) {
+        self.openAIClient = client
+        self.urlSession = urlSession
+    }
+
+    /// Creates a new TinfoilAI client configured for communication with a Tinfoil enclave
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - enclaveURL: Optional URL of the Tinfoil enclave. If not provided, will fetch from router API
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - onVerification: Optional callback for verification results (both attestation and TLS)
-    /// - Returns: An OpenAI client configured for secure communication
+    /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     public static func create(
         apiKey: String? = nil,
         enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         parsingOptions: ParsingOptions = .relaxed,
         onVerification: VerificationCallback? = nil
-    ) async throws -> OpenAI {
+    ) async throws -> TinfoilAI {
         // Get API key from parameter or environment
         let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
         guard let finalApiKey = finalApiKey else {
@@ -51,16 +73,12 @@ public enum TinfoilAI {
             // Call the verification callback with the attestation result
             onVerification?(verificationDocument)
 
-            // create the tinfoil client
-            let tinfoilClient = try TinfoilClient.create(
+            return try TinfoilAI(
                 apiKey: finalApiKey,
                 enclaveURL: finalEnclaveURL,
                 expectedFingerprint: groundTruth.tlsPublicKey,
                 parsingOptions: parsingOptions
             )
-
-            // Return the underlying OpenAI client directly
-            return tinfoilClient.underlyingClient
         } catch {
             // Verification failed - call the callback with the failure document (if available)
             let verificationDocument = verifier.getVerificationDocument()
@@ -70,8 +88,174 @@ public enum TinfoilAI {
             throw error
         }
     }
-    
 
+    /// Internal initializer that sets up the pinned URLSession and OpenAI client
+    internal convenience init(
+        apiKey: String,
+        enclaveURL: String,
+        expectedFingerprint: String,
+        parsingOptions: ParsingOptions = .relaxed
+    ) throws {
+        // Create the secure URLSession with certificate pinning
+        let urlSession = SecureURLSessionFactory.createSession(expectedFingerprint: expectedFingerprint)
+
+        // Create SSL delegate for streaming certificate pinning
+        let sslDelegate = StreamingSSLDelegate(expectedFingerprint: expectedFingerprint)
+
+        // Parse the enclave URL
+        let urlComponents = try URLHelpers.parseURL(enclaveURL)
+
+        // Build host string with port if needed
+        let hostWithPort = URLHelpers.buildHostWithPort(host: urlComponents.host, port: urlComponents.port)
+
+        // Create OpenAI configuration with custom host, session, and parsing options
+        let configuration = OpenAI.Configuration(
+            token: apiKey,
+            host: hostWithPort,
+            scheme: urlComponents.scheme,
+            parsingOptions: parsingOptions
+        )
+
+        let openAIClient = OpenAI(
+            configuration: configuration,
+            session: urlSession,
+            middlewares: [],
+            sslStreamingDelegate: sslDelegate
+        )
+
+        self.init(client: openAIClient, urlSession: urlSession)
+    }
+
+    /// Cleans up resources and invalidates the URLSession
+    public func shutdown() {
+        urlSession.invalidateAndCancel()
+    }
+
+    deinit {
+        urlSession.invalidateAndCancel()
+    }
+
+    // MARK: - OpenAI API Forwarding (Async)
+
+    public func chats(query: ChatQuery) async throws -> ChatResult {
+        try await openAIClient.chats(query: query)
+    }
+
+    public func chatsStream(query: ChatQuery) -> AsyncThrowingStream<ChatStreamResult, Error> {
+        openAIClient.chatsStream(query: query)
+    }
+
+    public func images(query: ImagesQuery) async throws -> ImagesResult {
+        try await openAIClient.images(query: query)
+    }
+
+    public func imageEdits(query: ImageEditsQuery) async throws -> ImagesResult {
+        try await openAIClient.imageEdits(query: query)
+    }
+
+    public func imageVariations(query: ImageVariationsQuery) async throws -> ImagesResult {
+        try await openAIClient.imageVariations(query: query)
+    }
+
+    public func embeddings(query: EmbeddingsQuery) async throws -> EmbeddingsResult {
+        try await openAIClient.embeddings(query: query)
+    }
+
+    public func model(query: ModelQuery) async throws -> ModelResult {
+        try await openAIClient.model(query: query)
+    }
+
+    public func models() async throws -> ModelsResult {
+        try await openAIClient.models()
+    }
+
+    public func moderations(query: ModerationsQuery) async throws -> ModerationsResult {
+        try await openAIClient.moderations(query: query)
+    }
+
+    public func audioCreateSpeech(query: AudioSpeechQuery) async throws -> AudioSpeechResult {
+        try await openAIClient.audioCreateSpeech(query: query)
+    }
+
+    public func audioCreateSpeechStream(query: AudioSpeechQuery) -> AsyncThrowingStream<AudioSpeechResult, Error> {
+        openAIClient.audioCreateSpeechStream(query: query)
+    }
+
+    public func audioTranscriptions(query: AudioTranscriptionQuery) async throws -> AudioTranscriptionResult {
+        try await openAIClient.audioTranscriptions(query: query)
+    }
+
+    public func audioTranscriptionsVerbose(query: AudioTranscriptionQuery) async throws -> AudioTranscriptionVerboseResult {
+        try await openAIClient.audioTranscriptionsVerbose(query: query)
+    }
+
+    public func audioTranscriptionStream(query: AudioTranscriptionQuery) -> AsyncThrowingStream<AudioTranscriptionStreamResult, Error> {
+        openAIClient.audioTranscriptionStream(query: query)
+    }
+
+    public func audioTranslations(query: AudioTranslationQuery) async throws -> AudioTranslationResult {
+        try await openAIClient.audioTranslations(query: query)
+    }
+
+    public func assistants() async throws -> AssistantsResult {
+        try await openAIClient.assistants()
+    }
+
+    public func assistants(after: String?) async throws -> AssistantsResult {
+        try await openAIClient.assistants(after: after)
+    }
+
+    public func assistantCreate(query: AssistantsQuery) async throws -> AssistantResult {
+        try await openAIClient.assistantCreate(query: query)
+    }
+
+    public func assistantModify(query: AssistantsQuery, assistantId: String) async throws -> AssistantResult {
+        try await openAIClient.assistantModify(query: query, assistantId: assistantId)
+    }
+
+    public func threads(query: ThreadsQuery) async throws -> ThreadsResult {
+        try await openAIClient.threads(query: query)
+    }
+
+    public func threadRun(query: ThreadRunQuery) async throws -> RunResult {
+        try await openAIClient.threadRun(query: query)
+    }
+
+    public func runs(threadId: String, query: RunsQuery) async throws -> RunResult {
+        try await openAIClient.runs(threadId: threadId, query: query)
+    }
+
+    public func runRetrieve(threadId: String, runId: String) async throws -> RunResult {
+        try await openAIClient.runRetrieve(threadId: threadId, runId: runId)
+    }
+
+    public func runRetrieveSteps(threadId: String, runId: String) async throws -> RunRetrieveStepsResult {
+        try await openAIClient.runRetrieveSteps(threadId: threadId, runId: runId)
+    }
+
+    public func runRetrieveSteps(threadId: String, runId: String, before: String?) async throws -> RunRetrieveStepsResult {
+        try await openAIClient.runRetrieveSteps(threadId: threadId, runId: runId, before: before)
+    }
+
+    public func runSubmitToolOutputs(threadId: String, runId: String, query: RunToolOutputsQuery) async throws -> RunResult {
+        try await openAIClient.runSubmitToolOutputs(threadId: threadId, runId: runId, query: query)
+    }
+
+    public func threadsMessages(threadId: String) async throws -> ThreadsMessagesResult {
+        try await openAIClient.threadsMessages(threadId: threadId)
+    }
+
+    public func threadsMessages(threadId: String, before: String?) async throws -> ThreadsMessagesResult {
+        try await openAIClient.threadsMessages(threadId: threadId, before: before)
+    }
+
+    public func threadsAddMessage(threadId: String, query: MessageQuery) async throws -> ThreadAddMessageResult {
+        try await openAIClient.threadsAddMessage(threadId: threadId, query: query)
+    }
+
+    public func files(query: FilesQuery) async throws -> FilesResult {
+        try await openAIClient.files(query: query)
+    }
 }
 
 /// Errors that can occur when using the Tinfoil client
@@ -79,4 +263,4 @@ public enum TinfoilError: Error, Equatable {
     case missingAPIKey
     case invalidConfiguration(String)
     case connectionError(String)
-} 
+}

@@ -123,12 +123,12 @@ let client = try await TinfoilAI.create(
     onVerification: VerificationCallback? = nil // Verification callback
 )
 
-// Returns: OpenAI - The configured OpenAI client
+// Returns: TinfoilAI - A client with the same API as OpenAI
 ```
 
 ## API Documentation
 
-This library is a secure wrapper around the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) that can be used with Tinfoil. The `TinfoilAI.create()` method returns an OpenAI client configured for secure communication with Tinfoil enclaves.
+This library is a secure wrapper around the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) that can be used with Tinfoil. The `TinfoilAI.create()` method returns a `TinfoilAI` client that provides the same API as the OpenAI client, configured for secure communication with Tinfoil enclaves.
 
 For complete documentation, see:
 - [Swift SDK Documentation](https://docs.tinfoil.sh/sdk/swift-sdk)
