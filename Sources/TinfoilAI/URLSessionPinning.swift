@@ -100,11 +100,13 @@ public class SecureURLSessionFactory {
         // Disable caching for security
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        
-        // Use a specific operation queue for delegate callbacks to ensure thread safety
+
+        // Use a specific operation queue for delegate callbacks
+        // Allow concurrent operations since delegate methods are thread-safe
+        // (HTTP/2 handles multiplexing over a single connection)
         let delegateQueue = OperationQueue()
-        delegateQueue.maxConcurrentOperationCount = 1 // Serial queue for thread safety
-        
+        delegateQueue.maxConcurrentOperationCount = OperationQueue.defaultMaxConcurrentOperationCount
+
         return URLSession(configuration: configuration, delegate: delegate, delegateQueue: delegateQueue)
     }
 } 
