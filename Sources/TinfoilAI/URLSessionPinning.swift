@@ -101,6 +101,9 @@ public class SecureURLSessionFactory {
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
 
+        // Keep connections alive longer to avoid frequent reconnects
+        configuration.shouldUseExtendedBackgroundIdleMode = true
+
         // Use a specific operation queue for delegate callbacks
         // Allow concurrent operations since delegate methods are thread-safe
         // (HTTP/2 handles multiplexing over a single connection)
