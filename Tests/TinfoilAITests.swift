@@ -34,31 +34,18 @@ final class TinfoilAITests: XCTestCase {
             ],
             model: "gpt-oss-120b"
         )
-        
+
         let response = try await client.chats(query: chatQuery)
-        
+
         // Verify response
         XCTAssertFalse(response.choices.isEmpty, "Response should contain at least one choice")
         XCTAssertNotNil(response.choices.first?.message.content, "Response should have content")
     }
-    
-    func testCertificatePinningSuccess() async throws {
+
+    func testEHBPEncryptionSuccess() async throws {
         try skipIfNoAPIKey()
 
-        let routerAddress = try await RouterManager.fetchRouter()
-        let enclaveURL = "https://\(routerAddress)"
-
-        let secureClient = SecureClient(enclaveURL: enclaveURL)
-
-        let verificationResult = try await secureClient.verify()
-        let expectedFingerprint = verificationResult.tlsPublicKey
-
-        let tinfoilClient = try TinfoilAI(
-            apiKey: try getAPIKey()!,
-            enclaveURL: enclaveURL,
-            expectedFingerprint: expectedFingerprint,
-            parsingOptions: .relaxed
-        )
+        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -66,102 +53,67 @@ final class TinfoilAITests: XCTestCase {
             ],
             model: "gpt-oss-120b"
         )
-        
-        let response = try await tinfoilClient.chats(query: chatQuery)
-        XCTAssertFalse(response.choices.isEmpty, "Request should succeed with correct fingerprint")
-        
-        // Clean up
-        tinfoilClient.shutdown()
+
+        let response = try await client.chats(query: chatQuery)
+        XCTAssertFalse(response.choices.isEmpty, "Request should succeed with EHBP encryption")
     }
-    
-    func testCertificatePinningFailure() async throws {
-        try skipIfNoAPIKey()
 
-        let routerAddress = try await RouterManager.fetchRouter()
-        let enclaveURL = "https://\(routerAddress)"
-
-        let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
-
-        let tinfoilClient = try TinfoilAI(
-            apiKey: try getAPIKey()!,
-            enclaveURL: enclaveURL,
-            expectedFingerprint: wrongFingerprint
-        )
-
-        let chatQuery = ChatQuery(
-            messages: [
-                .user(.init(content: .string("This should fail")))
-            ],
-            model: "gpt-oss-120b"
-        )
-        
+    func testVerificationFailureWithInvalidEnclave() async throws {
         do {
-            _ = try await tinfoilClient.chats(query: chatQuery)
-            XCTFail("Request should have failed due to certificate pinning mismatch")
+            _ = try await TinfoilAI.create(
+                apiKey: "test-key",
+                enclaveURL: "https://invalid-enclave-12345.example.com"
+            )
+            XCTFail("Should have failed with invalid enclave URL")
         } catch {
-            // Expected to fail - certificate pinning should reject the connection
-            XCTAssertTrue(true, "Certificate pinning correctly prevented connection")
+            // Expected - verification should reject invalid enclave
+            // Error may be VerificationError or NSError from Go bindings
+            XCTAssertNotNil(error)
         }
-        
-        // Clean up
-        tinfoilClient.shutdown()
     }
-    
+
     // MARK: - Streaming Tests
-    
+
     func testStreamingChatCompletion() async throws {
         try skipIfNoAPIKey()
 
         let client = try await TinfoilAI.create(apiKey: try getAPIKey())
-        
+
         let chatQuery = ChatQuery(
             messages: [
                 .user(.init(content: .string("Count from 1 to 5, one number per response.")))
             ],
             model: "gpt-oss-120b"
         )
-        
+
         var receivedChunks: [ChatStreamResult] = []
         var accumulatedContent = ""
-        
+
         for try await result in client.chatsStream(query: chatQuery) {
             receivedChunks.append(result)
-            
+
             // Accumulate content from delta
             if let choice = result.choices.first,
                let delta = choice.delta.content {
                 accumulatedContent += delta
             }
         }
-        
+
         // Verify streaming response
         XCTAssertFalse(receivedChunks.isEmpty, "Should receive at least one streaming chunk")
         XCTAssertFalse(accumulatedContent.isEmpty, "Should accumulate some content from streaming")
-        
+
         // Verify we received proper stream structure
         let hasValidChoice = receivedChunks.contains { result in
             !result.choices.isEmpty && result.choices.first?.delta.content != nil
         }
         XCTAssertTrue(hasValidChoice, "Should receive at least one chunk with content")
     }
-    
-    func testStreamingWithCertificatePinning() async throws {
+
+    func testStreamingWithEHBP() async throws {
         try skipIfNoAPIKey()
 
-        let routerAddress = try await RouterManager.fetchRouter()
-        let enclaveURL = "https://\(routerAddress)"
-
-        let secureClient = SecureClient(enclaveURL: enclaveURL)
-
-        let verificationResult = try await secureClient.verify()
-        let expectedFingerprint = verificationResult.tlsPublicKey
-
-        let tinfoilClient = try TinfoilAI(
-            apiKey: try getAPIKey()!,
-            enclaveURL: enclaveURL,
-            expectedFingerprint: expectedFingerprint,
-            parsingOptions: .relaxed
-        )
+        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -169,55 +121,17 @@ final class TinfoilAITests: XCTestCase {
             ],
             model: "gpt-oss-120b"
         )
-        
+
         var receivedChunks: [ChatStreamResult] = []
-        
-        for try await result in tinfoilClient.chatsStream(query: chatQuery) {
+
+        for try await result in client.chatsStream(query: chatQuery) {
             receivedChunks.append(result)
         }
-        
-        // Verify streaming succeeded with certificate pinning
-        XCTAssertFalse(receivedChunks.isEmpty, "Streaming should succeed with correct certificate pinning")
-        
-        // Clean up
-        tinfoilClient.shutdown()
+
+        // Verify streaming succeeded with EHBP encryption
+        XCTAssertFalse(receivedChunks.isEmpty, "Streaming should succeed with EHBP encryption")
     }
-    
-    func testStreamingFailsWithWrongCertificate() async throws {
-        try skipIfNoAPIKey()
 
-        let routerAddress = try await RouterManager.fetchRouter()
-        let enclaveURL = "https://\(routerAddress)"
-
-        let wrongFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
-
-        let tinfoilClient = try TinfoilAI(
-            apiKey: try getAPIKey()!,
-            enclaveURL: enclaveURL,
-            expectedFingerprint: wrongFingerprint
-        )
-
-        let chatQuery = ChatQuery(
-            messages: [
-                .user(.init(content: .string("This streaming should fail")))
-            ],
-            model: "gpt-oss-120b"
-        )
-        
-        do {
-            for try await _ in tinfoilClient.chatsStream(query: chatQuery) {
-                XCTFail("Streaming should have failed due to certificate pinning mismatch")
-                break
-            }
-        } catch {
-            // Expected to fail - certificate pinning should reject the connection
-            XCTAssertTrue(true, "Certificate pinning correctly prevented streaming connection")
-        }
-        
-        // Clean up
-        tinfoilClient.shutdown()
-    }
-    
     func testStreamingResponseStructure() async throws {
         try skipIfNoAPIKey()
 
@@ -262,7 +176,7 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertTrue(hasFinishReason, "Streaming response should eventually have a finish reason")
     }
 
-    // MARK: - Integration Tests for New Verification Flow
+    // MARK: - Integration Tests for Verification Flow
 
     func testCompleteVerificationFlowWithNewFormat() async throws {
         try skipIfNoAPIKey()
