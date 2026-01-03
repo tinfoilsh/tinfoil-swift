@@ -1,5 +1,9 @@
 import Foundation
 
+/// Callback type for verification events
+/// - Parameter verificationDocument: The verification document from attestation
+public typealias VerificationCallback = @Sendable (VerificationDocument?) -> Void
+
 /// Represents the state of a verification step
 public struct VerificationStepState: Codable {
     public enum Status: String, Codable {
