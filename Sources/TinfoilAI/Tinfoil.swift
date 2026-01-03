@@ -1,29 +1,14 @@
 import Foundation
 import OpenAI
-
-/// SSL delegate for streaming certificate pinning
-final class StreamingSSLDelegate: SSLDelegateProtocol {
-    private let expectedFingerprint: String
-
-    init(expectedFingerprint: String) {
-        self.expectedFingerprint = expectedFingerprint
-    }
-
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        let delegate = CertificatePinningDelegate(expectedFingerprint: expectedFingerprint)
-        delegate.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
-    }
-}
+import EHBP
 
 /// Main entry point for the Tinfoil client library.
-/// Provides the same API as OpenAI client with certificate pinning for secure enclave communication.
+/// Provides the same API as OpenAI client with EHBP encryption for secure enclave communication.
 public class TinfoilAI {
     private let openAIClient: OpenAI
-    private let urlSession: URLSession
 
-    private init(client: OpenAI, urlSession: URLSession) {
+    private init(client: OpenAI) {
         self.openAIClient = client
-        self.urlSession = urlSession
     }
 
     /// Creates a new TinfoilAI client configured for communication with a Tinfoil enclave
@@ -32,7 +17,7 @@ public class TinfoilAI {
     ///   - enclaveURL: Optional URL of the Tinfoil enclave. If not provided, will fetch from router API
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - parsingOptions: Parsing options for handling different providers.
-    ///   - onVerification: Optional callback for verification results (both attestation and TLS)
+    ///   - onVerification: Optional callback for verification results
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     public static func create(
         apiKey: String? = nil,
@@ -41,74 +26,70 @@ public class TinfoilAI {
         parsingOptions: ParsingOptions = .relaxed,
         onVerification: VerificationCallback? = nil
     ) async throws -> TinfoilAI {
-        // Get API key from parameter or environment
         let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
         guard let finalApiKey = finalApiKey else {
             throw TinfoilError.missingAPIKey
         }
 
-        // Determine the enclave URL - fetch from router if not provided
         let finalEnclaveURL: String
         if let providedURL = enclaveURL {
             finalEnclaveURL = providedURL
         } else {
-            // Fetch router address from ATC API
             let routerAddress = try await RouterManager.fetchRouter()
             finalEnclaveURL = "https://\(routerAddress)"
         }
 
-        // Create SecureClient with enclave URL and GitHub repo
         let verifier = SecureClient(
             githubRepo: githubRepo,
             enclaveURL: finalEnclaveURL
         )
 
-        // get the verification result + cert fingerprint
         do {
             let groundTruth = try await verifier.verify()
-
-            // Get the verification document
             let verificationDocument = verifier.getVerificationDocument()
-
-            // Call the verification callback with the attestation result
             onVerification?(verificationDocument)
 
             return try TinfoilAI(
                 apiKey: finalApiKey,
                 enclaveURL: finalEnclaveURL,
-                expectedFingerprint: groundTruth.tlsPublicKey,
+                hpkePublicKeyHex: groundTruth.hpkePublicKey,
                 parsingOptions: parsingOptions
             )
         } catch {
-            // Verification failed - call the callback with the failure document (if available)
             let verificationDocument = verifier.getVerificationDocument()
             onVerification?(verificationDocument)
-
-            // Re-throw the error
             throw error
         }
     }
 
-    /// Internal initializer that sets up the pinned URLSession and OpenAI client
+    /// Internal initializer that sets up the EHBP session and OpenAI client
     internal convenience init(
         apiKey: String,
         enclaveURL: String,
-        expectedFingerprint: String,
+        hpkePublicKeyHex: String?,
         parsingOptions: ParsingOptions = .relaxed
     ) throws {
-        // Create the secure URLSession with certificate pinning
-        let urlSession = SecureURLSessionFactory.createSession(expectedFingerprint: expectedFingerprint)
+        guard let hpkeKeyHex = hpkePublicKeyHex, !hpkeKeyHex.isEmpty else {
+            throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
+        }
 
-        // Create SSL delegate for streaming certificate pinning
-        let sslDelegate = StreamingSSLDelegate(expectedFingerprint: expectedFingerprint)
+        guard let hpkePublicKey = Data(hexString: hpkeKeyHex) else {
+            throw TinfoilError.invalidConfiguration("Invalid HPKE public key format")
+        }
 
-        // Parse the enclave URL
+        let ehbpSession = try EHBPURLSession(
+            baseURL: enclaveURL,
+            publicKey: hpkePublicKey
+        )
+
+        let ehbpStreamingFactory = EHBPURLSessionFactory(
+            baseURL: enclaveURL,
+            publicKey: hpkePublicKey
+        )
+
         let urlComponents = try URLHelpers.parseURL(enclaveURL)
-
-        // Build host string with port if needed
         let hostWithPort = URLHelpers.buildHostWithPort(host: urlComponents.host, port: urlComponents.port)
 
-        // Create OpenAI configuration with custom host, session, and parsing options
         let configuration = OpenAI.Configuration(
             token: apiKey,
             host: hostWithPort,
@@ -118,21 +99,11 @@ public class TinfoilAI {
 
         let openAIClient = OpenAI(
             configuration: configuration,
-            session: urlSession,
-            middlewares: [],
-            sslStreamingDelegate: sslDelegate
+            customSession: ehbpSession,
+            streamingURLSessionFactory: ehbpStreamingFactory
         )
 
-        self.init(client: openAIClient, urlSession: urlSession)
-    }
-
-    /// Cleans up resources and invalidates the URLSession
-    public func shutdown() {
-        urlSession.invalidateAndCancel()
-    }
-
-    deinit {
-        urlSession.invalidateAndCancel()
+        self.init(client: openAIClient)
     }
 
     // MARK: - OpenAI API Forwarding (Async)
