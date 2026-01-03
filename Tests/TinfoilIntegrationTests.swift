@@ -17,6 +17,7 @@ final class TinfoilIntegrationTests: XCTestCase {
                 apiKey: "test-key",
                 enclaveURL: explicitURL
             )
+            XCTFail("Expected verification to fail for explicit URL")
         } catch {
             // Expected to fail during verification, but that's OK for this test
             // We're just testing that the explicit URL would be used
@@ -35,6 +36,7 @@ final class TinfoilIntegrationTests: XCTestCase {
                 apiKey: "test-key"
                 // No enclaveURL provided - should trigger router fetch
             )
+            // If API key is valid, this may succeed - that's acceptable
         } catch {
             // Expected to fail (either during router fetch or verification)
             // We're validating that the router fetch path is triggered
@@ -63,30 +65,28 @@ final class TinfoilIntegrationTests: XCTestCase {
         }
     }
 
-    func testTinfoilClientWithExplicitURL() throws {
+    func testTinfoilClientWithExplicitURL() async throws {
         // Test TinfoilAI with explicit URL parameter
         do {
-            _ = try TinfoilAI(
+            _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                enclaveURL: "test.example.com",
-                expectedFingerprint: "test-fingerprint"
+                enclaveURL: "https://test.example.com"
             )
+            XCTFail("Expected verification to fail for test URL")
         } catch {
-            // Expected to fail during URL parsing or connection
-            // We're just testing that explicit URL is handled
+            // Expected to fail during verification
             XCTAssertNotNil(error)
         }
 
         // Test with explicit URL
         do {
-            _ = try TinfoilAI(
+            _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                enclaveURL: "custom.example.com",
-                expectedFingerprint: "test-fingerprint"
+                enclaveURL: "https://custom.example.com"
             )
+            XCTFail("Expected verification to fail for custom URL")
         } catch {
-            // Expected to fail during URL parsing or connection
-            // We're just testing that explicit URL is handled
+            // Expected to fail during verification
             XCTAssertNotNil(error)
         }
     }
