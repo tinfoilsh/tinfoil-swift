@@ -1,29 +1,18 @@
 import Foundation
 import OpenAI
-
-/// SSL delegate for streaming certificate pinning
-final class StreamingSSLDelegate: SSLDelegateProtocol {
-    private let expectedFingerprint: String
-
-    init(expectedFingerprint: String) {
-        self.expectedFingerprint = expectedFingerprint
-    }
-
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        let delegate = CertificatePinningDelegate(expectedFingerprint: expectedFingerprint)
-        delegate.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
-    }
-}
+import EHBP
 
 /// Main entry point for the Tinfoil client library.
-/// Provides the same API as OpenAI client with certificate pinning for secure enclave communication.
+/// Provides the same API as OpenAI client with EHBP encryption for secure enclave communication.
 public class TinfoilAI {
-    private let openAIClient: OpenAI
-    private let urlSession: URLSession
+    private let ehbpClient: EHBPClient
+    private let baseURL: String
+    private let apiKey: String
 
-    private init(client: OpenAI, urlSession: URLSession) {
-        self.openAIClient = client
-        self.urlSession = urlSession
+    private init(ehbpClient: EHBPClient, baseURL: String, apiKey: String) {
+        self.ehbpClient = ehbpClient
+        self.baseURL = baseURL
+        self.apiKey = apiKey
     }
 
     /// Creates a new TinfoilAI client configured for communication with a Tinfoil enclave
@@ -31,230 +20,427 @@ public class TinfoilAI {
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - enclaveURL: Optional URL of the Tinfoil enclave. If not provided, will fetch from router API
     ///   - githubRepo: GitHub repository containing the enclave config
-    ///   - parsingOptions: Parsing options for handling different providers.
-    ///   - onVerification: Optional callback for verification results (both attestation and TLS)
-    /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
+    ///   - onVerification: Optional callback for verification results
+    /// - Returns: A TinfoilAI client configured for secure communication
     public static func create(
         apiKey: String? = nil,
         enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
-        parsingOptions: ParsingOptions = .relaxed,
         onVerification: VerificationCallback? = nil
     ) async throws -> TinfoilAI {
-        // Get API key from parameter or environment
         let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
         guard let finalApiKey = finalApiKey else {
             throw TinfoilError.missingAPIKey
         }
 
-        // Determine the enclave URL - fetch from router if not provided
         let finalEnclaveURL: String
         if let providedURL = enclaveURL {
             finalEnclaveURL = providedURL
         } else {
-            // Fetch router address from ATC API
             let routerAddress = try await RouterManager.fetchRouter()
             finalEnclaveURL = "https://\(routerAddress)"
         }
 
-        // Create SecureClient with enclave URL and GitHub repo
         let verifier = SecureClient(
             githubRepo: githubRepo,
             enclaveURL: finalEnclaveURL
         )
 
-        // get the verification result + cert fingerprint
         do {
             let groundTruth = try await verifier.verify()
-
-            // Get the verification document
             let verificationDocument = verifier.getVerificationDocument()
-
-            // Call the verification callback with the attestation result
             onVerification?(verificationDocument)
 
-            return try TinfoilAI(
-                apiKey: finalApiKey,
-                enclaveURL: finalEnclaveURL,
-                expectedFingerprint: groundTruth.tlsPublicKey,
-                parsingOptions: parsingOptions
+            guard let hpkeKeyHex = groundTruth.hpkePublicKey, !hpkeKeyHex.isEmpty else {
+                throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
+            }
+
+            guard let hpkePublicKey = Data(hexString: hpkeKeyHex) else {
+                throw TinfoilError.invalidConfiguration("Invalid HPKE public key format")
+            }
+
+            let client = try EHBPClient(baseURL: finalEnclaveURL, publicKey: hpkePublicKey)
+
+            return TinfoilAI(
+                ehbpClient: client,
+                baseURL: finalEnclaveURL,
+                apiKey: finalApiKey
             )
         } catch {
-            // Verification failed - call the callback with the failure document (if available)
             let verificationDocument = verifier.getVerificationDocument()
             onVerification?(verificationDocument)
-
-            // Re-throw the error
             throw error
         }
     }
 
-    /// Internal initializer that sets up the pinned URLSession and OpenAI client
-    internal convenience init(
-        apiKey: String,
-        enclaveURL: String,
-        expectedFingerprint: String,
-        parsingOptions: ParsingOptions = .relaxed
-    ) throws {
-        // Create the secure URLSession with certificate pinning
-        let urlSession = SecureURLSessionFactory.createSession(expectedFingerprint: expectedFingerprint)
-
-        // Create SSL delegate for streaming certificate pinning
-        let sslDelegate = StreamingSSLDelegate(expectedFingerprint: expectedFingerprint)
-
-        // Parse the enclave URL
-        let urlComponents = try URLHelpers.parseURL(enclaveURL)
-
-        // Build host string with port if needed
-        let hostWithPort = URLHelpers.buildHostWithPort(host: urlComponents.host, port: urlComponents.port)
-
-        // Create OpenAI configuration with custom host, session, and parsing options
-        let configuration = OpenAI.Configuration(
-            token: apiKey,
-            host: hostWithPort,
-            scheme: urlComponents.scheme,
-            parsingOptions: parsingOptions
-        )
-
-        let openAIClient = OpenAI(
-            configuration: configuration,
-            session: urlSession,
-            middlewares: [],
-            sslStreamingDelegate: sslDelegate
-        )
-
-        self.init(client: openAIClient, urlSession: urlSession)
-    }
-
-    /// Cleans up resources and invalidates the URLSession
-    public func shutdown() {
-        urlSession.invalidateAndCancel()
-    }
-
-    deinit {
-        urlSession.invalidateAndCancel()
-    }
-
-    // MARK: - OpenAI API Forwarding (Async)
+    // MARK: - Chat Completions
 
     public func chats(query: ChatQuery) async throws -> ChatResult {
-        try await openAIClient.chats(query: query)
+        let body = try JSONEncoder().encode(query)
+        let (data, response) = try await ehbpClient.request(
+            method: "POST",
+            path: "/v1/chat/completions",
+            headers: defaultHeaders(),
+            body: body
+        )
+
+        guard response.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw TinfoilError.connectionError("HTTP \(response.statusCode): \(errorMessage)")
+        }
+
+        return try JSONDecoder().decode(ChatResult.self, from: data)
     }
 
     public func chatsStream(query: ChatQuery) -> AsyncThrowingStream<ChatStreamResult, Error> {
-        openAIClient.chatsStream(query: query)
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    var streamQuery = query
+                    streamQuery.stream = true
+
+                    let body = try JSONEncoder().encode(streamQuery)
+                    let (stream, response) = try await ehbpClient.requestStream(
+                        method: "POST",
+                        path: "/v1/chat/completions",
+                        headers: defaultHeaders(),
+                        body: body
+                    )
+
+                    guard response.statusCode == 200 else {
+                        var errorData = Data()
+                        for try await chunk in stream {
+                            errorData.append(chunk)
+                        }
+                        let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                        throw TinfoilError.connectionError("HTTP \(response.statusCode): \(errorMessage)")
+                    }
+
+                    var buffer = Data()
+                    for try await chunk in stream {
+                        buffer.append(chunk)
+
+                        while let lineRange = buffer.range(of: Data("\n".utf8)) {
+                            let lineData = buffer.subdata(in: buffer.startIndex..<lineRange.lowerBound)
+                            buffer.removeSubrange(buffer.startIndex...lineRange.lowerBound)
+
+                            guard let line = String(data: lineData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                  !line.isEmpty else {
+                                continue
+                            }
+
+                            if line.hasPrefix("data: ") {
+                                let jsonString = String(line.dropFirst(6))
+                                if jsonString == "[DONE]" {
+                                    continuation.finish()
+                                    return
+                                }
+
+                                if let jsonData = jsonString.data(using: .utf8) {
+                                    let result = try JSONDecoder().decode(ChatStreamResult.self, from: jsonData)
+                                    continuation.yield(result)
+                                }
+                            }
+                        }
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
     }
 
-    public func images(query: ImagesQuery) async throws -> ImagesResult {
-        try await openAIClient.images(query: query)
-    }
-
-    public func imageEdits(query: ImageEditsQuery) async throws -> ImagesResult {
-        try await openAIClient.imageEdits(query: query)
-    }
-
-    public func imageVariations(query: ImageVariationsQuery) async throws -> ImagesResult {
-        try await openAIClient.imageVariations(query: query)
-    }
+    // MARK: - Embeddings
 
     public func embeddings(query: EmbeddingsQuery) async throws -> EmbeddingsResult {
-        try await openAIClient.embeddings(query: query)
+        let body = try JSONEncoder().encode(query)
+        let (data, response) = try await ehbpClient.request(
+            method: "POST",
+            path: "/v1/embeddings",
+            headers: defaultHeaders(),
+            body: body
+        )
+
+        guard response.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw TinfoilError.connectionError("HTTP \(response.statusCode): \(errorMessage)")
+        }
+
+        return try JSONDecoder().decode(EmbeddingsResult.self, from: data)
+    }
+
+    // MARK: - Models
+
+    public func models() async throws -> ModelsResult {
+        let (data, response) = try await ehbpClient.request(
+            method: "GET",
+            path: "/v1/models",
+            headers: ["Authorization": "Bearer \(apiKey)"],
+            body: nil
+        )
+
+        guard response.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw TinfoilError.connectionError("HTTP \(response.statusCode): \(errorMessage)")
+        }
+
+        return try JSONDecoder().decode(ModelsResult.self, from: data)
     }
 
     public func model(query: ModelQuery) async throws -> ModelResult {
-        try await openAIClient.model(query: query)
+        let (data, response) = try await ehbpClient.request(
+            method: "GET",
+            path: "/v1/models/\(query.model)",
+            headers: ["Authorization": "Bearer \(apiKey)"],
+            body: nil
+        )
+
+        guard response.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw TinfoilError.connectionError("HTTP \(response.statusCode): \(errorMessage)")
+        }
+
+        return try JSONDecoder().decode(ModelResult.self, from: data)
     }
 
-    public func models() async throws -> ModelsResult {
-        try await openAIClient.models()
+    // MARK: - Responses API
+
+    public func createResponse(query: CreateModelResponseQuery) async throws -> ResponseObject {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/responses", body: body)
     }
 
-    public func moderations(query: ModerationsQuery) async throws -> ModerationsResult {
-        try await openAIClient.moderations(query: query)
+    public func createResponseStream(query: CreateModelResponseQuery) -> AsyncThrowingStream<ResponseStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let streamQuery = CreateModelResponseQuery(
+                        input: query.input,
+                        model: query.model,
+                        include: query.include,
+                        background: query.background,
+                        instructions: query.instructions,
+                        maxOutputTokens: query.maxOutputTokens,
+                        metadata: query.metadata,
+                        parallelToolCalls: query.parallelToolCalls,
+                        previousResponseId: query.previousResponseId,
+                        prompt: query.prompt,
+                        reasoning: query.reasoning,
+                        serviceTier: query.serviceTier,
+                        store: query.store,
+                        stream: true,
+                        temperature: query.temperature,
+                        text: query.text,
+                        toolChoice: query.toolChoice,
+                        tools: query.tools,
+                        topP: query.topP,
+                        truncation: query.truncation,
+                        user: query.user
+                    )
+
+                    let body = try JSONEncoder().encode(streamQuery)
+                    let (stream, response) = try await ehbpClient.requestStream(
+                        method: "POST",
+                        path: "/v1/responses",
+                        headers: defaultHeaders(),
+                        body: body
+                    )
+
+                    guard response.statusCode == 200 else {
+                        var errorData = Data()
+                        for try await chunk in stream {
+                            errorData.append(chunk)
+                        }
+                        let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                        throw TinfoilError.connectionError("HTTP \(response.statusCode): \(errorMessage)")
+                    }
+
+                    var buffer = Data()
+                    for try await chunk in stream {
+                        buffer.append(chunk)
+
+                        while let lineRange = buffer.range(of: Data("\n".utf8)) {
+                            let lineData = buffer.subdata(in: buffer.startIndex..<lineRange.lowerBound)
+                            buffer.removeSubrange(buffer.startIndex...lineRange.lowerBound)
+
+                            guard let line = String(data: lineData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                  !line.isEmpty else {
+                                continue
+                            }
+
+                            if line.hasPrefix("data: ") {
+                                let jsonString = String(line.dropFirst(6))
+                                if jsonString == "[DONE]" {
+                                    continuation.finish()
+                                    return
+                                }
+
+                                if let jsonData = jsonString.data(using: .utf8) {
+                                    let result = try JSONDecoder().decode(ResponseStreamEvent.self, from: jsonData)
+                                    continuation.yield(result)
+                                }
+                            }
+                        }
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
     }
 
-    public func audioCreateSpeech(query: AudioSpeechQuery) async throws -> AudioSpeechResult {
-        try await openAIClient.audioCreateSpeech(query: query)
+    public func getResponse(id: String) async throws -> ResponseObject {
+        return try await performRequest(method: "GET", path: "/v1/responses/\(id)", body: nil)
     }
 
-    public func audioCreateSpeechStream(query: AudioSpeechQuery) -> AsyncThrowingStream<AudioSpeechResult, Error> {
-        openAIClient.audioCreateSpeechStream(query: query)
+    public func deleteResponse(id: String) async throws -> DeleteModelResponseResult {
+        return try await performRequest(method: "DELETE", path: "/v1/responses/\(id)", body: nil)
     }
 
-    public func audioTranscriptions(query: AudioTranscriptionQuery) async throws -> AudioTranscriptionResult {
-        try await openAIClient.audioTranscriptions(query: query)
-    }
+    // MARK: - Assistants
 
-    public func audioTranscriptionsVerbose(query: AudioTranscriptionQuery) async throws -> AudioTranscriptionVerboseResult {
-        try await openAIClient.audioTranscriptionsVerbose(query: query)
-    }
-
-    public func audioTranscriptionStream(query: AudioTranscriptionQuery) -> AsyncThrowingStream<AudioTranscriptionStreamResult, Error> {
-        openAIClient.audioTranscriptionStream(query: query)
-    }
-
-    public func audioTranslations(query: AudioTranslationQuery) async throws -> AudioTranslationResult {
-        try await openAIClient.audioTranslations(query: query)
-    }
-
-    public func assistants() async throws -> AssistantsResult {
-        try await openAIClient.assistants()
-    }
-
-    public func assistants(after: String?) async throws -> AssistantsResult {
-        try await openAIClient.assistants(after: after)
+    public func assistants(after: String? = nil) async throws -> AssistantsResult {
+        let path = buildPath("/v1/assistants", queryItems: ["after": after])
+        return try await performRequest(method: "GET", path: path, body: nil)
     }
 
     public func assistantCreate(query: AssistantsQuery) async throws -> AssistantResult {
-        try await openAIClient.assistantCreate(query: query)
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/assistants", body: body)
     }
 
-    public func assistantModify(query: AssistantsQuery, assistantId: String) async throws -> AssistantResult {
-        try await openAIClient.assistantModify(query: query, assistantId: assistantId)
+    public func assistantModify(assistantId: String, query: AssistantsQuery) async throws -> AssistantResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/assistants/\(assistantId)", body: body)
     }
+
+    // MARK: - Threads
 
     public func threads(query: ThreadsQuery) async throws -> ThreadsResult {
-        try await openAIClient.threads(query: query)
-    }
-
-    public func threadRun(query: ThreadRunQuery) async throws -> RunResult {
-        try await openAIClient.threadRun(query: query)
-    }
-
-    public func runs(threadId: String, query: RunsQuery) async throws -> RunResult {
-        try await openAIClient.runs(threadId: threadId, query: query)
-    }
-
-    public func runRetrieve(threadId: String, runId: String) async throws -> RunResult {
-        try await openAIClient.runRetrieve(threadId: threadId, runId: runId)
-    }
-
-    public func runRetrieveSteps(threadId: String, runId: String) async throws -> RunRetrieveStepsResult {
-        try await openAIClient.runRetrieveSteps(threadId: threadId, runId: runId)
-    }
-
-    public func runRetrieveSteps(threadId: String, runId: String, before: String?) async throws -> RunRetrieveStepsResult {
-        try await openAIClient.runRetrieveSteps(threadId: threadId, runId: runId, before: before)
-    }
-
-    public func runSubmitToolOutputs(threadId: String, runId: String, query: RunToolOutputsQuery) async throws -> RunResult {
-        try await openAIClient.runSubmitToolOutputs(threadId: threadId, runId: runId, query: query)
-    }
-
-    public func threadsMessages(threadId: String) async throws -> ThreadsMessagesResult {
-        try await openAIClient.threadsMessages(threadId: threadId)
-    }
-
-    public func threadsMessages(threadId: String, before: String?) async throws -> ThreadsMessagesResult {
-        try await openAIClient.threadsMessages(threadId: threadId, before: before)
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/threads", body: body)
     }
 
     public func threadsAddMessage(threadId: String, query: MessageQuery) async throws -> ThreadAddMessageResult {
-        try await openAIClient.threadsAddMessage(threadId: threadId, query: query)
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/threads/\(threadId)/messages", body: body)
     }
 
+    public func threadsMessages(threadId: String, before: String? = nil) async throws -> ThreadsMessagesResult {
+        let path = buildPath("/v1/threads/\(threadId)/messages", queryItems: ["before": before])
+        return try await performRequest(method: "GET", path: path, body: nil)
+    }
+
+    // MARK: - Runs
+
+    public func runs(threadId: String, query: RunsQuery) async throws -> RunResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/threads/\(threadId)/runs", body: body)
+    }
+
+    public func runRetrieve(threadId: String, runId: String) async throws -> RunResult {
+        return try await performRequest(method: "GET", path: "/v1/threads/\(threadId)/runs/\(runId)", body: nil)
+    }
+
+    public func runRetrieveSteps(threadId: String, runId: String, before: String? = nil) async throws -> RunRetrieveStepsResult {
+        let path = buildPath("/v1/threads/\(threadId)/runs/\(runId)/steps", queryItems: ["before": before])
+        return try await performRequest(method: "GET", path: path, body: nil)
+    }
+
+    public func runSubmitToolOutputs(threadId: String, runId: String, query: RunToolOutputsQuery) async throws -> RunResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/threads/\(threadId)/runs/\(runId)/submit_tool_outputs", body: body)
+    }
+
+    public func threadRun(query: ThreadRunQuery) async throws -> RunResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/threads/runs", body: body)
+    }
+
+    // MARK: - Files
+
     public func files(query: FilesQuery) async throws -> FilesResult {
-        try await openAIClient.files(query: query)
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/files", body: body)
+    }
+
+    // MARK: - Images
+
+    public func images(query: ImagesQuery) async throws -> ImagesResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/images/generations", body: body)
+    }
+
+    public func imageEdits(query: ImageEditsQuery) async throws -> ImagesResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/images/edits", body: body)
+    }
+
+    public func imageVariations(query: ImageVariationsQuery) async throws -> ImagesResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/images/variations", body: body)
+    }
+
+    // MARK: - Audio
+
+    public func audioTranscriptions(query: AudioTranscriptionQuery) async throws -> AudioTranscriptionResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/audio/transcriptions", body: body)
+    }
+
+    public func audioTranslations(query: AudioTranslationQuery) async throws -> AudioTranslationResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/audio/translations", body: body)
+    }
+
+    public func audioCreateSpeech(query: AudioSpeechQuery) async throws -> AudioSpeechResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/audio/speech", body: body)
+    }
+
+    // MARK: - Moderations
+
+    public func moderations(query: ModerationsQuery) async throws -> ModerationsResult {
+        let body = try JSONEncoder().encode(query)
+        return try await performRequest(method: "POST", path: "/v1/moderations", body: body)
+    }
+
+    // MARK: - Helper Methods
+
+    private func defaultHeaders() -> [String: String] {
+        return [
+            "Content-Type": "application/json",
+            "Authorization": "Bearer \(apiKey)"
+        ]
+    }
+
+    private func buildPath(_ basePath: String, queryItems: [String: String?]) -> String {
+        let items = queryItems.compactMapValues { $0 }
+        guard !items.isEmpty else { return basePath }
+
+        var components = URLComponents(string: basePath)!
+        components.queryItems = items.map { URLQueryItem(name: $0.key, value: $0.value) }
+        return components.string!
+    }
+
+    private func performRequest<T: Decodable>(method: String, path: String, body: Data?) async throws -> T {
+        let (data, response) = try await ehbpClient.request(
+            method: method,
+            path: path,
+            headers: defaultHeaders(),
+            body: body
+        )
+
+        guard response.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw TinfoilError.connectionError("HTTP \(response.statusCode): \(errorMessage)")
+        }
+
+        return try JSONDecoder().decode(T.self, from: data)
     }
 }
 

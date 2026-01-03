@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "tinfoil-swift",
     platforms: [
-        .macOS(.v12),
+        .macOS(.v14),
         .iOS(.v17)
     ],
     products: [
@@ -14,6 +14,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/MacPaw/OpenAI.git", exact: "0.4.7"),
+        .package(url: "https://github.com/tinfoilsh/encrypted-http-body-protocol.git", branch: "feat/native-swift"),
     ],
     targets: [
         .binaryTarget(
@@ -24,6 +25,7 @@ let package = Package(
             name: "TinfoilAI",
             dependencies: [
                 .product(name: "OpenAI", package: "OpenAI"),
+                .product(name: "EHBP", package: "encrypted-http-body-protocol"),
                 "TinfoilVerifier"
             ],
             path: "Sources/TinfoilAI",

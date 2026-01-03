@@ -63,29 +63,27 @@ final class TinfoilIntegrationTests: XCTestCase {
         }
     }
 
-    func testTinfoilClientWithExplicitURL() throws {
+    func testTinfoilClientWithExplicitURL() async throws {
         // Test TinfoilAI with explicit URL parameter
         do {
-            _ = try TinfoilAI(
+            _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                enclaveURL: "test.example.com",
-                expectedFingerprint: "test-fingerprint"
+                enclaveURL: "https://test.example.com"
             )
         } catch {
-            // Expected to fail during URL parsing or connection
+            // Expected to fail during verification
             // We're just testing that explicit URL is handled
             XCTAssertNotNil(error)
         }
 
         // Test with explicit URL
         do {
-            _ = try TinfoilAI(
+            _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                enclaveURL: "custom.example.com",
-                expectedFingerprint: "test-fingerprint"
+                enclaveURL: "https://custom.example.com"
             )
         } catch {
-            // Expected to fail during URL parsing or connection
+            // Expected to fail during verification
             // We're just testing that explicit URL is handled
             XCTAssertNotNil(error)
         }
