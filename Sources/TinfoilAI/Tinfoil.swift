@@ -227,6 +227,16 @@ public class TinfoilAI {
     public func files(query: FilesQuery) async throws -> FilesResult {
         try await openAIClient.files(query: query)
     }
+
+    // MARK: - Responses API
+
+    public func createResponse(query: CreateModelResponseQuery) async throws -> ResponseObject {
+        try await openAIClient.responses.createResponse(query: query)
+    }
+
+    public func createResponseStream(query: CreateModelResponseQuery) -> AsyncThrowingStream<ResponseStreamEvent, Error> {
+        openAIClient.responses.createResponseStreaming(query: query)
+    }
 }
 
 /// Errors that can occur when using the Tinfoil client
