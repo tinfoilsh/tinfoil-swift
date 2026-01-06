@@ -198,6 +198,8 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     }
 
     private func performStreamingRequest() async {
+        guard let session = session else { return }
+
         do {
             let ehbpClient = try EHBPClient(baseURL: baseURL, publicKey: publicKey)
 
@@ -220,7 +222,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             )
 
             delegate?.urlSession(
-                session!,
+                session,
                 dataTask: self,
                 didReceive: response
             ) { disposition in
@@ -233,17 +235,17 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             for try await chunk in stream {
                 if Task.isCancelled { break }
                 accumulatedData.append(chunk)
-                delegate?.urlSession(session!, dataTask: self, didReceive: chunk)
+                delegate?.urlSession(session, dataTask: self, didReceive: chunk)
             }
 
             completionHandler(accumulatedData, response, nil)
-            delegate?.urlSession(session!, task: self, didCompleteWithError: nil)
+            delegate?.urlSession(session, task: self, didCompleteWithError: nil)
         } catch {
             completionHandler(nil, nil, error)
-            delegate?.urlSession(session!, task: self, didCompleteWithError: error)
+            delegate?.urlSession(session, task: self, didCompleteWithError: error)
         }
 
-        session?.removeTask(self)
+        session.removeTask(self)
     }
 
     private func extractPath(from url: URL) -> String {
