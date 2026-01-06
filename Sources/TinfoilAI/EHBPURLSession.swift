@@ -281,7 +281,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         with request: URLRequest,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) -> URLSessionDataTaskProtocol {
-        let task = AsyncDataTask { [self] in
+        let task = AsyncDataTask(request: request) { [self] in
             try await self.performRequest(request)
         } completionHandler: { data, response, error in
             completionHandler(data, response, error)
@@ -290,7 +290,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     }
 
     public func dataTask(with request: URLRequest) -> URLSessionDataTaskProtocol {
-        return AsyncDataTask { [self] in
+        return AsyncDataTask(request: request) { [self] in
             try await self.performRequest(request)
         } completionHandler: { _, _, _ in }
     }
@@ -382,9 +382,11 @@ private final class AsyncDataTask: URLSessionDataTaskProtocol, @unchecked Sendab
     var originalRequest: URLRequest? { _originalRequest }
 
     init(
+        request: URLRequest,
         operation: @escaping @Sendable () async throws -> (Data, URLResponse),
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) {
+        self._originalRequest = request
         self.operation = operation
         self.completionHandler = completionHandler
     }
