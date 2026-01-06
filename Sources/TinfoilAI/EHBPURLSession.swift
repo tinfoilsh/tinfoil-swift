@@ -198,7 +198,10 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     }
 
     private func performStreamingRequest() async {
-        guard let session = session else { return }
+        guard let session = session else {
+            completionHandler(nil, nil, EHBPError.invalidInput("session was deallocated"))
+            return
+        }
 
         do {
             let ehbpClient = try EHBPClient(baseURL: baseURL, publicKey: publicKey)

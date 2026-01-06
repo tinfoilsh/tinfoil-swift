@@ -1342,6 +1342,227 @@ final class EHBPTests: XCTestCase {
         }
     }
 
+    /// Verifies that ALL TinfoilAI POST requests have non-empty bodies.
+    /// This is critical because EHBPClient skips encryption when body is empty:
+    /// `if let body = body, !body.isEmpty { ... }`
+    /// An empty body would bypass EHBP encryption entirely.
+    func testAllPOSTRequestsHaveNonEmptyBodies() async throws {
+        let tinfoilClient = try TinfoilAI(
+            apiKey: "test-api-key",
+            enclaveURL: server.baseURL,
+            hpkePublicKeyHex: testPublicKey.hexString
+        )
+
+        // Track all POST requests and verify they have non-empty bodies
+        var testedEndpoints: [(name: String, hasBody: Bool)] = []
+
+        // Helper to test an endpoint
+        func testEndpoint(_ name: String, action: () async throws -> Void) async {
+            server.requestStore.clear()
+            do {
+                try await action()
+            } catch {
+                // Expected - server returns invalid response
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+
+            if let request = server.requestStore.lastRequest {
+                let hasBody = request.body != nil && !request.body!.isEmpty
+                testedEndpoints.append((name, hasBody))
+            }
+        }
+
+        // Helper for streaming endpoints
+        func testStreamingEndpoint<T>(_ name: String, stream: AsyncThrowingStream<T, Error>) async {
+            server.requestStore.clear()
+            do {
+                for try await _ in stream {
+                    break
+                }
+            } catch {
+                // Expected
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+
+            if let request = server.requestStore.lastRequest {
+                let hasBody = request.body != nil && !request.body!.isEmpty
+                testedEndpoints.append((name, hasBody))
+            }
+        }
+
+        // Test all POST endpoints
+        await testEndpoint("chats") {
+            _ = try await tinfoilClient.chats(query: ChatQuery(
+                messages: [.user(.init(content: .string("test")))],
+                model: "gpt-4"
+            ))
+        }
+
+        await testStreamingEndpoint("chatsStream", stream: tinfoilClient.chatsStream(query: ChatQuery(
+            messages: [.user(.init(content: .string("test")))],
+            model: "gpt-4",
+            stream: true
+        )))
+
+        await testEndpoint("embeddings") {
+            _ = try await tinfoilClient.embeddings(query: EmbeddingsQuery(
+                input: .string("test"),
+                model: "text-embedding-ada-002"
+            ))
+        }
+
+        await testEndpoint("images") {
+            _ = try await tinfoilClient.images(query: ImagesQuery(prompt: "test"))
+        }
+
+        await testEndpoint("imageEdits") {
+            _ = try await tinfoilClient.imageEdits(query: ImageEditsQuery(
+                image: Data("fake".utf8),
+                prompt: "test"
+            ))
+        }
+
+        await testEndpoint("imageVariations") {
+            _ = try await tinfoilClient.imageVariations(query: ImageVariationsQuery(
+                image: Data("fake".utf8)
+            ))
+        }
+
+        await testEndpoint("moderations") {
+            _ = try await tinfoilClient.moderations(query: ModerationsQuery(input: "test"))
+        }
+
+        await testEndpoint("audioCreateSpeech") {
+            _ = try await tinfoilClient.audioCreateSpeech(query: AudioSpeechQuery(
+                model: .tts_1,
+                input: "test",
+                voice: .alloy
+            ))
+        }
+
+        await testStreamingEndpoint("audioCreateSpeechStream", stream: tinfoilClient.audioCreateSpeechStream(query: AudioSpeechQuery(
+            model: .tts_1,
+            input: "test",
+            voice: .alloy
+        )))
+
+        await testEndpoint("audioTranscriptions") {
+            _ = try await tinfoilClient.audioTranscriptions(query: AudioTranscriptionQuery(
+                file: Data("fake".utf8),
+                fileType: .mp3,
+                model: .whisper_1
+            ))
+        }
+
+        await testEndpoint("audioTranslations") {
+            _ = try await tinfoilClient.audioTranslations(query: AudioTranslationQuery(
+                file: Data("fake".utf8),
+                fileType: .mp3,
+                model: .whisper_1
+            ))
+        }
+
+        await testEndpoint("assistantCreate") {
+            _ = try await tinfoilClient.assistantCreate(query: AssistantsQuery(
+                model: "gpt-4",
+                name: "test",
+                description: nil,
+                instructions: nil,
+                tools: nil
+            ))
+        }
+
+        await testEndpoint("assistantModify") {
+            _ = try await tinfoilClient.assistantModify(
+                query: AssistantsQuery(
+                    model: "gpt-4",
+                    name: "test",
+                    description: nil,
+                    instructions: nil,
+                    tools: nil
+                ),
+                assistantId: "asst_123"
+            )
+        }
+
+        await testEndpoint("threads") {
+            _ = try await tinfoilClient.threads(query: ThreadsQuery(messages: []))
+        }
+
+        await testEndpoint("threadRun") {
+            _ = try await tinfoilClient.threadRun(query: ThreadRunQuery(
+                assistantId: "asst_123",
+                thread: ThreadsQuery(messages: [])
+            ))
+        }
+
+        await testEndpoint("runs") {
+            _ = try await tinfoilClient.runs(
+                threadId: "thread_123",
+                query: RunsQuery(assistantId: "asst_123")
+            )
+        }
+
+        await testEndpoint("runSubmitToolOutputs") {
+            _ = try await tinfoilClient.runSubmitToolOutputs(
+                threadId: "thread_123",
+                runId: "run_456",
+                query: RunToolOutputsQuery(toolOutputs: [
+                    .init(toolCallId: "call_123", output: "result")
+                ])
+            )
+        }
+
+        await testEndpoint("threadsAddMessage") {
+            _ = try await tinfoilClient.threadsAddMessage(
+                threadId: "thread_123",
+                query: MessageQuery(role: .user, content: "test")
+            )
+        }
+
+        await testEndpoint("files") {
+            _ = try await tinfoilClient.files(query: FilesQuery(
+                purpose: "assistants",
+                file: Data("test".utf8),
+                fileName: "test.txt",
+                contentType: "text/plain"
+            ))
+        }
+
+        await testEndpoint("createResponse") {
+            _ = try await tinfoilClient.createResponse(query: CreateModelResponseQuery(
+                input: .textInput("test"),
+                model: "gpt-4"
+            ))
+        }
+
+        await testStreamingEndpoint("createResponseStream", stream: tinfoilClient.createResponseStream(query: CreateModelResponseQuery(
+            input: .textInput("test"),
+            model: "gpt-4",
+            stream: true
+        )))
+
+        // Verify ALL endpoints have non-empty bodies
+        var failures: [String] = []
+        for (name, hasBody) in testedEndpoints {
+            if !hasBody {
+                failures.append(name)
+            }
+        }
+
+        XCTAssertTrue(
+            failures.isEmpty,
+            "SECURITY FAILURE: The following POST endpoints have empty bodies and would bypass EHBP encryption: \(failures.joined(separator: ", "))"
+        )
+
+        // Also verify we tested a reasonable number of endpoints
+        XCTAssertGreaterThanOrEqual(
+            testedEndpoints.count,
+            15,
+            "Expected to test at least 15 POST endpoints, but only tested \(testedEndpoints.count)"
+        )
+    }
+
     /// Verifies that TinfoilAI.audioCreateSpeechStream() uses EHBP encryption end-to-end
     func testTinfoilAIAudioCreateSpeechStreamUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
