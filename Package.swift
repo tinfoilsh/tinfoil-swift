@@ -13,8 +13,8 @@ let package = Package(
             targets: ["TinfoilAI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/tinfoilsh/openai-swift-fork.git", branch: "main"),
-        .package(url: "https://github.com/tinfoilsh/encrypted-http-body-protocol.git", branch: "main"),
+        .package(url: "https://github.com/tinfoilsh/openai-swift-fork.git", from: "0.0.1"),
+        .package(url: "https://github.com/tinfoilsh/encrypted-http-body-protocol.git", from: "0.1.4"),
     ],
     targets: [
         .binaryTarget(
