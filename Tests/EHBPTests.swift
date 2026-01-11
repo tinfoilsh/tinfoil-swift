@@ -619,6 +619,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIChatsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -666,6 +667,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIChatsStreamUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -713,6 +715,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIEmbeddingsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -756,6 +759,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIImagesUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -799,6 +803,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAICreateResponseUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -842,6 +847,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAICreateResponseStreamUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -888,6 +894,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIModerationsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -927,6 +934,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIImageEditsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -957,6 +965,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIImageVariationsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -984,6 +993,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIAudioCreateSpeechUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1025,6 +1035,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIAudioTranscriptionsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1056,6 +1067,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIAudioTranslationsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1087,6 +1099,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIAssistantCreateUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1130,6 +1143,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIThreadsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1160,6 +1174,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIThreadRunUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1203,6 +1218,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIRunsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1230,6 +1246,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIThreadsAddMessageUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1267,6 +1284,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIFilesUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1303,6 +1321,7 @@ final class EHBPTests: XCTestCase {
         XCTAssertThrowsError(
             try TinfoilAI(
                 apiKey: "test-api-key",
+                baseURL: "https://example.com",
                 enclaveURL: "https://example.com",
                 hpkePublicKeyHex: nil
             ),
@@ -1325,6 +1344,7 @@ final class EHBPTests: XCTestCase {
         XCTAssertThrowsError(
             try TinfoilAI(
                 apiKey: "test-api-key",
+                baseURL: "https://example.com",
                 enclaveURL: "https://example.com",
                 hpkePublicKeyHex: ""
             ),
@@ -1349,6 +1369,7 @@ final class EHBPTests: XCTestCase {
     func testAllPOSTRequestsHaveNonEmptyBodies() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1567,6 +1588,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIAudioCreateSpeechStreamUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1607,6 +1629,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIAudioTranscriptionsVerboseUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1639,6 +1662,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIAudioTranscriptionStreamUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1669,6 +1693,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIAssistantModifyUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
@@ -1712,6 +1737,7 @@ final class EHBPTests: XCTestCase {
     func testTinfoilAIRunSubmitToolOutputsUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
+            baseURL: server.baseURL,
             enclaveURL: server.baseURL,
             hpkePublicKeyHex: testPublicKey.hexString
         )
