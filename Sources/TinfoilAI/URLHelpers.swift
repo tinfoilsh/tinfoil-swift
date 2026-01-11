@@ -41,11 +41,12 @@ internal enum URLHelpers {
         return port != nil ? "\(host):\(port!)" : host
     }
 
-    /// Extracts the origin (host:port) from a URL string for comparison
+    /// Extracts the origin (scheme://host:port) from a URL string for comparison
     /// - Parameter urlString: The URL string to extract origin from
-    /// - Returns: The origin string (host:port or just host), or empty string if invalid
+    /// - Returns: The origin string (scheme://host:port), or empty string if invalid
     static func origin(from urlString: String) -> String {
         guard let components = try? parseURL(urlString) else { return "" }
-        return buildHostWithPort(host: components.host, port: components.port)
+        let hostWithPort = buildHostWithPort(host: components.host, port: components.port)
+        return "\(components.scheme)://\(hostWithPort)"
     }
 } 
