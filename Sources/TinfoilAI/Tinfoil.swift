@@ -14,13 +14,19 @@ public class TinfoilAI {
     /// Creates a new TinfoilAI client configured for communication with a Tinfoil enclave
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
-    ///   - enclaveURL: Optional URL of the Tinfoil enclave. If not provided, will fetch from router API
+    ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
+    ///   - enclaveURL: Optional URL of the Tinfoil enclave to verify. If not provided, will fetch from router API.
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - onVerification: Optional callback for verification results
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
+    ///
+    /// When using a proxy, set `baseURL` to your proxy server (e.g., "http://localhost:8080").
+    /// The SDK will verify the enclave and encrypt requests with EHBP, but send them to the proxy.
+    /// The proxy receives the `X-Tinfoil-Enclave-Url` header to know where to forward requests.
     public static func create(
         apiKey: String? = nil,
+        baseURL: String? = nil,
         enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         parsingOptions: ParsingOptions = .relaxed,
@@ -39,6 +45,8 @@ public class TinfoilAI {
             finalEnclaveURL = "https://\(routerAddress)"
         }
 
+        let finalBaseURL = baseURL ?? finalEnclaveURL
+
         let verifier = SecureClient(
             githubRepo: githubRepo,
             enclaveURL: finalEnclaveURL
@@ -51,6 +59,7 @@ public class TinfoilAI {
 
             return try TinfoilAI(
                 apiKey: finalApiKey,
+                baseURL: finalBaseURL,
                 enclaveURL: finalEnclaveURL,
                 hpkePublicKeyHex: groundTruth.hpkePublicKey,
                 parsingOptions: parsingOptions
@@ -65,6 +74,7 @@ public class TinfoilAI {
     /// Internal initializer that sets up the EHBP session and OpenAI client
     internal convenience init(
         apiKey: String,
+        baseURL: String,
         enclaveURL: String,
         hpkePublicKeyHex: String?,
         parsingOptions: ParsingOptions = .relaxed
@@ -78,16 +88,18 @@ public class TinfoilAI {
         }
 
         let ehbpSession = try EHBPURLSession(
-            baseURL: enclaveURL,
+            baseURL: baseURL,
+            enclaveURL: enclaveURL,
             publicKey: hpkePublicKey
         )
 
         let ehbpStreamingFactory = EHBPURLSessionFactory(
-            baseURL: enclaveURL,
+            baseURL: baseURL,
+            enclaveURL: enclaveURL,
             publicKey: hpkePublicKey
         )
 
-        let urlComponents = try URLHelpers.parseURL(enclaveURL)
+        let urlComponents = try URLHelpers.parseURL(baseURL)
         let hostWithPort = URLHelpers.buildHostWithPort(host: urlComponents.host, port: urlComponents.port)
 
         let configuration = OpenAI.Configuration(

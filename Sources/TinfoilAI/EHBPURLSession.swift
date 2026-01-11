@@ -10,25 +10,32 @@ import FoundationNetworking
 import Combine
 #endif
 
+/// Header name for communicating the verified enclave URL to proxies
+private let enclaveURLHeaderName = "X-Tinfoil-Enclave-Url"
+
 /// Factory for creating EHBP-enabled URLSession instances for streaming requests.
 /// Implements URLSessionFactory to integrate with OpenAI SDK's streaming infrastructure.
 public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
     private let baseURL: String
+    private let enclaveURL: String?
     private let publicKey: Data
 
     /// Creates an EHBP URLSession factory
     ///
     /// - Parameters:
-    ///   - baseURL: Base URL for the server (e.g., "https://api.example.com")
+    ///   - baseURL: Base URL where requests are sent (e.g., proxy server or enclave directly)
+    ///   - enclaveURL: URL of the verified enclave (added as header when different from baseURL)
     ///   - publicKey: Server's X25519 public key (32 bytes)
-    public init(baseURL: String, publicKey: Data) {
+    public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        self.enclaveURL = enclaveURL
         self.publicKey = publicKey
     }
 
     public func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
         return EHBPStreamingSession(
             baseURL: baseURL,
+            enclaveURL: enclaveURL,
             publicKey: publicKey,
             delegate: delegate
         )
@@ -39,13 +46,15 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
 /// Wraps requests with EHBP encryption and decrypts streaming responses on the fly.
 internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendable {
     private let baseURL: String
+    private let enclaveURL: String?
     private let publicKey: Data
     private weak var delegate: URLSessionDataDelegateProtocol?
     private var activeTasks: [ObjectIdentifier: EHBPStreamingDataTask] = [:]
     private let lock = NSLock()
 
-    init(baseURL: String, publicKey: Data, delegate: URLSessionDataDelegateProtocol) {
+    init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, delegate: URLSessionDataDelegateProtocol) {
         self.baseURL = baseURL
+        self.enclaveURL = enclaveURL
         self.publicKey = publicKey
         self.delegate = delegate
     }
@@ -57,6 +66,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
         let task = EHBPStreamingDataTask(
             request: request,
             baseURL: baseURL,
+            enclaveURL: enclaveURL,
             publicKey: publicKey,
             delegate: delegate,
             session: self,
@@ -141,6 +151,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
 internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @unchecked Sendable {
     private let request: URLRequest
     private let baseURL: String
+    private let enclaveURL: String?
     private let publicKey: Data
     private weak var delegate: URLSessionDataDelegateProtocol?
     private weak var session: EHBPStreamingSession?
@@ -160,6 +171,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     init(
         request: URLRequest,
         baseURL: String,
+        enclaveURL: String? = nil,
         publicKey: Data,
         delegate: URLSessionDataDelegateProtocol?,
         session: EHBPStreamingSession,
@@ -167,6 +179,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     ) {
         self.request = request
         self.baseURL = baseURL
+        self.enclaveURL = enclaveURL
         self.publicKey = publicKey
         self.delegate = delegate
         self.session = session
@@ -215,6 +228,14 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             var headers: [String: String] = [:]
             if let allHeaders = request.allHTTPHeaderFields {
                 headers = allHeaders
+            }
+
+            if let enclaveURL = enclaveURL, !enclaveURL.isEmpty {
+                let baseOrigin = URL(string: baseURL)?.host ?? ""
+                let enclaveOrigin = URL(string: enclaveURL)?.host ?? ""
+                if baseOrigin != enclaveOrigin {
+                    headers[enclaveURLHeaderName] = enclaveURL
+                }
             }
 
             let (stream, response) = try await ehbpClient.requestStream(
@@ -266,16 +287,19 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
 public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     private let ehbpClient: EHBPClient
     private let baseURL: String
+    private let enclaveURL: String?
 
     /// Creates an EHBP URLSession with the given server public key
     ///
     /// - Parameters:
-    ///   - baseURL: Base URL for the server (e.g., "https://api.example.com")
+    ///   - baseURL: Base URL where requests are sent (e.g., proxy server or enclave directly)
+    ///   - enclaveURL: URL of the verified enclave (added as header when different from baseURL)
     ///   - publicKey: Server's X25519 public key (32 bytes)
     ///   - session: Underlying URLSession to use (defaults to shared)
-    public init(baseURL: String, publicKey: Data, session: URLSession = .shared) throws {
+    public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, session: URLSession = .shared) throws {
         self.ehbpClient = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        self.enclaveURL = enclaveURL
     }
 
     // MARK: - URLSessionProtocol
@@ -350,6 +374,14 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         var headers: [String: String] = [:]
         if let allHeaders = request.allHTTPHeaderFields {
             headers = allHeaders
+        }
+
+        if let enclaveURL = enclaveURL, !enclaveURL.isEmpty {
+            let baseOrigin = URL(string: baseURL)?.host ?? ""
+            let enclaveOrigin = URL(string: enclaveURL)?.host ?? ""
+            if baseOrigin != enclaveOrigin {
+                headers[enclaveURLHeaderName] = enclaveURL
+            }
         }
 
         let (data, response) = try await ehbpClient.request(
