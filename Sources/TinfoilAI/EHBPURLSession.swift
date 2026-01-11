@@ -231,9 +231,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             }
 
             if let enclaveURL = enclaveURL, !enclaveURL.isEmpty {
-                let baseOrigin = URL(string: baseURL)?.host ?? ""
-                let enclaveOrigin = URL(string: enclaveURL)?.host ?? ""
-                if baseOrigin != enclaveOrigin {
+                if URLHelpers.origin(from: baseURL) != URLHelpers.origin(from: enclaveURL) {
                     headers[enclaveURLHeaderName] = enclaveURL
                 }
             }
@@ -377,9 +375,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         }
 
         if let enclaveURL = enclaveURL, !enclaveURL.isEmpty {
-            let baseOrigin = URL(string: baseURL)?.host ?? ""
-            let enclaveOrigin = URL(string: enclaveURL)?.host ?? ""
-            if baseOrigin != enclaveOrigin {
+            if URLHelpers.origin(from: baseURL) != URLHelpers.origin(from: enclaveURL) {
                 headers[enclaveURLHeaderName] = enclaveURL
             }
         }
