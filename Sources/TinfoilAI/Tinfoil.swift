@@ -100,11 +100,12 @@ public class TinfoilAI {
         )
 
         let urlComponents = try URLHelpers.parseURL(baseURL)
-        let hostWithPort = URLHelpers.buildHostWithPort(host: urlComponents.host, port: urlComponents.port)
+        let defaultPort = urlComponents.scheme == "https" ? 443 : 80
 
         let configuration = OpenAI.Configuration(
             token: apiKey,
-            host: hostWithPort,
+            host: urlComponents.host,
+            port: urlComponents.port ?? defaultPort,
             scheme: urlComponents.scheme,
             parsingOptions: parsingOptions
         )
