@@ -117,7 +117,8 @@ let client = try await TinfoilAI.create(
 ```swift
 let client = try await TinfoilAI.create(
     apiKey: String? = nil,              // API key (uses TINFOIL_API_KEY env var if nil)
-    enclaveURL: String? = nil,           // Custom enclave URL (auto-selects router if nil)
+    baseURL: String? = nil,             // Proxy server URL (requests go directly to enclave if nil)
+    enclaveURL: String? = nil,          // Custom enclave URL (auto-selects router if nil)
     githubRepo: String = "tinfoilsh/confidential-model-router", // GitHub repo for verification
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
     onVerification: VerificationCallback? = nil // Verification callback
@@ -125,6 +126,10 @@ let client = try await TinfoilAI.create(
 
 // Returns: TinfoilAI - A client with the same API as OpenAI
 ```
+
+### Proxy Server Support
+
+See the [Proxy Server Guide](https://docs.tinfoil.sh/guides/proxy-server) for routing requests through a proxy while maintaining end-to-end encryption.
 
 ## API Documentation
 
