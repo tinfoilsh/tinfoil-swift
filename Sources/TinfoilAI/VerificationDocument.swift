@@ -74,6 +74,104 @@ public struct HardwareMeasurement: Codable {
     }
 }
 
+/// Attestation document format and body
+public struct AttestationDocument: Codable {
+    public let format: String
+    public let body: String
+
+    public init(format: String, body: String) {
+        self.format = format
+        self.body = body
+    }
+}
+
+/// Complete attestation bundle from single-request verification.
+/// Contains all material needed for verification without additional network calls.
+public struct AttestationBundle: Codable {
+    /// Selected enclave domain hostname
+    public let domain: String
+    /// Enclave attestation report (from router's /.well-known/tinfoil-attestation)
+    public let enclaveAttestationReport: AttestationDocument
+    /// SHA256 digest of the release
+    public let digest: String
+    /// Sigstore bundle for code provenance verification (opaque JSON)
+    public let sigstoreBundle: AnyCodable
+    /// Base64-encoded VCEK certificate (DER format)
+    public let vcek: String
+    /// PEM-encoded enclave TLS certificate (contains HPKE key and attestation hash in SANs)
+    public let enclaveCert: String
+
+    public init(
+        domain: String,
+        enclaveAttestationReport: AttestationDocument,
+        digest: String,
+        sigstoreBundle: AnyCodable,
+        vcek: String,
+        enclaveCert: String
+    ) {
+        self.domain = domain
+        self.enclaveAttestationReport = enclaveAttestationReport
+        self.digest = digest
+        self.sigstoreBundle = sigstoreBundle
+        self.vcek = vcek
+        self.enclaveCert = enclaveCert
+    }
+}
+
+/// Type-erased Codable wrapper for arbitrary JSON values
+public struct AnyCodable: Codable {
+    public let value: Any
+
+    public init(_ value: Any) {
+        self.value = value
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if container.decodeNil() {
+            self.value = NSNull()
+        } else if let bool = try? container.decode(Bool.self) {
+            self.value = bool
+        } else if let int = try? container.decode(Int.self) {
+            self.value = int
+        } else if let double = try? container.decode(Double.self) {
+            self.value = double
+        } else if let string = try? container.decode(String.self) {
+            self.value = string
+        } else if let array = try? container.decode([AnyCodable].self) {
+            self.value = array.map { $0.value }
+        } else if let dictionary = try? container.decode([String: AnyCodable].self) {
+            self.value = dictionary.mapValues { $0.value }
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unable to decode value")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+
+        switch value {
+        case is NSNull:
+            try container.encodeNil()
+        case let bool as Bool:
+            try container.encode(bool)
+        case let int as Int:
+            try container.encode(int)
+        case let double as Double:
+            try container.encode(double)
+        case let string as String:
+            try container.encode(string)
+        case let array as [Any]:
+            try container.encode(array.map { AnyCodable($0) })
+        case let dictionary as [String: Any]:
+            try container.encode(dictionary.mapValues { AnyCodable($0) })
+        default:
+            throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "Unable to encode value"))
+        }
+    }
+}
+
 /// Complete verification document containing all verification details
 public struct VerificationDocument: Codable {
     public let configRepo: String
