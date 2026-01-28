@@ -15,8 +15,12 @@ public class TinfoilAI {
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
-    ///   - enclaveURL: Optional URL of the Tinfoil enclave to verify. If not provided, will fetch from router API.
+    ///   - enclaveURL: Optional URL of the Tinfoil enclave to verify. If not provided, will fetch from attestation bundle or router API.
     ///   - githubRepo: GitHub repository containing the enclave config
+    ///   - attestationBundleURL: Optional URL to fetch a precomputed attestation bundle from.
+    ///     This is primarily useful when you want verification to use an externally
+    ///     produced bundle (e.g., fetched via your own routing layer) instead of
+    ///     letting the client fetch it from the default router flow.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - onVerification: Optional callback for verification results
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
@@ -29,6 +33,7 @@ public class TinfoilAI {
         baseURL: String? = nil,
         enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
+        attestationBundleURL: String? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         onVerification: VerificationCallback? = nil
     ) async throws -> TinfoilAI {
@@ -38,11 +43,15 @@ public class TinfoilAI {
         }
 
         let finalEnclaveURL: String
+        var attestationBundle: AttestationBundle?
+
         if let providedURL = enclaveURL {
             finalEnclaveURL = providedURL
         } else {
-            let routerAddress = try await RouterManager.fetchRouter()
-            finalEnclaveURL = "https://\(routerAddress)"
+            // Fetch attestation bundle (from custom URL or default ATC endpoint)
+            let bundleURL = attestationBundleURL ?? TinfoilConstants.atcAttestationURL
+            attestationBundle = try await RouterManager.fetchAttestationBundle(from: bundleURL)
+            finalEnclaveURL = "https://\(attestationBundle!.domain)"
         }
 
         let finalBaseURL = baseURL ?? finalEnclaveURL
