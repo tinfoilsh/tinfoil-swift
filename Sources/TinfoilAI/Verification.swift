@@ -34,6 +34,7 @@ public struct HardwareMeasurementData: Codable {
 
 /// Ground truth structure matching Go's client.GroundTruth
 public struct GroundTruth: Codable {
+    public let enclaveHost: String?
     public let tlsPublicKey: String
     public let hpkePublicKey: String?
     public let digest: String
@@ -44,6 +45,7 @@ public struct GroundTruth: Codable {
     public let enclaveFingerprint: String
 
     private enum CodingKeys: String, CodingKey {
+        case enclaveHost = "enclave_host"
         case tlsPublicKey = "tls_public_key"
         case hpkePublicKey = "hpke_public_key"
         case digest
