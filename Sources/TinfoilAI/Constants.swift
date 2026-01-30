@@ -13,4 +13,7 @@ public enum TinfoilConstants {
 
     /// ATC API URL for fetching attestation bundles
     public static let atcAttestationURL = "\(atcBaseURL)/attestation"
+
+    /// Placeholder for unknown host values
+    internal static let unknownHost = "unknown"
 }
