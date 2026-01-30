@@ -118,7 +118,7 @@ public class SecureClient {
                 let urlComponents = try URLHelpers.parseURL(enclaveURL)
                 jsonString = TinfoilVerifier.ClientVerifyJSON(urlComponents.host, githubRepo, nil, &error)
             } else {
-                // Default: fetch from Tinfoil's attestation service
+                // Default: fetch from Tinfoil's attestation bundle URL
                 jsonString = TinfoilVerifier.ClientFetchAndVerifyJSON(githubRepo, nil, &error)
             }
 
