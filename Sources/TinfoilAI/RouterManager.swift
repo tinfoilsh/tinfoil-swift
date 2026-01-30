@@ -74,42 +74,4 @@ public enum RouterManager {
             throw RouterError.networkError(error.localizedDescription)
         }
     }
-
-    /// Fetches a complete attestation bundle from ATC (single-request mode).
-    /// The bundle contains all material needed for verification without additional network calls.
-    ///
-    /// - Parameter attestationURL: Optional URL to fetch the bundle from. Defaults to ATC attestation endpoint.
-    /// - Returns: The complete attestation bundle
-    /// - Throws: RouterError if the request fails
-    public static func fetchAttestationBundle(
-        from attestationURL: String = TinfoilConstants.atcAttestationURL
-    ) async throws -> AttestationBundle {
-        guard let url = URL(string: attestationURL) else {
-            throw RouterError.networkError("Invalid URL: \(attestationURL)")
-        }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw RouterError.networkError("Invalid response type")
-            }
-
-            guard httpResponse.statusCode == 200 else {
-                throw RouterError.networkError("Failed to fetch attestation bundle: \(httpResponse.statusCode) \(HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode))")
-            }
-
-            do {
-                let bundle = try JSONDecoder().decode(AttestationBundle.self, from: data)
-                return bundle
-            } catch {
-                throw RouterError.invalidResponse
-            }
-
-        } catch let error as RouterError {
-            throw error
-        } catch {
-            throw RouterError.networkError(error.localizedDescription)
-        }
-    }
 }
