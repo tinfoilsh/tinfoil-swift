@@ -10,9 +10,6 @@ import FoundationNetworking
 import Combine
 #endif
 
-/// Header name for communicating the verified enclave URL to proxies
-private let enclaveURLHeaderName = "X-Tinfoil-Enclave-Url"
-
 /// Factory for creating EHBP-enabled URLSession instances for streaming requests.
 /// Implements URLSessionFactory to integrate with OpenAI SDK's streaming infrastructure.
 public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
@@ -229,12 +226,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             if let allHeaders = request.allHTTPHeaderFields {
                 headers = allHeaders
             }
-
-            if let enclaveURL = enclaveURL, !enclaveURL.isEmpty {
-                if URLHelpers.origin(from: baseURL) != URLHelpers.origin(from: enclaveURL) {
-                    headers[enclaveURLHeaderName] = enclaveURL
-                }
-            }
+            URLHelpers.addProxyHeaderIfNeeded(to: &headers, baseURL: baseURL, enclaveURL: enclaveURL)
 
             let (stream, response) = try await ehbpClient.requestStream(
                 method: method,
@@ -365,12 +357,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         if let allHeaders = request.allHTTPHeaderFields {
             headers = allHeaders
         }
-
-        if let enclaveURL = enclaveURL, !enclaveURL.isEmpty {
-            if URLHelpers.origin(from: baseURL) != URLHelpers.origin(from: enclaveURL) {
-                headers[enclaveURLHeaderName] = enclaveURL
-            }
-        }
+        URLHelpers.addProxyHeaderIfNeeded(to: &headers, baseURL: baseURL, enclaveURL: enclaveURL)
 
         let (data, response) = try await ehbpClient.request(
             method: method,
