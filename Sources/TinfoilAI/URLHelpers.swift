@@ -21,8 +21,8 @@ internal enum URLHelpers {
         
         guard let url = URL(string: normalizedURL),
               let host = url.host else {
-            throw NSError(domain: "sh.tinfoil.url-helpers",
-                          code: 1001,
+            throw NSError(domain: TinfoilConstants.urlHelpersErrorDomain,
+                          code: TinfoilConstants.invalidURLErrorCode,
                           userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(urlString)"])
         }
         

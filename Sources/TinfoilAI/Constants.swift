@@ -13,4 +13,10 @@ public enum TinfoilConstants {
 
     /// Placeholder for unknown host values
     internal static let unknownHost = "unknown"
+
+    /// Error domain for URL parsing errors
+    internal static let urlHelpersErrorDomain = "sh.tinfoil.url-helpers"
+
+    /// Error code for invalid URL
+    internal static let invalidURLErrorCode = 1001
 }
