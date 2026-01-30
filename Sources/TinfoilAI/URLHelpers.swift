@@ -60,4 +60,20 @@ internal enum URLHelpers {
         }
         return path
     }
+
+    /// Header name for communicating the verified enclave URL to proxies
+    static let enclaveURLHeaderName = "X-Tinfoil-Enclave-Url"
+
+    /// Adds the proxy header to the headers dictionary if the baseURL and enclaveURL have different origins.
+    /// This header tells the proxy where to forward the encrypted request.
+    /// - Parameters:
+    ///   - headers: The headers dictionary to modify
+    ///   - baseURL: The URL where requests are sent (e.g., proxy server)
+    ///   - enclaveURL: The URL of the verified enclave
+    static func addProxyHeaderIfNeeded(to headers: inout [String: String], baseURL: String, enclaveURL: String?) {
+        guard let enclaveURL = enclaveURL, !enclaveURL.isEmpty else { return }
+        if origin(from: baseURL) != origin(from: enclaveURL) {
+            headers[enclaveURLHeaderName] = enclaveURL
+        }
+    }
 } 
