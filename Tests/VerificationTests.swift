@@ -7,7 +7,7 @@ final class VerificationTests: XCTestCase {
     // MARK: - New Verification Format Tests
 
     func testNewVerificationFormatFields() async throws {
-        // Use ATC-based SecureClient (default flow)
+        // Use SecureClient with default attestation bundle flow
         let secureClient = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
 
         do {
@@ -22,7 +22,7 @@ final class VerificationTests: XCTestCase {
             // Verify HPKE public key exists (may be empty for some configurations)
             XCTAssertNotNil(groundTruth.hpkePublicKey, "HPKE public key field should exist")
 
-            // Verify enclave host is populated from ATC flow
+            // Verify enclave host is populated from attestation bundle
             XCTAssertNotNil(groundTruth.enclaveHost, "Enclave host should exist")
             XCTAssertFalse(groundTruth.enclaveHost?.isEmpty ?? true, "Enclave host should not be empty")
 

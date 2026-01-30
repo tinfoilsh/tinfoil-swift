@@ -5,10 +5,10 @@ public enum TinfoilConstants {
     /// Default GitHub repository for the inference proxy
     public static let defaultGithubRepo = "tinfoilsh/confidential-model-router"
 
-    /// ATC (Attestation and Trust Center) base URL
+    /// Base URL for Tinfoil's attestation service
     public static let atcBaseURL = "https://atc.tinfoil.sh"
 
-    /// ATC API URL for fetching attestation bundles
+    /// Default URL for fetching attestation bundles
     public static let atcAttestationURL = "\(atcBaseURL)/attestation"
 
     /// Placeholder for unknown host values

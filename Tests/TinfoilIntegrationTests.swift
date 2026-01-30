@@ -25,19 +25,19 @@ final class TinfoilIntegrationTests: XCTestCase {
         }
     }
 
-    func testCreateWithDefaultATCEndpoint() async throws {
-        // Test that when no attestation bundle URL is provided, default ATC is used
+    func testCreateWithDefaultAttestationEndpoint() async throws {
+        // Test that when no attestation bundle URL is provided, default Tinfoil endpoint is used
         // This test validates the behavior without making actual network calls
 
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key"
-                // No attestationBundleURL provided - should use default ATC endpoint
+                // No attestationBundleURL provided - should use default endpoint
             )
             // If API key is valid, this may succeed - that's acceptable
         } catch {
             // Expected to fail (either during fetch or verification)
-            // We're validating that the default ATC path is triggered
+            // We're validating that the default attestation path is triggered
             if let tinfoilError = error as? TinfoilError {
                 XCTAssertNotEqual(tinfoilError, TinfoilError.missingAPIKey)
             }
