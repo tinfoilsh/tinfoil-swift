@@ -12,11 +12,6 @@ public enum VerificationError: Error {
 public struct Measurement: Codable {
     public let type: String
     public let registers: [String]
-    
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case registers
-    }
 }
 
 /// Hardware measurement structure for TDX platforms
