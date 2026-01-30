@@ -111,14 +111,15 @@ public class SecureClient {
             var error: NSError?
 
             if let attestationBundleURL = attestationBundleURL, !attestationBundleURL.isEmpty {
-                // Verification using attestation bundle
-                jsonString = TinfoilVerifier.ClientVerifyFromATCURLJSON(attestationBundleURL, githubRepo, nil, &error)
+                // Verification using custom attestation bundle URL
+                jsonString = TinfoilVerifier.ClientFetchAndVerifyFromURLJSON(attestationBundleURL, githubRepo, nil, &error)
             } else if let enclaveURL = enclaveURL {
                 // Direct enclave verification
                 let urlComponents = try URLHelpers.parseURL(enclaveURL)
                 jsonString = TinfoilVerifier.ClientVerifyJSON(urlComponents.host, githubRepo, nil, &error)
             } else {
-                throw VerificationError.verificationFailed("No enclave URL or attestation bundle URL configured")
+                // Default: fetch from Tinfoil's attestation service
+                jsonString = TinfoilVerifier.ClientFetchAndVerifyJSON(githubRepo, nil, &error)
             }
 
             if let error = error {
