@@ -181,7 +181,7 @@ public class SecureClient {
             } else if let existingURL = enclaveURL, let urlComponents = try? URLHelpers.parseURL(existingURL) {
                 enclaveHost = urlComponents.host
             } else {
-                enclaveHost = "unknown"
+                enclaveHost = TinfoilConstants.unknownHost
             }
 
             let codeMeasurement = AttestationMeasurement(
@@ -284,7 +284,7 @@ public class SecureClient {
         if let enclaveURL = enclaveURL {
             host = (try? URLHelpers.parseURL(enclaveURL))?.host ?? enclaveURL
         } else {
-            host = "unknown"
+            host = TinfoilConstants.unknownHost
         }
 
         lastVerificationDocument = VerificationDocument(
