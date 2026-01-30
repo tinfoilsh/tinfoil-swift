@@ -55,8 +55,9 @@ public struct GroundTruth: Codable {
 /// A client for securely verifying code integrity through remote attestation
 public class SecureClient {
     private let githubRepo: String
-    private var enclaveURL: String?
+    private let configuredEnclaveURL: String?
     private let attestationBundleURL: String?
+    private var discoveredEnclaveURL: String?
     private var groundTruth: GroundTruth?
     private var lastVerificationDocument: VerificationDocument?
 
@@ -69,7 +70,7 @@ public class SecureClient {
         enclaveURL: String
     ) {
         self.githubRepo = githubRepo
-        self.enclaveURL = enclaveURL
+        self.configuredEnclaveURL = enclaveURL
         self.attestationBundleURL = nil
     }
 
@@ -82,12 +83,12 @@ public class SecureClient {
         attestationBundleURL: String? = nil
     ) {
         self.githubRepo = githubRepo
-        self.enclaveURL = nil
+        self.configuredEnclaveURL = nil
         self.attestationBundleURL = attestationBundleURL
     }
 
     /// The verified enclave URL (available after successful verification)
-    public var verifiedEnclaveURL: String? { enclaveURL }
+    public var verifiedEnclaveURL: String? { discoveredEnclaveURL ?? configuredEnclaveURL }
 
     /// The last verified ground truth
     public var verifiedGroundTruth: GroundTruth? { groundTruth }
@@ -113,9 +114,9 @@ public class SecureClient {
             if let attestationBundleURL = attestationBundleURL, !attestationBundleURL.isEmpty {
                 // Verification using custom attestation bundle URL
                 jsonString = TinfoilVerifier.ClientFetchAndVerifyFromURLJSON(attestationBundleURL, githubRepo, nil, &error)
-            } else if let enclaveURL = enclaveURL {
+            } else if let configuredEnclaveURL = configuredEnclaveURL {
                 // Direct enclave verification
-                let urlComponents = try URLHelpers.parseURL(enclaveURL)
+                let urlComponents = try URLHelpers.parseURL(configuredEnclaveURL)
                 jsonString = TinfoilVerifier.ClientVerifyJSON(urlComponents.host, githubRepo, nil, &error)
             } else {
                 // Default: fetch from Tinfoil's attestation bundle URL
@@ -160,15 +161,12 @@ public class SecureClient {
             let groundTruth = try decoder.decode(GroundTruth.self, from: jsonData)
             self.groundTruth = groundTruth
 
-            // Get enclave host from ground truth (for bundle flow) or existing URL
+            // Get enclave host from ground truth (for bundle flow) or configured URL
             let enclaveHost: String
             if let host = groundTruth.enclaveHost, !host.isEmpty {
                 enclaveHost = host
-                // Update enclaveURL so verifiedEnclaveURL returns the verified domain
-                if self.enclaveURL == nil {
-                    self.enclaveURL = "https://\(host)"
-                }
-            } else if let existingURL = enclaveURL, let urlComponents = try? URLHelpers.parseURL(existingURL) {
+                self.discoveredEnclaveURL = "https://\(host)"
+            } else if let existingURL = configuredEnclaveURL, let urlComponents = try? URLHelpers.parseURL(existingURL) {
                 enclaveHost = urlComponents.host
             } else {
                 enclaveHost = TinfoilConstants.unknownHost
@@ -271,8 +269,8 @@ public class SecureClient {
     /// Helper method to build a failure verification document
     private func buildFailureDocument(error: Error, steps: VerificationDocument.Steps) {
         let host: String
-        if let enclaveURL = enclaveURL {
-            host = (try? URLHelpers.parseURL(enclaveURL))?.host ?? enclaveURL
+        if let url = discoveredEnclaveURL ?? configuredEnclaveURL {
+            host = (try? URLHelpers.parseURL(url))?.host ?? url
         } else {
             host = TinfoilConstants.unknownHost
         }
