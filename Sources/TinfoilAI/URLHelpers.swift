@@ -38,7 +38,7 @@ internal enum URLHelpers {
     ///   - port: Optional port number
     /// - Returns: Host string with port appended if provided
     static func buildHostWithPort(host: String, port: Int?) -> String {
-        return port != nil ? "\(host):\(port!)" : host
+        return port.map { "\(host):\($0)" } ?? host
     }
 
     /// Extracts the origin (scheme://host:port) from a URL string for comparison
