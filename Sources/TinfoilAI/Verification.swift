@@ -60,11 +60,12 @@ public struct GroundTruth: Codable {
 /// A client for securely verifying code integrity through remote attestation
 public class SecureClient {
     private let githubRepo: String
-    private let enclaveURL: String
+    private var enclaveURL: String?
+    private let attestationBundleURL: String?
     private var groundTruth: GroundTruth?
     private var lastVerificationDocument: VerificationDocument?
 
-    /// Initialize a secure client with required configuration
+    /// Initialize a secure client for direct enclave verification
     /// - Parameters:
     ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - enclaveURL: URL for the enclave attestation endpoint
@@ -74,8 +75,27 @@ public class SecureClient {
     ) {
         self.githubRepo = githubRepo
         self.enclaveURL = enclaveURL
+        self.attestationBundleURL = nil
     }
-    
+
+    /// Initialize a secure client for ATC-based verification (single-request flow)
+    /// - Parameters:
+    ///   - githubRepo: GitHub repository in the format "org/repo"
+    ///   - attestationBundleURL: Base URL for fetching the attestation bundle. If nil, uses default ATC endpoint.
+    public init(
+        githubRepo: String = TinfoilConstants.defaultGithubRepo,
+        attestationBundleURL: String? = nil
+    ) {
+        self.githubRepo = githubRepo
+        self.enclaveURL = nil
+        self.attestationBundleURL = attestationBundleURL ?? ""
+    }
+
+    /// Returns the verified enclave URL (available after successful verification)
+    public func getEnclaveURL() -> String? {
+        return enclaveURL
+    }
+
     /// Returns the last verified ground truth
     public func getGroundTruth() -> GroundTruth? {
         return groundTruth
@@ -85,7 +105,7 @@ public class SecureClient {
     public func getVerificationDocument() -> VerificationDocument? {
         return lastVerificationDocument
     }
-    
+
     /// Verifies the committed code and runtime binaries using remote attestation
     /// - Returns: The ground truth containing all verification results
     public func verify() async throws -> GroundTruth {
@@ -96,19 +116,21 @@ public class SecureClient {
             compareMeasurements: .pending()
         )
 
-        let urlComponents: (url: URL, host: String, scheme: String, port: Int?)
-        do {
-            urlComponents = try URLHelpers.parseURL(enclaveURL)
-        } catch {
-            let verificationError = VerificationError.verificationFailed("Invalid enclave URL: \(error.localizedDescription)")
-            buildFailureDocument(error: verificationError, steps: steps)
-            throw verificationError
-        }
-
         let jsonString: String
+
         do {
             var error: NSError?
-            jsonString = TinfoilVerifier.ClientVerifyJSON(urlComponents.host, githubRepo, nil, &error)
+
+            if let attestationBundleURL = attestationBundleURL {
+                // ATC-based verification (single-request flow)
+                jsonString = TinfoilVerifier.ClientVerifyFromATCURLJSON(attestationBundleURL, githubRepo, nil, &error)
+            } else if let enclaveURL = enclaveURL {
+                // Direct enclave verification
+                let urlComponents = try URLHelpers.parseURL(enclaveURL)
+                jsonString = TinfoilVerifier.ClientVerifyJSON(urlComponents.host, githubRepo, nil, &error)
+            } else {
+                throw VerificationError.verificationFailed("No enclave URL or ATC URL configured")
+            }
 
             if let error = error {
                 throw error
@@ -122,53 +144,10 @@ public class SecureClient {
             )
         } catch let error as NSError {
             let errorMessage = error.localizedDescription
-
-            // Check error prefix to determine which step failed
-            if errorMessage.starts(with: "fetchDigest:") {
-                steps = VerificationDocument.Steps(
-                    fetchDigest: .failed(errorMessage),
-                    verifyCode: .pending(),
-                    verifyEnclave: .pending(),
-                    compareMeasurements: .pending()
-                )
-            } else if errorMessage.starts(with: "verifyCode:") {
-                steps = VerificationDocument.Steps(
-                    fetchDigest: .success(),
-                    verifyCode: .failed(errorMessage),
-                    verifyEnclave: .pending(),
-                    compareMeasurements: .pending()
-                )
-            } else if errorMessage.starts(with: "verifyEnclave:") {
-                steps = VerificationDocument.Steps(
-                    fetchDigest: .success(),
-                    verifyCode: .success(),
-                    verifyEnclave: .failed(errorMessage),
-                    compareMeasurements: .pending()
-                )
-            } else if errorMessage.starts(with: "verifyHardware:") {
-                steps = VerificationDocument.Steps(
-                    fetchDigest: .success(),
-                    verifyCode: .success(),
-                    verifyEnclave: .success(),
-                    compareMeasurements: .failed(errorMessage)
-                )
-            } else if errorMessage.starts(with: "validateTLS:") || errorMessage.starts(with: "measurements:") {
-                steps = VerificationDocument.Steps(
-                    fetchDigest: .success(),
-                    verifyCode: .success(),
-                    verifyEnclave: .success(),
-                    compareMeasurements: .failed(errorMessage)
-                )
-            } else {
-                steps = VerificationDocument.Steps(
-                    fetchDigest: .pending(),
-                    verifyCode: .pending(),
-                    verifyEnclave: .pending(),
-                    compareMeasurements: .pending(),
-                    otherError: .failed(errorMessage)
-                )
-            }
-
+            steps = Self.stepsFromError(errorMessage)
+            buildFailureDocument(error: error, steps: steps)
+            throw error
+        } catch {
             buildFailureDocument(error: error, steps: steps)
             throw error
         }
@@ -191,6 +170,20 @@ public class SecureClient {
             let groundTruth = try decoder.decode(GroundTruth.self, from: jsonData)
             self.groundTruth = groundTruth
 
+            // Get enclave host from ground truth (for ATC flow) or existing URL
+            let enclaveHost: String
+            if let host = groundTruth.enclaveHost, !host.isEmpty {
+                enclaveHost = host
+                // Update enclaveURL for ATC flow so getEnclaveURL() returns the verified domain
+                if self.enclaveURL == nil {
+                    self.enclaveURL = "https://\(host)"
+                }
+            } else if let existingURL = enclaveURL, let urlComponents = try? URLHelpers.parseURL(existingURL) {
+                enclaveHost = urlComponents.host
+            } else {
+                enclaveHost = "unknown"
+            }
+
             let codeMeasurement = AttestationMeasurement(
                 type: groundTruth.codeMeasurement?.type ?? "",
                 registers: groundTruth.codeMeasurement?.registers ?? []
@@ -207,7 +200,7 @@ public class SecureClient {
 
             lastVerificationDocument = VerificationDocument(
                 configRepo: githubRepo,
-                enclaveHost: urlComponents.host,
+                enclaveHost: enclaveHost,
                 releaseDigest: groundTruth.digest,
                 codeMeasurement: codeMeasurement,
                 enclaveMeasurement: enclaveMeasurement,
@@ -222,7 +215,7 @@ public class SecureClient {
                 },
                 codeFingerprint: groundTruth.codeFingerprint,
                 enclaveFingerprint: groundTruth.enclaveFingerprint,
-                selectedRouterEndpoint: urlComponents.host,
+                selectedRouterEndpoint: enclaveHost,
                 securityVerified: true,
                 steps: steps
             )
@@ -242,9 +235,57 @@ public class SecureClient {
         }
     }
 
+    /// Maps error message prefixes to verification step states
+    private static func stepsFromError(_ errorMessage: String) -> VerificationDocument.Steps {
+        if errorMessage.starts(with: "fetchDigest:") || errorMessage.starts(with: "failed to fetch bundle:") {
+            return VerificationDocument.Steps(
+                fetchDigest: .failed(errorMessage),
+                verifyCode: .pending(),
+                verifyEnclave: .pending(),
+                compareMeasurements: .pending()
+            )
+        } else if errorMessage.starts(with: "verifyCode:") {
+            return VerificationDocument.Steps(
+                fetchDigest: .success(),
+                verifyCode: .failed(errorMessage),
+                verifyEnclave: .pending(),
+                compareMeasurements: .pending()
+            )
+        } else if errorMessage.starts(with: "verifyEnclave:") {
+            return VerificationDocument.Steps(
+                fetchDigest: .success(),
+                verifyCode: .success(),
+                verifyEnclave: .failed(errorMessage),
+                compareMeasurements: .pending()
+            )
+        } else if errorMessage.starts(with: "verifyHardware:") ||
+                  errorMessage.starts(with: "validateTLS:") ||
+                  errorMessage.starts(with: "measurements:") {
+            return VerificationDocument.Steps(
+                fetchDigest: .success(),
+                verifyCode: .success(),
+                verifyEnclave: .success(),
+                compareMeasurements: .failed(errorMessage)
+            )
+        } else {
+            return VerificationDocument.Steps(
+                fetchDigest: .pending(),
+                verifyCode: .pending(),
+                verifyEnclave: .pending(),
+                compareMeasurements: .pending(),
+                otherError: .failed(errorMessage)
+            )
+        }
+    }
+
     /// Helper method to build a failure verification document
     private func buildFailureDocument(error: Error, steps: VerificationDocument.Steps) {
-        let host = (try? URLHelpers.parseURL(enclaveURL))?.host ?? enclaveURL
+        let host: String
+        if let enclaveURL = enclaveURL {
+            host = (try? URLHelpers.parseURL(enclaveURL))?.host ?? enclaveURL
+        } else {
+            host = "unknown"
+        }
 
         lastVerificationDocument = VerificationDocument(
             configRepo: githubRepo,
