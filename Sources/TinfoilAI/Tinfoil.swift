@@ -47,11 +47,12 @@ public class TinfoilAI {
 
         do {
             let groundTruth = try await verifier.verify()
-            onVerification?(verifier.verificationDocument)
 
             guard let enclaveURL = verifier.verifiedEnclaveURL else {
                 throw TinfoilError.invalidConfiguration("Verification succeeded but enclave URL not available")
             }
+
+            onVerification?(verifier.verificationDocument)
 
             let finalBaseURL = baseURL ?? enclaveURL
 
