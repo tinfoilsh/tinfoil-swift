@@ -35,7 +35,7 @@ final class VerificationTests: XCTestCase {
             _ = groundTruth.hardwareMeasurement
 
             // Verify the verification document is properly populated
-            let verificationDoc = secureClient.getVerificationDocument()
+            let verificationDoc = secureClient.verificationDocument
             XCTAssertNotNil(verificationDoc, "Verification document should be available")
             XCTAssertTrue(verificationDoc?.securityVerified ?? false, "Security should be verified")
             XCTAssertEqual(verificationDoc?.tlsPublicKey, groundTruth.tlsPublicKey, "TLS key should match")
@@ -43,8 +43,8 @@ final class VerificationTests: XCTestCase {
             XCTAssertEqual(verificationDoc?.enclaveFingerprint, groundTruth.enclaveFingerprint, "Enclave fingerprint should match")
             XCTAssertFalse(verificationDoc?.selectedRouterEndpoint.isEmpty ?? true, "Router endpoint should be populated")
 
-            // Verify getEnclaveURL returns the discovered enclave
-            let enclaveURL = secureClient.getEnclaveURL()
+            // Verify verifiedEnclaveURL returns the discovered enclave
+            let enclaveURL = secureClient.verifiedEnclaveURL
             XCTAssertNotNil(enclaveURL, "Enclave URL should be available after verification")
             XCTAssertTrue(enclaveURL?.starts(with: "https://") ?? false, "Enclave URL should be HTTPS")
         } catch {
@@ -63,7 +63,7 @@ final class VerificationTests: XCTestCase {
             _ = try await invalidClient.verify()
             XCTFail("Should have failed with invalid URL")
         } catch {
-            let verificationDoc = invalidClient.getVerificationDocument()
+            let verificationDoc = invalidClient.verificationDocument
             XCTAssertNotNil(verificationDoc, "Should have failure document")
             XCTAssertFalse(verificationDoc?.securityVerified ?? true, "Security should not be verified")
         }
@@ -77,7 +77,7 @@ final class VerificationTests: XCTestCase {
             _ = try await invalidRepoClient.verify()
             XCTFail("Should have failed with invalid GitHub repo")
         } catch {
-            let verificationDoc = invalidRepoClient.getVerificationDocument()
+            let verificationDoc = invalidRepoClient.verificationDocument
             XCTAssertNotNil(verificationDoc, "Should have failure document")
             XCTAssertFalse(verificationDoc?.securityVerified ?? true, "Security should not be verified")
         }
