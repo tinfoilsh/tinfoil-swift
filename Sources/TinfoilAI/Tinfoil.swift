@@ -15,23 +15,21 @@ public class TinfoilAI {
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
-    ///   - enclaveURL: Optional URL of the Tinfoil enclave to verify. If not provided, will fetch from attestation bundle or router API.
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - attestationBundleURL: Optional URL to fetch a precomputed attestation bundle from.
-    ///     This is primarily useful when you want verification to use an externally
-    ///     produced bundle (e.g., fetched via your own routing layer) instead of
-    ///     letting the client fetch it from the default router flow.
+    ///     If not provided, uses the default ATC endpoint. The enclave URL is discovered from
+    ///     the attestation bundle during verification.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - onVerification: Optional callback for verification results
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     ///
-    /// When using a proxy, set `baseURL` to your proxy server (e.g., "http://localhost:8080").
-    /// The SDK will verify the enclave and encrypt requests with EHBP, but send them to the proxy.
-    /// The proxy receives the `X-Tinfoil-Enclave-Url` header to know where to forward requests.
+    /// When using a proxy, set both `baseURL` and `attestationBundleURL` to your proxy server
+    /// (e.g., "http://localhost:8080"). The SDK will fetch the attestation bundle through the proxy,
+    /// verify the enclave, and encrypt requests with EHBP. The proxy receives the `X-Tinfoil-Enclave-Url`
+    /// header to know where to forward requests.
     public static func create(
         apiKey: String? = nil,
         baseURL: String? = nil,
-        enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         attestationBundleURL: String? = nil,
         parsingOptions: ParsingOptions = .relaxed,
@@ -42,23 +40,9 @@ public class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
 
-        let finalEnclaveURL: String
-        var attestationBundle: AttestationBundle?
-
-        if let providedURL = enclaveURL {
-            finalEnclaveURL = providedURL
-        } else {
-            // Fetch attestation bundle (from custom URL or default ATC endpoint)
-            let bundleURL = attestationBundleURL ?? TinfoilConstants.atcAttestationURL
-            attestationBundle = try await RouterManager.fetchAttestationBundle(from: bundleURL)
-            finalEnclaveURL = "https://\(attestationBundle!.domain)"
-        }
-
-        let finalBaseURL = baseURL ?? finalEnclaveURL
-
         let verifier = SecureClient(
             githubRepo: githubRepo,
-            enclaveURL: finalEnclaveURL
+            attestationBundleURL: attestationBundleURL
         )
 
         do {
@@ -66,10 +50,16 @@ public class TinfoilAI {
             let verificationDocument = verifier.getVerificationDocument()
             onVerification?(verificationDocument)
 
+            guard let enclaveURL = verifier.getEnclaveURL() else {
+                throw TinfoilError.invalidConfiguration("Verification succeeded but enclave URL not available")
+            }
+
+            let finalBaseURL = baseURL ?? enclaveURL
+
             return try TinfoilAI(
                 apiKey: finalApiKey,
                 baseURL: finalBaseURL,
-                enclaveURL: finalEnclaveURL,
+                enclaveURL: enclaveURL,
                 hpkePublicKeyHex: groundTruth.hpkePublicKey,
                 parsingOptions: parsingOptions
             )
