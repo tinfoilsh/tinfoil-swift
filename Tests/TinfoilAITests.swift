@@ -58,15 +58,15 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertFalse(response.choices.isEmpty, "Request should succeed with EHBP encryption")
     }
 
-    func testVerificationFailureWithInvalidEnclave() async throws {
+    func testVerificationFailureWithInvalidAttestationURL() async throws {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                enclaveURL: "https://invalid-enclave-12345.example.com"
+                attestationBundleURL: "https://invalid-attestation-12345.example.com"
             )
-            XCTFail("Should have failed with invalid enclave URL")
+            XCTFail("Should have failed with invalid attestation URL")
         } catch {
-            // Expected - verification should reject invalid enclave
+            // Expected - verification should reject invalid attestation URL
             // Error may be VerificationError or NSError from Go bindings
             XCTAssertNotNil(error)
         }
@@ -230,12 +230,12 @@ final class TinfoilAITests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                enclaveURL: "https://invalid-enclave-12345.example.com",
+                attestationBundleURL: "https://invalid-attestation-12345.example.com",
                 onVerification: { document in
                     capturedDocument.value = document
                 }
             )
-            XCTFail("Should have failed with invalid enclave URL")
+            XCTFail("Should have failed with invalid attestation URL")
         } catch {
             verificationFailed = true
 
@@ -272,10 +272,8 @@ final class TinfoilAITests: XCTestCase {
     }
 
     func testNewGroundTruthFieldsIntegration() async throws {
-        let routerAddress = try await RouterManager.fetchRouter()
-        let enclaveURL = "https://\(routerAddress)"
-
-        let secureClient = SecureClient(enclaveURL: enclaveURL)
+        // Use the ATC-based SecureClient
+        let secureClient = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
 
         do {
             let groundTruth = try await secureClient.verify()
@@ -286,6 +284,10 @@ final class TinfoilAITests: XCTestCase {
             XCTAssertFalse(groundTruth.digest.isEmpty, "Digest should exist")
             XCTAssertFalse(groundTruth.codeFingerprint.isEmpty, "Code fingerprint should exist")
             XCTAssertFalse(groundTruth.enclaveFingerprint.isEmpty, "Enclave fingerprint should exist")
+
+            // Verify enclave host is populated from ATC flow
+            XCTAssertNotNil(groundTruth.enclaveHost, "Enclave host should exist")
+            XCTAssertFalse(groundTruth.enclaveHost?.isEmpty ?? true, "Enclave host should not be empty")
 
             // Verify measurements
             if let codeMeasurement = groundTruth.codeMeasurement {

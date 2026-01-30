@@ -7,13 +7,8 @@ final class VerificationTests: XCTestCase {
     // MARK: - New Verification Format Tests
 
     func testNewVerificationFormatFields() async throws {
-        let routerAddress = try await RouterManager.fetchRouter()
-        let enclaveURL = "https://\(routerAddress)"
-
-        let secureClient = SecureClient(
-            githubRepo: TinfoilConstants.defaultGithubRepo,
-            enclaveURL: enclaveURL
-        )
+        // Use ATC-based SecureClient (default flow)
+        let secureClient = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
 
         do {
             let groundTruth = try await secureClient.verify()
@@ -26,6 +21,10 @@ final class VerificationTests: XCTestCase {
 
             // Verify HPKE public key exists (may be empty for some configurations)
             XCTAssertNotNil(groundTruth.hpkePublicKey, "HPKE public key field should exist")
+
+            // Verify enclave host is populated from ATC flow
+            XCTAssertNotNil(groundTruth.enclaveHost, "Enclave host should exist")
+            XCTAssertFalse(groundTruth.enclaveHost?.isEmpty ?? true, "Enclave host should not be empty")
 
             // Verify measurements exist
             XCTAssertNotNil(groundTruth.codeMeasurement, "Code measurement should exist")
@@ -43,18 +42,21 @@ final class VerificationTests: XCTestCase {
             XCTAssertEqual(verificationDoc?.codeFingerprint, groundTruth.codeFingerprint, "Code fingerprint should match")
             XCTAssertEqual(verificationDoc?.enclaveFingerprint, groundTruth.enclaveFingerprint, "Enclave fingerprint should match")
             XCTAssertFalse(verificationDoc?.selectedRouterEndpoint.isEmpty ?? true, "Router endpoint should be populated")
+
+            // Verify getEnclaveURL returns the discovered enclave
+            let enclaveURL = secureClient.getEnclaveURL()
+            XCTAssertNotNil(enclaveURL, "Enclave URL should be available after verification")
+            XCTAssertTrue(enclaveURL?.starts(with: "https://") ?? false, "Enclave URL should be HTTPS")
         } catch {
             // If this fails in CI, it might be due to network issues
         }
     }
 
     func testVerificationStepFailures() async throws {
-        // Test each failure prefix scenario by using invalid configurations
-
-        // Test 1: Invalid URL that should fail early
+        // Test 1: Invalid attestation URL that should fail early
         let invalidClient = SecureClient(
             githubRepo: TinfoilConstants.defaultGithubRepo,
-            enclaveURL: "invalid-url-format"
+            attestationBundleURL: "https://invalid-attestation-12345.example.com"
         )
 
         do {
@@ -66,37 +68,9 @@ final class VerificationTests: XCTestCase {
             XCTAssertFalse(verificationDoc?.securityVerified ?? true, "Security should not be verified")
         }
 
-        // Test 2: Non-existent host that should fail at fetchDigest
-        let nonExistentClient = SecureClient(
-            githubRepo: TinfoilConstants.defaultGithubRepo,
-            enclaveURL: "https://non-existent-host-12345.example.com"
-        )
-
-        do {
-            _ = try await nonExistentClient.verify()
-            XCTFail("Should have failed with non-existent host")
-        } catch {
-            let verificationDoc = nonExistentClient.getVerificationDocument()
-            XCTAssertNotNil(verificationDoc, "Should have failure document")
-            XCTAssertFalse(verificationDoc?.securityVerified ?? true, "Security should not be verified")
-
-            // Check if the error indicates a fetch failure
-            if let steps = verificationDoc?.steps {
-                // At least one step should have failed
-                let hasFailure = steps.fetchDigest.status == .failed ||
-                                steps.verifyCode.status == .failed ||
-                                steps.verifyEnclave.status == .failed ||
-                                steps.compareMeasurements.status == .failed
-                XCTAssertTrue(hasFailure, "At least one step should be marked as failed")
-            }
-        }
-
-        let routerAddress = try await RouterManager.fetchRouter()
-        let enclaveURL = "https://\(routerAddress)"
-
+        // Test 2: Invalid GitHub repo that should fail during code verification
         let invalidRepoClient = SecureClient(
-            githubRepo: "invalid-org/non-existent-repo",
-            enclaveURL: enclaveURL
+            githubRepo: "invalid-org/non-existent-repo"
         )
 
         do {
@@ -121,6 +95,7 @@ final class VerificationTests: XCTestCase {
             "digest": "test-digest",
             "code_fingerprint": "test-code-fp",
             "enclave_fingerprint": "test-enclave-fp",
+            "enclave_host": "test.tinfoil.sh",
             "hardware_measurement": {
                 "ID": "TDX-001",
                 "MRTD": "0123456789abcdef",
@@ -146,6 +121,9 @@ final class VerificationTests: XCTestCase {
         XCTAssertEqual(groundTruth.hardwareMeasurement?.mrtd, "0123456789abcdef", "MRTD should match")
         XCTAssertEqual(groundTruth.hardwareMeasurement?.rtmr0, "fedcba9876543210", "RTMR0 should match")
 
+        // Verify enclave host is parsed
+        XCTAssertEqual(groundTruth.enclaveHost, "test.tinfoil.sh", "Enclave host should match")
+
         // Test JSON without hardware measurement (non-TDX platform)
         let jsonWithoutHardware = """
         {
@@ -154,6 +132,7 @@ final class VerificationTests: XCTestCase {
             "digest": "test-digest",
             "code_fingerprint": "test-code-fp",
             "enclave_fingerprint": "test-enclave-fp",
+            "enclave_host": "test.tinfoil.sh",
             "code_measurement": {
                 "type": "MREnclave",
                 "registers": ["register1", "register2"]
@@ -175,6 +154,7 @@ final class VerificationTests: XCTestCase {
         // Test error prefix detection logic
         let testCases: [(error: String, expectedStep: String)] = [
             ("fetchDigest: failed to connect", "fetchDigest"),
+            ("failed to fetch bundle: connection refused", "fetchDigest"),
             ("verifyCode: invalid repository", "verifyCode"),
             ("verifyEnclave: measurement mismatch", "verifyEnclave"),
             ("verifyHardware: TDX attestation failed", "verifyHardware"),
@@ -187,7 +167,7 @@ final class VerificationTests: XCTestCase {
             let errorMessage = testCase.error
             var detectedStep = "other"
 
-            if errorMessage.starts(with: "fetchDigest:") {
+            if errorMessage.starts(with: "fetchDigest:") || errorMessage.starts(with: "failed to fetch bundle:") {
                 detectedStep = "fetchDigest"
             } else if errorMessage.starts(with: "verifyCode:") {
                 detectedStep = "verifyCode"
