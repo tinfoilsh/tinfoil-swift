@@ -80,8 +80,8 @@ public class TinfoilAI {
             throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
         }
 
-        guard let hpkePublicKey = Data(hexString: hpkeKeyHex) else {
-            throw TinfoilError.invalidConfiguration("Invalid HPKE public key format")
+        guard let hpkePublicKey = Data(hexString: hpkeKeyHex), hpkePublicKey.count == 32 else {
+            throw TinfoilError.invalidConfiguration("Invalid HPKE public key format (expected 32 bytes)")
         }
 
         let ehbpSession = try EHBPURLSession(
