@@ -86,20 +86,14 @@ public class SecureClient {
         self.attestationBundleURL = attestationBundleURL
     }
 
-    /// Returns the verified enclave URL (available after successful verification)
-    public func getEnclaveURL() -> String? {
-        return enclaveURL
-    }
+    /// The verified enclave URL (available after successful verification)
+    public var verifiedEnclaveURL: String? { enclaveURL }
 
-    /// Returns the last verified ground truth
-    public func getGroundTruth() -> GroundTruth? {
-        return groundTruth
-    }
+    /// The last verified ground truth
+    public var verifiedGroundTruth: GroundTruth? { groundTruth }
 
-    /// Returns the full verification document from the last verification attempt
-    public func getVerificationDocument() -> VerificationDocument? {
-        return lastVerificationDocument
-    }
+    /// The full verification document from the last verification attempt
+    public var verificationDocument: VerificationDocument? { lastVerificationDocument }
 
     /// Verifies the committed code and runtime binaries using remote attestation
     /// - Returns: The ground truth containing all verification results
