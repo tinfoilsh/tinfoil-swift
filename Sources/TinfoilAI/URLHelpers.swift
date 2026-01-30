@@ -49,4 +49,15 @@ internal enum URLHelpers {
         let hostWithPort = buildHostWithPort(host: components.host, port: components.port)
         return "\(components.scheme)://\(hostWithPort)"
     }
+
+    /// Extracts the path and query string from a URL
+    /// - Parameter url: The URL to extract path from
+    /// - Returns: The path with query string if present (e.g., "/v1/chat?model=gpt-4")
+    static func extractPath(from url: URL) -> String {
+        var path = url.path
+        if let query = url.query {
+            path += "?\(query)"
+        }
+        return path
+    }
 } 

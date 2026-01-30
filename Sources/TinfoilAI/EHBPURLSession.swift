@@ -223,7 +223,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                 throw EHBPError.invalidInput("request has no URL")
             }
 
-            let path = extractPath(from: url)
+            let path = URLHelpers.extractPath(from: url)
             let method = request.httpMethod ?? "GET"
             var headers: [String: String] = [:]
             if let allHeaders = request.allHTTPHeaderFields {
@@ -268,14 +268,6 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         }
 
         session.removeTask(self)
-    }
-
-    private func extractPath(from url: URL) -> String {
-        var path = url.path
-        if let query = url.query {
-            path += "?\(query)"
-        }
-        return path
     }
 }
 
@@ -367,7 +359,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
             throw EHBPError.invalidInput("request has no URL")
         }
 
-        let path = extractPath(from: url)
+        let path = URLHelpers.extractPath(from: url)
         let method = request.httpMethod ?? "GET"
         var headers: [String: String] = [:]
         if let allHeaders = request.allHTTPHeaderFields {
@@ -388,14 +380,6 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         )
 
         return (data, response)
-    }
-
-    private func extractPath(from url: URL) -> String {
-        var path = url.path
-        if let query = url.query {
-            path += "?\(query)"
-        }
-        return path
     }
 }
 
