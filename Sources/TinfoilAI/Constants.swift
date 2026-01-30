@@ -6,10 +6,10 @@ public enum TinfoilConstants {
     public static let defaultGithubRepo = "tinfoilsh/confidential-model-router"
 
     /// Base URL for Tinfoil's attestation service
-    public static let atcBaseURL = "https://atc.tinfoil.sh"
+    public static let attestationBaseURL = "https://atc.tinfoil.sh"
 
     /// Default URL for fetching attestation bundles
-    public static let atcAttestationURL = "\(atcBaseURL)/attestation"
+    public static let defaultAttestationBundleURL = "\(attestationBaseURL)/attestation"
 
     /// Placeholder for unknown host values
     internal static let unknownHost = "unknown"
