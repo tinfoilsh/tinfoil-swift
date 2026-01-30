@@ -83,7 +83,7 @@ public class SecureClient {
     ) {
         self.githubRepo = githubRepo
         self.enclaveURL = nil
-        self.attestationBundleURL = attestationBundleURL ?? ""
+        self.attestationBundleURL = attestationBundleURL
     }
 
     /// Returns the verified enclave URL (available after successful verification)
@@ -116,7 +116,7 @@ public class SecureClient {
         do {
             var error: NSError?
 
-            if let attestationBundleURL = attestationBundleURL {
+            if let attestationBundleURL = attestationBundleURL, !attestationBundleURL.isEmpty {
                 // ATC-based verification (single-request flow)
                 jsonString = TinfoilVerifier.ClientVerifyFromATCURLJSON(attestationBundleURL, githubRepo, nil, &error)
             } else if let enclaveURL = enclaveURL {
