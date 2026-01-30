@@ -17,7 +17,7 @@ public class TinfoilAI {
     ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - attestationBundleURL: Optional URL to fetch a precomputed attestation bundle from.
-    ///     If not provided, uses the default ATC endpoint. The enclave URL is discovered from
+    ///     If not provided, uses the default Tinfoil endpoint. The enclave URL is discovered from
     ///     the attestation bundle during verification.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - onVerification: Optional callback for verification results

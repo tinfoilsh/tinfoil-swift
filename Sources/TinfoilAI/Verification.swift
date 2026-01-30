@@ -73,10 +73,10 @@ public class SecureClient {
         self.attestationBundleURL = nil
     }
 
-    /// Initialize a secure client for ATC-based verification (single-request flow)
+    /// Initialize a secure client that fetches an attestation bundle for verification
     /// - Parameters:
     ///   - githubRepo: GitHub repository in the format "org/repo"
-    ///   - attestationBundleURL: Base URL for fetching the attestation bundle. If nil, uses default ATC endpoint.
+    ///   - attestationBundleURL: URL for fetching the attestation bundle. If nil, uses default Tinfoil endpoint.
     public init(
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         attestationBundleURL: String? = nil
@@ -111,14 +111,14 @@ public class SecureClient {
             var error: NSError?
 
             if let attestationBundleURL = attestationBundleURL, !attestationBundleURL.isEmpty {
-                // ATC-based verification (single-request flow)
+                // Verification using attestation bundle
                 jsonString = TinfoilVerifier.ClientVerifyFromATCURLJSON(attestationBundleURL, githubRepo, nil, &error)
             } else if let enclaveURL = enclaveURL {
                 // Direct enclave verification
                 let urlComponents = try URLHelpers.parseURL(enclaveURL)
                 jsonString = TinfoilVerifier.ClientVerifyJSON(urlComponents.host, githubRepo, nil, &error)
             } else {
-                throw VerificationError.verificationFailed("No enclave URL or ATC URL configured")
+                throw VerificationError.verificationFailed("No enclave URL or attestation bundle URL configured")
             }
 
             if let error = error {
@@ -159,11 +159,11 @@ public class SecureClient {
             let groundTruth = try decoder.decode(GroundTruth.self, from: jsonData)
             self.groundTruth = groundTruth
 
-            // Get enclave host from ground truth (for ATC flow) or existing URL
+            // Get enclave host from ground truth (for bundle flow) or existing URL
             let enclaveHost: String
             if let host = groundTruth.enclaveHost, !host.isEmpty {
                 enclaveHost = host
-                // Update enclaveURL for ATC flow so getEnclaveURL() returns the verified domain
+                // Update enclaveURL so verifiedEnclaveURL returns the verified domain
                 if self.enclaveURL == nil {
                     self.enclaveURL = "https://\(host)"
                 }

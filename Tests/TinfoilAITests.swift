@@ -272,7 +272,7 @@ final class TinfoilAITests: XCTestCase {
     }
 
     func testNewGroundTruthFieldsIntegration() async throws {
-        // Use the ATC-based SecureClient
+        // Use SecureClient with default attestation bundle flow
         let secureClient = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
 
         do {
@@ -285,7 +285,7 @@ final class TinfoilAITests: XCTestCase {
             XCTAssertFalse(groundTruth.codeFingerprint.isEmpty, "Code fingerprint should exist")
             XCTAssertFalse(groundTruth.enclaveFingerprint.isEmpty, "Enclave fingerprint should exist")
 
-            // Verify enclave host is populated from ATC flow
+            // Verify enclave host is populated from attestation bundle
             XCTAssertNotNil(groundTruth.enclaveHost, "Enclave host should exist")
             XCTAssertFalse(groundTruth.enclaveHost?.isEmpty ?? true, "Enclave host should not be empty")
 
