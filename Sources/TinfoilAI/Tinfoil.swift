@@ -127,6 +127,13 @@ public class TinfoilAI {
         openAIClient.chatsStream(query: query)
     }
 
+    public func chatsStream(
+        query: ChatQuery,
+        onWebSearchEvent: @escaping @Sendable (WebSearchEvent) -> Void
+    ) -> AsyncThrowingStream<ChatStreamResult, Error> {
+        openAIClient.chatsStream(query: query, onWebSearchEvent: onWebSearchEvent)
+    }
+
     public func images(query: ImagesQuery) async throws -> ImagesResult {
         try await openAIClient.images(query: query)
     }
