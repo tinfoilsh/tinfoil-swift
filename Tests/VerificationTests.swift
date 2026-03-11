@@ -1,6 +1,6 @@
 import XCTest
 @testable import TinfoilAI
-import TinfoilVerifier
+import Tinfoil
 
 final class VerificationTests: XCTestCase {
 
