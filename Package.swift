@@ -18,15 +18,15 @@ let package = Package(
     ],
     targets: [
         .binaryTarget(
-            name: "TinfoilVerifier",
-            url: "https://github.com/tinfoilsh/tinfoil-go/releases/download/verifier/v0.12.0/TinfoilVerifier.xcframework.zip",
-            checksum: "ed74ae241497c76613c8bd12490171518cfd79f3c42cafb6113c60968404679c"),
+            name: "Tinfoil",
+            url: "https://github.com/tinfoilsh/tinfoil-go/releases/download/v0.12.3/Tinfoil.xcframework.zip",
+            checksum: "3e67b7e5cdf92b511cae1c184891619b430bcc83c3e5605172f5d30701b496d7"),
         .target(
             name: "TinfoilAI",
             dependencies: [
                 .product(name: "OpenAI", package: "openai-swift-fork"),
                 .product(name: "EHBP", package: "encrypted-http-body-protocol"),
-                "TinfoilVerifier"
+                "Tinfoil"
             ],
             path: "Sources/TinfoilAI",
             linkerSettings: [

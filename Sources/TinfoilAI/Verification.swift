@@ -1,10 +1,25 @@
 import Foundation
-import TinfoilVerifier
+import Tinfoil
+
+/// Response from an attested HTTP request
+public struct SecureResponse: Sendable {
+    /// HTTP status code
+    public let statusCode: Int
+
+    /// Response body data
+    public let body: Data
+
+    /// Response body as a UTF-8 string
+    public var bodyString: String? {
+        String(data: body, encoding: .utf8)
+    }
+}
 
 /// Errors that can occur during verification
 public enum VerificationError: Error {
     case verificationFailed(String)
     case jsonDecodingFailed(String)
+    case notVerified
     case unknown(Error)
 }
 
@@ -60,6 +75,7 @@ public class SecureClient {
     private var discoveredEnclaveURL: String?
     private var groundTruth: GroundTruth?
     private var lastVerificationDocument: VerificationDocument?
+    private var goClient: ClientSecureClient?
 
     /// Initialize a secure client for direct enclave verification
     /// - Parameters:
@@ -113,14 +129,14 @@ public class SecureClient {
 
             if let attestationBundleURL = attestationBundleURL, !attestationBundleURL.isEmpty {
                 // Verification using custom attestation bundle URL
-                jsonString = TinfoilVerifier.ClientFetchAndVerifyFromURLJSON(attestationBundleURL, githubRepo, nil, &error)
+                jsonString = Tinfoil.ClientFetchAndVerifyFromURLJSON(attestationBundleURL, githubRepo, nil, &error)
             } else if let configuredEnclaveURL = configuredEnclaveURL {
                 // Direct enclave verification
                 let urlComponents = try URLHelpers.parseURL(configuredEnclaveURL)
-                jsonString = TinfoilVerifier.ClientVerifyJSON(urlComponents.host, githubRepo, nil, &error)
+                jsonString = Tinfoil.ClientVerifyJSON(urlComponents.host, githubRepo, nil, &error)
             } else {
                 // Default: fetch from Tinfoil's attestation bundle URL
-                jsonString = TinfoilVerifier.ClientFetchAndVerifyJSON(githubRepo, nil, &error)
+                jsonString = Tinfoil.ClientFetchAndVerifyJSON(githubRepo, nil, &error)
             }
 
             if let error = error {
@@ -221,6 +237,72 @@ public class SecureClient {
             buildFailureDocument(error: decodingError, steps: steps)
             throw decodingError
         }
+    }
+
+    // MARK: - Attested HTTP Requests
+
+    /// Returns the Go SecureClient, creating it if needed from verified enclave info
+    private func getGoClient() throws -> ClientSecureClient {
+        if let existing = goClient {
+            return existing
+        }
+
+        guard let groundTruth = groundTruth else {
+            throw VerificationError.notVerified
+        }
+
+        guard let host = groundTruth.enclaveHost ?? (configuredEnclaveURL.flatMap { try? URLHelpers.parseURL($0).host }) else {
+            throw VerificationError.verificationFailed("No enclave host available")
+        }
+
+        guard let client = ClientNewSecureClient(host, githubRepo) else {
+            throw VerificationError.verificationFailed("Failed to create secure client for \(host)")
+        }
+        goClient = client
+        return client
+    }
+
+    /// Makes an attested HTTP GET request to the verified enclave
+    /// - Parameters:
+    ///   - url: The URL to request (absolute or relative path)
+    ///   - headers: Optional HTTP headers
+    /// - Returns: The response with status code and body
+    public func get(url: String, headers: [String: String]? = nil) async throws -> SecureResponse {
+        let client = try getGoClient()
+        let headersJSON = try encodeHeaders(headers)
+
+        let response = try client.secureGet(url, headersJSON: headersJSON)
+
+        return SecureResponse(
+            statusCode: response.statusCode,
+            body: response.body ?? Data()
+        )
+    }
+
+    /// Makes an attested HTTP POST request to the verified enclave
+    /// - Parameters:
+    ///   - url: The URL to request (absolute or relative path)
+    ///   - headers: Optional HTTP headers
+    ///   - body: Optional request body
+    /// - Returns: The response with status code and body
+    public func post(url: String, headers: [String: String]? = nil, body: Data? = nil) async throws -> SecureResponse {
+        let client = try getGoClient()
+        let headersJSON = try encodeHeaders(headers)
+
+        let response = try client.securePost(url, headersJSON: headersJSON, body: body)
+
+        return SecureResponse(
+            statusCode: response.statusCode,
+            body: response.body ?? Data()
+        )
+    }
+
+    private func encodeHeaders(_ headers: [String: String]?) throws -> String {
+        guard let headers = headers, !headers.isEmpty else {
+            return ""
+        }
+        let data = try JSONSerialization.data(withJSONObject: headers)
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     /// Maps error message prefixes to verification step states
