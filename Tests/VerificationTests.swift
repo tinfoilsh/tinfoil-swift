@@ -229,6 +229,131 @@ final class VerificationTests: XCTestCase {
         XCTAssertEqual(testDoc.hardwareMeasurement?.id, "TDX-1")
     }
 
+    // MARK: - SecureClient HTTP Methods
+
+    func testGetBeforeVerifyThrowsNotVerified() async {
+        let client = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+
+        do {
+            _ = try await client.get(url: "/health")
+            XCTFail("Should throw when calling get() before verify()")
+        } catch let error as VerificationError {
+            if case .notVerified = error {
+                // Expected
+            } else {
+                XCTFail("Expected VerificationError.notVerified, got \(error)")
+            }
+        } catch {
+            XCTFail("Expected VerificationError, got \(error)")
+        }
+    }
+
+    func testPostBeforeVerifyThrowsNotVerified() async {
+        let client = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+
+        do {
+            _ = try await client.post(url: "/api/test", body: Data())
+            XCTFail("Should throw when calling post() before verify()")
+        } catch let error as VerificationError {
+            if case .notVerified = error {
+                // Expected
+            } else {
+                XCTFail("Expected VerificationError.notVerified, got \(error)")
+            }
+        } catch {
+            XCTFail("Expected VerificationError, got \(error)")
+        }
+    }
+
+    func testSecureGetAfterVerify() async throws {
+        let client = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+
+        do {
+            _ = try await client.verify()
+        } catch {
+            throw XCTSkip("Verification failed (network issue): \(error)")
+        }
+
+        let response = try await client.get(url: "/v1/models")
+        XCTAssertTrue([200, 401].contains(response.statusCode),
+                      "Models endpoint should return 200 or 401 (no API key)")
+        XCTAssertNotNil(response.bodyString)
+    }
+
+    func testSecureGetWithHeaders() async throws {
+        let client = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+
+        do {
+            _ = try await client.verify()
+        } catch {
+            throw XCTSkip("Verification failed (network issue): \(error)")
+        }
+
+        let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? ""
+        let response = try await client.get(
+            url: "/v1/models",
+            headers: [
+                "Accept": "application/json",
+                "Authorization": "Bearer \(apiKey)"
+            ]
+        )
+        XCTAssertTrue([200, 401].contains(response.statusCode))
+    }
+
+    func testSecurePostWithBody() async throws {
+        let client = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+
+        do {
+            _ = try await client.verify()
+        } catch {
+            throw XCTSkip("Verification failed (network issue): \(error)")
+        }
+
+        let body = try JSONSerialization.data(withJSONObject: [
+            "model": "gpt-oss-120b",
+            "messages": [["role": "user", "content": "Say hi"]],
+            "max_tokens": 5
+        ])
+
+        let response = try await client.post(
+            url: "/v1/chat/completions",
+            headers: [
+                "Content-Type": "application/json",
+                "Authorization": "Bearer \(ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] ?? "")"
+            ],
+            body: body
+        )
+
+        XCTAssertTrue([200, 401].contains(response.statusCode),
+                      "Should get 200 (success) or 401 (no API key in CI)")
+        XCTAssertNotNil(response.bodyString, "Response should have a body")
+    }
+
+    func testSecureResponseBodyString() {
+        let data = "hello world".data(using: .utf8)!
+        let response = SecureResponse(statusCode: 200, body: data)
+
+        XCTAssertEqual(response.bodyString, "hello world")
+        XCTAssertEqual(response.statusCode, 200)
+    }
+
+    func testSecureGetWithNilAndEmptyHeaders() async throws {
+        let client = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+
+        do {
+            _ = try await client.verify()
+        } catch {
+            throw XCTSkip("Verification failed (network issue): \(error)")
+        }
+
+        // Verify nil and empty headers don't crash
+        let response = try await client.get(url: "/v1/models", headers: nil)
+        XCTAssertTrue([200, 401].contains(response.statusCode))
+
+        let response2 = try await client.get(url: "/v1/models", headers: [:])
+        XCTAssertEqual(response.statusCode, response2.statusCode)
+    }
+
     // MARK: - Step Status Tests
 
     func testVerificationStepStatuses() {
