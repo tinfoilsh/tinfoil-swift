@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "tinfoil-swift",
+    name: "Tinfoil",
     platforms: [
         .macOS(.v14),
         .iOS(.v17)
     ],
     products: [
         .library(
-            name: "TinfoilAI",
+            name: "Tinfoil",
             targets: ["TinfoilAI"]),
     ],
     dependencies: [
