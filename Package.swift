@@ -19,8 +19,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "Tinfoil",
-            url: "https://github.com/tinfoilsh/tinfoil-go/releases/download/v0.12.5/Tinfoil.xcframework.zip",
-            checksum: "5a86f265bd90ec116f7f7e8b6365d0bf4cde591e31a6e40e394f73b76a727f64"),
+            url: "https://github.com/tinfoilsh/tinfoil-go/releases/download/v0.12.6/Tinfoil.xcframework.zip",
+            checksum: "24ab873be646da47a8adee8c0f35ff3402761bc78e2a9ecf853f2c5b0d6cd9da"),
         .target(
             name: "TinfoilAI",
             dependencies: [
