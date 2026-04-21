@@ -20,6 +20,16 @@ public class TinfoilAI {
     ///     If not provided, uses the default Tinfoil endpoint. The enclave URL is discovered from
     ///     the attestation bundle during verification.
     ///   - parsingOptions: Parsing options for handling different providers.
+    ///   - customHeaders: Additional request headers to forward verbatim on
+    ///     every outbound request (merged over the headers synthesized by
+    ///     `tinfoilEvents`; caller values win on conflict). Use for arbitrary
+    ///     router / proxy pass-through headers.
+    ///   - tinfoilEvents: Optional set of Tinfoil-specific progress events
+    ///     to opt into. Each selected event contributes one comma-separated
+    ///     value on the `X-Tinfoil-Events` request header so the router
+    ///     emits `<tinfoil-event>...</tinfoil-event>` markers inline with
+    ///     the assistant text. Strict OpenAI SDKs render the markers as
+    ///     text; callers parse and strip them before display.
     ///   - onVerification: Optional callback for verification results
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     ///
@@ -33,6 +43,8 @@ public class TinfoilAI {
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         attestationBundleURL: String? = nil,
         parsingOptions: ParsingOptions = .relaxed,
+        customHeaders: [String: String] = [:],
+        tinfoilEvents: Set<TinfoilEvent> = [],
         onVerification: VerificationCallback? = nil
     ) async throws -> TinfoilAI {
         let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
@@ -61,7 +73,9 @@ public class TinfoilAI {
                 baseURL: finalBaseURL,
                 enclaveURL: enclaveURL,
                 hpkePublicKeyHex: groundTruth.hpkePublicKey,
-                parsingOptions: parsingOptions
+                parsingOptions: parsingOptions,
+                customHeaders: customHeaders,
+                tinfoilEvents: tinfoilEvents
             )
         } catch {
             onVerification?(verifier.verificationDocument)
@@ -75,7 +89,9 @@ public class TinfoilAI {
         baseURL: String,
         enclaveURL: String,
         hpkePublicKeyHex: String?,
-        parsingOptions: ParsingOptions = .relaxed
+        parsingOptions: ParsingOptions = .relaxed,
+        customHeaders: [String: String] = [:],
+        tinfoilEvents: Set<TinfoilEvent> = []
     ) throws {
         guard let hpkeKeyHex = hpkePublicKeyHex, !hpkeKeyHex.isEmpty else {
             throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
@@ -100,11 +116,18 @@ public class TinfoilAI {
         let urlComponents = try URLHelpers.parseURL(baseURL)
         let defaultPort = urlComponents.scheme == "https" ? 443 : 80
 
+        var mergedHeaders = customHeaders
+        if let eventsHeader = tinfoilEventsHeaderValue(tinfoilEvents),
+           mergedHeaders[tinfoilEventsHeader] == nil {
+            mergedHeaders[tinfoilEventsHeader] = eventsHeader
+        }
+
         let configuration = OpenAI.Configuration(
             token: apiKey,
             host: urlComponents.host,
             port: urlComponents.port ?? defaultPort,
             scheme: urlComponents.scheme,
+            customHeaders: mergedHeaders,
             parsingOptions: parsingOptions
         )
 
