@@ -118,7 +118,7 @@ public class TinfoilAI {
 
         var mergedHeaders = customHeaders
         if let eventsHeader = tinfoilEventsHeaderValue(tinfoilEvents),
-           mergedHeaders[tinfoilEventsHeader] == nil {
+           !mergedHeaders.keys.contains(where: { $0.caseInsensitiveCompare(tinfoilEventsHeader) == .orderedSame }) {
             mergedHeaders[tinfoilEventsHeader] = eventsHeader
         }
 
