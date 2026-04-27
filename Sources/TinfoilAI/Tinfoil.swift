@@ -1,5 +1,5 @@
 import Foundation
-import OpenAI
+@_exported import OpenAI
 import EHBP
 
 /// Main entry point for the Tinfoil client library.
