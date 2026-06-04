@@ -39,6 +39,7 @@ public class TinfoilAI {
     /// header to know where to forward requests.
     public static func create(
         apiKey: String? = nil,
+        apiKeyProvider: (@Sendable () -> String?)? = nil,
         baseURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         attestationBundleURL: String? = nil,
@@ -47,8 +48,12 @@ public class TinfoilAI {
         tinfoilEvents: Set<TinfoilEvent> = [],
         onVerification: VerificationCallback? = nil
     ) async throws -> TinfoilAI {
-        let finalApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
-        guard let finalApiKey = finalApiKey else {
+        let staticApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
+        // Attestation itself does not use the API key; it only authorizes
+        // inference requests. Require that a bearer can be resolved either
+        // statically or via the dynamic provider, so a caller using a rotating
+        // token (e.g. a short-lived JWT) is not forced to pass a placeholder key.
+        guard staticApiKey != nil || apiKeyProvider != nil else {
             throw TinfoilError.missingAPIKey
         }
 
@@ -69,7 +74,8 @@ public class TinfoilAI {
             let finalBaseURL = baseURL ?? enclaveURL
 
             return try TinfoilAI(
-                apiKey: finalApiKey,
+                apiKey: staticApiKey,
+                apiKeyProvider: apiKeyProvider,
                 baseURL: finalBaseURL,
                 enclaveURL: enclaveURL,
                 hpkePublicKeyHex: groundTruth.hpkePublicKey,
@@ -85,7 +91,8 @@ public class TinfoilAI {
 
     /// Internal initializer that sets up the EHBP session and OpenAI client
     internal convenience init(
-        apiKey: String,
+        apiKey: String?,
+        apiKeyProvider: (@Sendable () -> String?)? = nil,
         baseURL: String,
         enclaveURL: String,
         hpkePublicKeyHex: String?,
@@ -124,6 +131,7 @@ public class TinfoilAI {
 
         let configuration = OpenAI.Configuration(
             token: apiKey,
+            tokenProvider: apiKeyProvider,
             host: urlComponents.host,
             port: urlComponents.port ?? defaultPort,
             scheme: urlComponents.scheme,
