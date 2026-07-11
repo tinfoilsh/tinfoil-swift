@@ -23,6 +23,24 @@ final class TinfoilAITests: XCTestCase {
         }
     }
 
+    func testURLHelpersAcceptHTTPAndHTTPSURLs() throws {
+        XCTAssertEqual(try URLHelpers.parseHTTPURL("http://localhost:8080/v1").scheme, "http")
+        XCTAssertEqual(try URLHelpers.parseHTTPURL("https://proxy.example.com/v1").scheme, "https")
+        XCTAssertEqual(try URLHelpers.parseHTTPURL("proxy.example.com/v1").scheme, "https")
+        XCTAssertEqual(try URLHelpers.parseHTTPURL("localhost:8080/v1").port, 8080)
+    }
+
+    func testURLHelpersRejectUnsupportedAndMalformedURLs() {
+        XCTAssertThrowsError(try URLHelpers.parseHTTPURL("ftp://proxy.example.com/v1"))
+        XCTAssertThrowsError(try URLHelpers.parseHTTPURL("mailto:user@example.com"))
+        XCTAssertThrowsError(try URLHelpers.parseHTTPURL("file:/tmp/test"))
+        XCTAssertThrowsError(try URLHelpers.parseHTTPURL("://"))
+    }
+
+    func testGenericURLParserDoesNotRestrictSchemes() throws {
+        XCTAssertEqual(try URLHelpers.parseURL("wss://enclave.example.com/realtime").scheme, "wss")
+    }
+
     func testClientSucceedsWhenVerificationSucceeds() async throws {
         try skipIfNoAPIKey()
 

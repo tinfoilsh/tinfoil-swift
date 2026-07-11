@@ -108,6 +108,8 @@ public class TinfoilAI {
             throw TinfoilError.invalidConfiguration("Invalid HPKE public key format (expected 32 bytes)")
         }
 
+        let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
+
         let ehbpSession = try EHBPURLSession(
             baseURL: baseURL,
             enclaveURL: enclaveURL,
@@ -120,7 +122,6 @@ public class TinfoilAI {
             publicKey: hpkePublicKey
         )
 
-        let urlComponents = try URLHelpers.parseURL(baseURL)
         let defaultPort = urlComponents.scheme == "https" ? 443 : 80
 
         var mergedHeaders = customHeaders

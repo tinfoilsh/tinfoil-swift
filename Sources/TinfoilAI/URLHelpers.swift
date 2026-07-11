@@ -2,10 +2,26 @@ import Foundation
 
 /// Helper functions for URL handling
 internal enum URLHelpers {
+    private static func hasSchemeWithoutAuthority(_ urlString: String) -> Bool {
+        guard let separator = urlString.firstIndex(of: ":") else { return false }
+        let candidate = urlString[..<separator]
+        guard candidate.first?.isLetter == true,
+              candidate.allSatisfy({ $0.isLetter || $0.isNumber || "+-.".contains($0) }) else {
+            return false
+        }
+
+        let remainder = urlString[urlString.index(after: separator)...]
+        let port = remainder.prefix(while: \.isNumber)
+        let suffix = remainder.dropFirst(port.count)
+        let hasValidPortSuffix = suffix.first.map { "/?#".contains($0) } ?? true
+        let isHostPort = !port.isEmpty && hasValidPortSuffix
+        return !isHostPort
+    }
+
     /// Normalizes a URL string by adding https:// prefix if no protocol is specified
     static func normalizeURL(_ urlString: String) -> String {
         // Check if the URL already has a protocol
-        if urlString.contains("://") {
+        if urlString.contains("://") || hasSchemeWithoutAuthority(urlString) {
             return urlString
         }
         // Add https:// prefix if no protocol is present
@@ -26,10 +42,21 @@ internal enum URLHelpers {
                           userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(urlString)"])
         }
         
-        let scheme = url.scheme ?? "https"
+        let scheme = url.scheme?.lowercased() ?? "https"
         let port = url.port
         
         return (url: url, host: host, scheme: scheme, port: port)
+    }
+
+    /// Parses an HTTP API URL and requires the http or https scheme.
+    static func parseHTTPURL(_ urlString: String) throws -> (url: URL, host: String, scheme: String, port: Int?) {
+        let components = try parseURL(urlString)
+        guard components.scheme == "http" || components.scheme == "https" else {
+            throw NSError(domain: TinfoilConstants.urlHelpersErrorDomain,
+                          code: TinfoilConstants.invalidURLErrorCode,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid HTTP(S) URL: \(urlString)"])
+        }
+        return components
     }
     
     /// Builds a host string with port if needed
