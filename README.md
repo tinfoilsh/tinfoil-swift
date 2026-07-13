@@ -109,6 +109,39 @@ let client = try await TinfoilAI.create(
 )
 ```
 
+## Prompt Cache Scoping
+
+The inference router partitions its prompt cache per API identity, so your cached prompts are never observable by other tenants. Within your tenant, the SDK scopes caching further with a `user_cache_secret`: requests carrying the same secret share cached prompt prefixes, requests carrying different secrets cannot observe each other's cache timing. The secret never reaches the model — the router consumes it to derive the cache namespace and strips it from the request.
+
+By default the SDK generates a random secret and persists it at `~/.tinfoil/user_cache_secret` (mode `0600`, shared with the other Tinfoil SDKs on the same machine), so caching just works with per-machine scoping. You can control it explicitly:
+
+```swift
+// Pin the secret for this client (e.g. one stable value per end user)
+let client = try await TinfoilAI.create(
+    apiKey: "YOUR_API_KEY",
+    userCacheSecret: secret
+)
+
+// Or provision it via the environment
+//   TINFOIL_USER_CACHE_SECRET=<secret>   use this value
+//   TINFOIL_USER_CACHE_SECRET=           (set but empty) disable: tenant-wide caching
+
+// Servers that hold many end users' conversations should scope per request;
+// a field set here always wins over the client-level secret:
+let query = ChatQuery(
+    messages: [.user(.init(content: .string("Hello!")))],
+    model: "model-name",
+    extraBody: ["user_cache_secret": .string(perUserSecret)]
+)
+
+// Opt out entirely (tenant-wide caching, no file written)
+let optedOut = try await TinfoilAI.create(
+    apiKey: "YOUR_API_KEY",
+    userCacheSecret: ""
+)
+```
+
+If the secret cannot be persisted (no home directory, read-only filesystem), the SDK falls back to an in-memory secret, so cache continuity resets on every process restart. Containerized deployments should set `TINFOIL_USER_CACHE_SECRET` explicitly — one value per end user if requests are per-user, or empty to keep tenant-wide caching across replicas.
 
 ## Configuration Options
 
@@ -121,6 +154,7 @@ let client = try await TinfoilAI.create(
     enclaveURL: String? = nil,          // Custom enclave URL (auto-selects router if nil)
     githubRepo: String = "tinfoilsh/confidential-model-router", // GitHub repo for verification
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
+    userCacheSecret: String? = nil,             // Prompt cache scoping secret (see "Prompt Cache Scoping")
     onVerification: VerificationCallback? = nil // Verification callback
 )
 

@@ -30,6 +30,15 @@ public class TinfoilAI {
     ///     emits `<tinfoil-event>...</tinfoil-event>` markers inline with
     ///     the assistant text. Strict OpenAI SDKs render the markers as
     ///     text; callers parse and strip them before display.
+    ///   - userCacheSecret: Scopes the router's prompt cache. `nil` (the
+    ///     default) resolves the secret from `TINFOIL_USER_CACHE_SECRET` or a
+    ///     generated value persisted at `~/.tinfoil/user_cache_secret`; a
+    ///     non-empty string pins it (use one stable value per end user); an
+    ///     empty string disables provisioning entirely (tenant-wide caching).
+    ///     Servers holding many end users' conversations should instead set
+    ///     the `user_cache_secret` field per request (e.g. via
+    ///     `ChatQuery.extraBody`), which always wins over the client-level
+    ///     secret.
     ///   - onVerification: Optional callback for verification results
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     ///
@@ -46,6 +55,7 @@ public class TinfoilAI {
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
         tinfoilEvents: Set<TinfoilEvent> = [],
+        userCacheSecret: String? = nil,
         onVerification: VerificationCallback? = nil
     ) async throws -> TinfoilAI {
         let staticApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
@@ -81,7 +91,8 @@ public class TinfoilAI {
                 hpkePublicKeyHex: groundTruth.hpkePublicKey,
                 parsingOptions: parsingOptions,
                 customHeaders: customHeaders,
-                tinfoilEvents: tinfoilEvents
+                tinfoilEvents: tinfoilEvents,
+                userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret)
             )
         } catch {
             onVerification?(verifier.verificationDocument)
@@ -89,7 +100,9 @@ public class TinfoilAI {
         }
     }
 
-    /// Internal initializer that sets up the EHBP session and OpenAI client
+    /// Internal initializer that sets up the EHBP session and OpenAI client.
+    /// `userCacheSecret` is the already-resolved prompt-cache scoping secret
+    /// (see `UserCacheSecret.resolve`); an empty string disables injection.
     internal convenience init(
         apiKey: String?,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
@@ -98,7 +111,8 @@ public class TinfoilAI {
         hpkePublicKeyHex: String?,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
-        tinfoilEvents: Set<TinfoilEvent> = []
+        tinfoilEvents: Set<TinfoilEvent> = [],
+        userCacheSecret: String = ""
     ) throws {
         guard let hpkeKeyHex = hpkePublicKeyHex, !hpkeKeyHex.isEmpty else {
             throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
@@ -113,13 +127,15 @@ public class TinfoilAI {
         let ehbpSession = try EHBPURLSession(
             baseURL: baseURL,
             enclaveURL: enclaveURL,
-            publicKey: hpkePublicKey
+            publicKey: hpkePublicKey,
+            userCacheSecret: userCacheSecret
         )
 
         let ehbpStreamingFactory = EHBPURLSessionFactory(
             baseURL: baseURL,
             enclaveURL: enclaveURL,
-            publicKey: hpkePublicKey
+            publicKey: hpkePublicKey,
+            userCacheSecret: userCacheSecret
         )
 
         let defaultPort = urlComponents.scheme == "https" ? 443 : 80

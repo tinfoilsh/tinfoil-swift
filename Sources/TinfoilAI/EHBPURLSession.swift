@@ -16,6 +16,7 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
     private let baseURL: String
     private let enclaveURL: String?
     private let publicKey: Data
+    private let userCacheSecret: String
 
     /// Creates an EHBP URLSession factory
     ///
@@ -23,10 +24,13 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
     ///   - baseURL: Base URL where requests are sent (e.g., proxy server or enclave directly)
     ///   - enclaveURL: URL of the verified enclave (added as header when different from baseURL)
     ///   - publicKey: Server's X25519 public key (32 bytes)
-    public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data) {
+    ///   - userCacheSecret: Resolved prompt-cache scoping secret injected into
+    ///     eligible request bodies before encryption (empty disables injection)
+    public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "") {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.enclaveURL = enclaveURL
         self.publicKey = publicKey
+        self.userCacheSecret = userCacheSecret
     }
 
     public func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
@@ -34,6 +38,7 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
             baseURL: baseURL,
             enclaveURL: enclaveURL,
             publicKey: publicKey,
+            userCacheSecret: userCacheSecret,
             delegate: delegate
         )
     }
@@ -45,14 +50,16 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
     private let baseURL: String
     private let enclaveURL: String?
     private let publicKey: Data
+    private let userCacheSecret: String
     private weak var delegate: URLSessionDataDelegateProtocol?
     private var activeTasks: [ObjectIdentifier: EHBPStreamingDataTask] = [:]
     private let lock = NSLock()
 
-    init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, delegate: URLSessionDataDelegateProtocol) {
+    init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", delegate: URLSessionDataDelegateProtocol) {
         self.baseURL = baseURL
         self.enclaveURL = enclaveURL
         self.publicKey = publicKey
+        self.userCacheSecret = userCacheSecret
         self.delegate = delegate
     }
 
@@ -65,6 +72,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
             baseURL: baseURL,
             enclaveURL: enclaveURL,
             publicKey: publicKey,
+            userCacheSecret: userCacheSecret,
             delegate: delegate,
             session: self,
             completionHandler: completionHandler
@@ -150,6 +158,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     private let baseURL: String
     private let enclaveURL: String?
     private let publicKey: Data
+    private let userCacheSecret: String
     private weak var delegate: URLSessionDataDelegateProtocol?
     private weak var session: EHBPStreamingSession?
     private let completionHandler: @Sendable (Data?, URLResponse?, Error?) -> Void
@@ -170,6 +179,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         baseURL: String,
         enclaveURL: String? = nil,
         publicKey: Data,
+        userCacheSecret: String = "",
         delegate: URLSessionDataDelegateProtocol?,
         session: EHBPStreamingSession,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
@@ -178,6 +188,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         self.baseURL = baseURL
         self.enclaveURL = enclaveURL
         self.publicKey = publicKey
+        self.userCacheSecret = userCacheSecret
         self.delegate = delegate
         self.session = session
         self.completionHandler = completionHandler
@@ -228,11 +239,20 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             }
             URLHelpers.addProxyHeaderIfNeeded(to: &headers, baseURL: baseURL, enclaveURL: enclaveURL)
 
+            // The user-cache-secret field is added here, before EHBP seals
+            // the body, so the secret only ever travels inside the encrypted
+            // channel to the verified enclave.
+            let body = UserCacheSecret.provision(
+                request: request,
+                headers: &headers,
+                clientSecret: userCacheSecret
+            )
+
             let (stream, response) = try await ehbpClient.requestStream(
                 method: method,
                 path: path,
                 headers: headers,
-                body: request.httpBody
+                body: body
             )
 
             delegate?.urlSession(
@@ -270,6 +290,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     private let ehbpClient: EHBPClient
     private let baseURL: String
     private let enclaveURL: String?
+    private let userCacheSecret: String
 
     /// Creates an EHBP URLSession with the given server public key
     ///
@@ -277,11 +298,14 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     ///   - baseURL: Base URL where requests are sent (e.g., proxy server or enclave directly)
     ///   - enclaveURL: URL of the verified enclave (added as header when different from baseURL)
     ///   - publicKey: Server's X25519 public key (32 bytes)
+    ///   - userCacheSecret: Resolved prompt-cache scoping secret injected into
+    ///     eligible request bodies before encryption (empty disables injection)
     ///   - session: Underlying URLSession to use (defaults to shared)
-    public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, session: URLSession = .shared) throws {
+    public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
         self.ehbpClient = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.enclaveURL = enclaveURL
+        self.userCacheSecret = userCacheSecret
     }
 
     // MARK: - URLSessionProtocol
@@ -359,11 +383,20 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         }
         URLHelpers.addProxyHeaderIfNeeded(to: &headers, baseURL: baseURL, enclaveURL: enclaveURL)
 
+        // The user-cache-secret field is added here, before EHBP seals the
+        // body, so the secret only ever travels inside the encrypted channel
+        // to the verified enclave.
+        let body = UserCacheSecret.provision(
+            request: request,
+            headers: &headers,
+            clientSecret: userCacheSecret
+        )
+
         let (data, response) = try await ehbpClient.request(
             method: method,
             path: path,
             headers: headers,
-            body: request.httpBody
+            body: body
         )
 
         return (data, response)
