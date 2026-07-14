@@ -67,6 +67,21 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
         with request: URLRequest,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) -> URLSessionDataTaskProtocol {
+        return makeTask(with: request, accumulatesResponse: true, completionHandler: completionHandler)
+    }
+
+    public func dataTask(with request: URLRequest) -> URLSessionDataTaskProtocol {
+        // Delegate-driven streaming path (used by the OpenAI SDK): chunks are
+        // forwarded as they arrive and nobody reads the completion data, so
+        // the task skips buffering the full response.
+        return makeTask(with: request, accumulatesResponse: false) { _, _, _ in }
+    }
+
+    private func makeTask(
+        with request: URLRequest,
+        accumulatesResponse: Bool,
+        completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
+    ) -> EHBPStreamingDataTask {
         let task = EHBPStreamingDataTask(
             request: request,
             baseURL: baseURL,
@@ -75,16 +90,13 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
             userCacheSecret: userCacheSecret,
             delegate: delegate,
             session: self,
+            accumulatesResponse: accumulatesResponse,
             completionHandler: completionHandler
         )
         lock.lock()
         activeTasks[ObjectIdentifier(task)] = task
         lock.unlock()
         return task
-    }
-
-    public func dataTask(with request: URLRequest) -> URLSessionDataTaskProtocol {
-        return dataTask(with: request) { _, _, _ in }
     }
 
     @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
@@ -161,6 +173,11 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     private let userCacheSecret: String
     private weak var delegate: URLSessionDataDelegateProtocol?
     private weak var session: EHBPStreamingSession?
+    /// Whether the full decrypted response is buffered for the completion
+    /// handler. The delegate-driven streaming path disables this because its
+    /// completion handler discards the data, so buffering would only double
+    /// peak memory for large responses.
+    let accumulatesResponse: Bool
     private let completionHandler: @Sendable (Data?, URLResponse?, Error?) -> Void
 
     private var underlyingTask: Task<Void, Never>?
@@ -182,6 +199,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         userCacheSecret: String = "",
         delegate: URLSessionDataDelegateProtocol?,
         session: EHBPStreamingSession,
+        accumulatesResponse: Bool = true,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) {
         self.request = request
@@ -191,6 +209,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         self.userCacheSecret = userCacheSecret
         self.delegate = delegate
         self.session = session
+        self.accumulatesResponse = accumulatesResponse
         self.completionHandler = completionHandler
         self._originalRequest = request
     }
@@ -268,7 +287,9 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             var accumulatedData = Data()
             for try await chunk in stream {
                 if Task.isCancelled { break }
-                accumulatedData.append(chunk)
+                if accumulatesResponse {
+                    accumulatedData.append(chunk)
+                }
                 delegate?.urlSession(session, dataTask: self, didReceive: chunk)
             }
 
