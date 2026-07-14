@@ -375,11 +375,12 @@ internal enum UserCacheSecret {
             return nil
         }
         index += 1
+        var matchingRange: Range<Data.Index>?
 
         while index < bytes.count {
             skipWhitespace(in: bytes, index: &index)
             if index < bytes.count, bytes[index] == UInt8(ascii: "}") {
-                return nil
+                return matchingRange
             }
             guard let keyEnd = stringEnd(in: bytes, from: index),
                   let key = try? JSONSerialization.jsonObject(
@@ -401,7 +402,10 @@ internal enum UserCacheSecret {
                 return nil
             }
             if key == field {
-                return valueStart..<valueEnd
+                guard matchingRange == nil else {
+                    return nil
+                }
+                matchingRange = valueStart..<valueEnd
             }
             index = valueEnd
             skipWhitespace(in: bytes, index: &index)
@@ -411,7 +415,7 @@ internal enum UserCacheSecret {
             if bytes[index] == UInt8(ascii: ",") {
                 index += 1
             } else if bytes[index] == UInt8(ascii: "}") {
-                return nil
+                return matchingRange
             } else {
                 return nil
             }

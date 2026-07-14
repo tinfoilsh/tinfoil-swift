@@ -464,6 +464,42 @@ final class UserCacheSecretTests: XCTestCase {
         }
     }
 
+    func testDuplicateDecodedExistingFieldsForwardedUntouched() {
+        let keys = [
+            #""user_cache_secret""#,
+            #""user_cache_secre\u0074""#,
+        ]
+        let values = [
+            #""""#,
+            #""per-request""#,
+        ]
+
+        for firstKey in keys {
+            for secondKey in keys {
+                for firstValue in values {
+                    for secondValue in values {
+                        let raw = """
+                        {"large":9007199254740993,\(firstKey):\(firstValue),\(secondKey):\(secondValue)}
+                        """
+                        let request = postRequest(path: "/v1/chat/completions", body: raw)
+                        var headers = ["Content-Length": String(raw.utf8.count)]
+
+                        XCTAssertEqual(
+                            UserCacheSecret.provision(
+                                request: request,
+                                headers: &headers,
+                                clientSecret: "client-level"
+                            ),
+                            Data(raw.utf8),
+                            "duplicate decoded fields must not trigger an ambiguous rewrite: \(raw)"
+                        )
+                        XCTAssertEqual(headers["Content-Length"], String(raw.utf8.count))
+                    }
+                }
+            }
+        }
+    }
+
     func testNonObjectBodiesForwardedUntouched() {
         // The trailing '}' / ']' cases matter: a parser that stops at the
         // first complete object would re-serialize the body with the trailing
