@@ -10,6 +10,7 @@ final class Box<T>: @unchecked Sendable {
 }
 
 final class TinfoilAITests: XCTestCase {
+    private static let testUserCacheSecret = "swift-live-integration-cache-secret"
 
     // MARK: - Test Configuration
 
@@ -41,10 +42,13 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertEqual(try URLHelpers.parseURL("wss://enclave.example.com/realtime").scheme, "wss")
     }
 
-    func testClientSucceedsWhenVerificationSucceeds() async throws {
+    func testClientSucceedsWithCacheSecretWhenVerificationSucceeds() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
+        let client = try await TinfoilAI.create(
+            apiKey: try getAPIKey(),
+            userCacheSecret: Self.testUserCacheSecret
+        )
 
         let chatQuery = ChatQuery(
             messages: [

@@ -25,3 +25,5 @@ jobs:
 
       - name: Run tests
         run: swift test
+        env:
+          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
