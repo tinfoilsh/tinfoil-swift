@@ -33,8 +33,8 @@ public class TinfoilAI {
     ///   - userCacheSecret: Scopes the router's prompt cache. `nil` (the
     ///     default) resolves the secret from `TINFOIL_USER_CACHE_SECRET` or a
     ///     generated value persisted at `~/.tinfoil/user_cache_secret`; a
-    ///     non-empty string pins it (use one stable value per end user); an
-    ///     empty string disables provisioning entirely (tenant-wide caching).
+    ///     non-empty string pins it (use one stable value per end user). An
+    ///     empty string is treated as unset.
     ///     Servers holding many end users' conversations should instead set
     ///     the `user_cache_secret` field per request (e.g. via
     ///     `ChatQuery.extraBody`), which always wins over the client-level
@@ -102,7 +102,7 @@ public class TinfoilAI {
 
     /// Internal initializer that sets up the EHBP session and OpenAI client.
     /// `userCacheSecret` is the already-resolved prompt-cache scoping secret
-    /// (see `UserCacheSecret.resolve`); an empty string disables injection.
+    /// (see `UserCacheSecret.resolve`).
     internal convenience init(
         apiKey: String?,
         apiKeyProvider: (@Sendable () -> String?)? = nil,

@@ -119,16 +119,9 @@ final class UserCacheSecretTests: XCTestCase {
             "s1"
         )
 
-        // An explicit empty secret must still count as "set": it disables
-        // provisioning instead of falling through to generation.
-        XCTAssertEqual(
-            UserCacheSecret.resolve(explicit: "", environment: [:], homeDirectory: home),
-            ""
-        )
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: secretFile(in: home).path),
-            "a disabled secret must not create the secret file"
-        )
+        let resolved = UserCacheSecret.resolve(explicit: "", environment: [:], homeDirectory: home)
+        assertIsGeneratedSecret(resolved)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secretFile(in: home).path))
     }
 
     func testResolvePrecedence() throws {
@@ -140,10 +133,10 @@ final class UserCacheSecretTests: XCTestCase {
             "explicit"
         )
 
-        // Explicit empty disables even with the environment set.
+        // Explicit empty is treated as unset.
         XCTAssertEqual(
             UserCacheSecret.resolve(explicit: "", environment: [envVar: "from-env"], homeDirectory: home),
-            ""
+            "from-env"
         )
 
         // Environment beats generation and touches no file.
@@ -156,17 +149,14 @@ final class UserCacheSecretTests: XCTestCase {
             "an environment-provided secret must not create the secret file"
         )
 
-        // Environment set but empty disables generation entirely: the right
-        // call for pooled multi-user deployments that would otherwise mint a
-        // fresh namespace per container.
-        XCTAssertEqual(
-            UserCacheSecret.resolve(explicit: nil, environment: [envVar: ""], homeDirectory: home),
-            ""
+        // Environment set but empty falls through to generation.
+        let resolved = UserCacheSecret.resolve(
+            explicit: nil,
+            environment: [envVar: ""],
+            homeDirectory: home
         )
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: secretFile(in: home).path),
-            "a disabled secret must not create the secret file"
-        )
+        assertIsGeneratedSecret(resolved)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secretFile(in: home).path))
     }
 
     // MARK: - Persistence
@@ -435,10 +425,9 @@ final class UserCacheSecretTests: XCTestCase {
         )
     }
 
-    func testNeverClobbersExistingField() {
+    func testNeverClobbersNonEmptyExistingField() {
         let bodies = [
             #"{"model":"m","user_cache_secret":"end-user-7"}"#,        // explicit per-request secret
-            #"{"model":"m","user_cache_secret":""}"#,                  // explicit empty opt-out
             #"{"model":"m","user_cache_secre\u0074":"end-user-7"}"#, // escaped spelling of the same key
         ]
         for raw in bodies {
@@ -449,6 +438,29 @@ final class UserCacheSecretTests: XCTestCase {
                 Data(raw.utf8),
                 "a body that already carries the field must pass through byte-identical"
             )
+        }
+    }
+
+    func testReplacesEmptyExistingField() throws {
+        let cases = [
+            (
+                #"{"large":9007199254740993,"user_cache_secret":"","nested":{"value":1}}  "#,
+                #"{"large":9007199254740993,"user_cache_secret":"client-level","nested":{"value":1}}  "#
+            ),
+            (
+                #"{"user_cache_secre\u0074":""}"#,
+                #"{"user_cache_secre\u0074":"client-level"}"#
+            ),
+        ]
+        for (raw, expected) in cases {
+            let request = postRequest(path: "/v1/chat/completions", body: raw)
+            var headers = ["Content-Length": String(raw.utf8.count)]
+            let body = try XCTUnwrap(
+                UserCacheSecret.provision(request: request, headers: &headers, clientSecret: "client-level")
+            )
+
+            XCTAssertEqual(String(decoding: body, as: UTF8.self), expected)
+            XCTAssertEqual(headers["Content-Length"], String(body.count))
         }
     }
 

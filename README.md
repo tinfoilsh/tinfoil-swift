@@ -124,7 +124,6 @@ let client = try await TinfoilAI.create(
 
 // Or provision it via the environment
 //   TINFOIL_USER_CACHE_SECRET=<secret>   use this value
-//   TINFOIL_USER_CACHE_SECRET=           (set but empty) disable: tenant-wide caching
 
 // Servers that hold many end users' conversations should scope per request;
 // a field set here always wins over the client-level secret:
@@ -133,15 +132,9 @@ let query = ChatQuery(
     model: "model-name",
     extraBody: ["user_cache_secret": .string(perUserSecret)]
 )
-
-// Opt out entirely (tenant-wide caching, no file written)
-let optedOut = try await TinfoilAI.create(
-    apiKey: "YOUR_API_KEY",
-    userCacheSecret: ""
-)
 ```
 
-If the secret cannot be persisted (no home directory, read-only filesystem), the SDK falls back to an in-memory secret, so cache continuity resets on every process restart. Containerized deployments should set `TINFOIL_USER_CACHE_SECRET` explicitly — one value per end user if requests are per-user, or empty to keep tenant-wide caching across replicas.
+Empty client or environment values are treated as unset. If the secret cannot be persisted (no home directory, read-only filesystem), the SDK falls back to an in-memory secret, so cache continuity resets on every process restart. Containerized deployments should set `TINFOIL_USER_CACHE_SECRET` to a stable non-empty value wherever cache sharing is intended.
 
 ## Configuration Options
 
