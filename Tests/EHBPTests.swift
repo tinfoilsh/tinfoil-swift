@@ -598,6 +598,32 @@ final class EHBPTests: XCTestCase {
         }
     }
 
+    func testStreamingSessionOnlyBuffersResponsesForCompletionHandlers() throws {
+        let delegate = NoopStreamingDelegate()
+        let session = EHBPStreamingSession(
+            baseURL: server.baseURL,
+            publicKey: testPublicKey,
+            delegate: delegate
+        )
+        let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+
+        let delegateDrivenTask = try XCTUnwrap(
+            session.dataTask(with: request) as? EHBPStreamingDataTask
+        )
+        let completionHandlerTask = try XCTUnwrap(
+            session.dataTask(with: request) { _, _, _ in } as? EHBPStreamingDataTask
+        )
+
+        XCTAssertFalse(
+            delegateDrivenTask.accumulatesResponse,
+            "Delegate-driven streaming tasks should not buffer the full response"
+        )
+        XCTAssertTrue(
+            completionHandlerTask.accumulatesResponse,
+            "Completion-handler tasks must buffer the response they deliver"
+        )
+    }
+
     // MARK: - Protocol Constants Tests
 
     func testEHBPProtocolConstants() {
@@ -1785,6 +1811,28 @@ final class EHBPTests: XCTestCase {
         data.append(contentsOf: withUnsafeBytes(of: chunkLength.bigEndian) { Array($0) })
         return data
     }
+}
+
+// MARK: - Test Doubles
+
+/// Delegate stub for constructing streaming sessions without a real SDK consumer
+private final class NoopStreamingDelegate: URLSessionDataDelegateProtocol {
+    func urlSession(_ session: URLSessionProtocol, task: URLSessionTaskProtocol, didCompleteWithError error: Error?) {}
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {}
+
+    func urlSession(_ session: URLSessionProtocol, dataTask: URLSessionDataTaskProtocol, didReceive data: Data) {}
+
+    func urlSession(
+        _ session: URLSessionProtocol,
+        dataTask: URLSessionDataTaskProtocol,
+        didReceive response: URLResponse,
+        completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+    ) {}
 }
 
 // MARK: - Extensions
