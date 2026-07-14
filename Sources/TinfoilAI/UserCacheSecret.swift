@@ -15,7 +15,7 @@ import Security
 ///  2. the `userCacheSecret` parameter of `TinfoilAI.create`,
 ///  3. the `TINFOIL_USER_CACHE_SECRET` environment variable,
 ///  4. a generated secret persisted at `~/.tinfoil/user_cache_secret` (0600),
-///     shared with the other Tinfoil SDKs on the same machine.
+///     shared with other Tinfoil SDKs using the same home directory.
 ///
 /// Injection happens in the EHBP session, before the body is sealed, so the
 /// secret is only ever visible to the verified enclave.
