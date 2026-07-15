@@ -24,13 +24,13 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
     ///   - baseURL: Base URL where requests are sent (e.g., proxy server or enclave directly)
     ///   - enclaveURL: URL of the verified enclave (added as header when different from baseURL)
     ///   - publicKey: Server's X25519 public key (32 bytes)
-    ///   - userCacheSecret: Resolved prompt-cache scoping secret injected into
-    ///     eligible request bodies before encryption (empty disables injection)
+    ///   - userCacheSecret: Prompt-cache scoping secret injected into eligible
+    ///     request bodies before encryption. Empty values use the default.
     public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "") {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.enclaveURL = enclaveURL
         self.publicKey = publicKey
-        self.userCacheSecret = userCacheSecret
+        self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
     }
 
     public func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
@@ -319,14 +319,14 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     ///   - baseURL: Base URL where requests are sent (e.g., proxy server or enclave directly)
     ///   - enclaveURL: URL of the verified enclave (added as header when different from baseURL)
     ///   - publicKey: Server's X25519 public key (32 bytes)
-    ///   - userCacheSecret: Resolved prompt-cache scoping secret injected into
-    ///     eligible request bodies before encryption (empty disables injection)
+    ///   - userCacheSecret: Prompt-cache scoping secret injected into eligible
+    ///     request bodies before encryption. Empty values use the default.
     ///   - session: Underlying URLSession to use (defaults to shared)
     public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
         self.ehbpClient = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.enclaveURL = enclaveURL
-        self.userCacheSecret = userCacheSecret
+        self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
     }
 
     // MARK: - URLSessionProtocol

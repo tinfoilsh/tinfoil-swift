@@ -5,30 +5,26 @@ import Security
 /// caching contract. The router derives the request's prefix-cache namespace
 /// from it: requests carrying the same secret (under the same API identity)
 /// share cached prompt prefixes, requests carrying different secrets cannot
-/// observe each other's cache timing. The secret itself is stripped by the
-/// router and never reaches the model.
+/// observe each other's cache timing.
 ///
 /// Resolution order, mirroring the other Tinfoil clients:
 ///
-///  1. an explicit per-request `user_cache_secret` field in the body (never
-///     overwritten here), e.g. set via `ChatQuery.extraBody`,
+///  1. a non-empty per-request `user_cache_secret` field in the body, e.g.
+///     set via `ChatQuery.extraBody`,
 ///  2. the `userCacheSecret` parameter of `TinfoilAI.create`,
 ///  3. the `TINFOIL_USER_CACHE_SECRET` environment variable,
 ///  4. a generated secret persisted at `~/.tinfoil/user_cache_secret` (0600),
-///     shared with the other Tinfoil SDKs on the same machine.
+///     shared with other Tinfoil SDKs using the same home directory.
 ///
 /// Injection happens in the EHBP session, before the body is sealed, so the
 /// secret is only ever visible to the verified enclave.
 internal enum UserCacheSecret {
     /// Router-only request-body field. A non-empty string scopes the prompt
-    /// cache to that secret; an absent or empty value leaves the request in
-    /// the tenant-wide namespace.
+    /// cache to that secret.
     static let bodyField = "user_cache_secret"
 
-    /// Environment variable that provisions the secret. Setting it to an
-    /// empty string disables generation entirely (tenant-wide caching), which
-    /// is the right call for pooled multi-user deployments that would
-    /// otherwise mint a fresh namespace per container.
+    /// Environment variable that provisions the secret. An empty value is
+    /// treated as unset.
     static let environmentVariable = "TINFOIL_USER_CACHE_SECRET"
     private static let homeEnvironmentVariable = "HOME"
 
@@ -53,21 +49,19 @@ internal enum UserCacheSecret {
 
     // MARK: - Resolution
 
-    /// Resolves the client-level secret: the explicit `TinfoilAI.create`
-    /// parameter wins (`nil` means "not set"; an empty string disables
-    /// provisioning entirely), then the environment (where set-but-empty
-    /// also disables), then the persisted (or generated) secret. An empty
-    /// result means injection is disabled. Never throws: every failure
-    /// degrades to an in-memory secret or to tenant-wide caching.
+    /// Resolves the client-level secret: a non-empty explicit
+    /// `TinfoilAI.create` parameter wins, then a non-empty environment value,
+    /// then the persisted (or generated) secret. Never throws: persistence
+    /// failures degrade to an in-memory secret.
     static func resolve(
         explicit: String?,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         homeDirectory: URL? = defaultHomeDirectory
     ) -> String {
-        if let explicit {
+        if let explicit, !explicit.isEmpty {
             return explicit
         }
-        if let env = environment[environmentVariable] {
+        if let env = environment[environmentVariable], !env.isEmpty {
             return env
         }
         return loadOrGenerate(homeDirectory: homeDirectory)
@@ -89,8 +83,7 @@ internal enum UserCacheSecret {
     }
 
     /// Returns a fresh 256-bit random secret, hex-encoded. Never falls back
-    /// to a weak generator: no secret means tenant-wide caching, which is
-    /// safe.
+    /// to a weak generator.
     static func generate() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
@@ -327,15 +320,33 @@ internal enum UserCacheSecret {
     /// closing brace, leaving every caller-written byte — including number
     /// formatting, which a float round-trip would corrupt — exactly as the
     /// caller serialized it. Returns nil — forward the original bytes — for
-    /// non-object bodies, trailing data, or a body that already carries the
-    /// field: an explicit per-request value, including an explicit empty
-    /// string (= opt out for that request), always wins.
+    /// non-object bodies, trailing data, or a body that already carries a
+    /// non-empty or non-string field. An empty string is replaced with the
+    /// resolved client secret.
     static func inject(into body: Data, secret: String) -> Data? {
         guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              !containsTrailingComma(in: body),
-              object[bodyField] == nil,
-              let field = try? JSONSerialization.data(withJSONObject: [bodyField: secret])
+              !containsTrailingComma(in: body)
         else {
+            return nil
+        }
+
+        if let existing = object[bodyField] {
+            guard let existing = existing as? String,
+                  existing.isEmpty,
+                  let valueRange = topLevelValueRange(in: body, for: bodyField),
+                  let replacement = try? JSONSerialization.data(
+                      withJSONObject: secret,
+                      options: [.fragmentsAllowed]
+                  )
+            else {
+                return nil
+            }
+            var injected = body
+            injected.replaceSubrange(valueRange, with: replacement)
+            return injected
+        }
+
+        guard let field = try? JSONSerialization.data(withJSONObject: [bodyField: secret]) else {
             return nil
         }
 
@@ -353,6 +364,142 @@ internal enum UserCacheSecret {
         injected.append(field.dropFirst().dropLast()) // strip the one-field object's own braces
         injected.append(contentsOf: body[closingBraceIndex...])
         return injected
+    }
+
+    private static func topLevelValueRange(in body: Data, for field: String) -> Range<Data.Index>? {
+        let bytes = [UInt8](body)
+        var index = 0
+        skipWhitespace(in: bytes, index: &index)
+        guard index < bytes.count, bytes[index] == UInt8(ascii: "{") else {
+            return nil
+        }
+        index += 1
+        var matchingRange: Range<Data.Index>?
+
+        while index < bytes.count {
+            skipWhitespace(in: bytes, index: &index)
+            if index < bytes.count, bytes[index] == UInt8(ascii: "}") {
+                return matchingRange
+            }
+            guard let keyEnd = stringEnd(in: bytes, from: index),
+                  let key = try? JSONSerialization.jsonObject(
+                      with: Data(bytes[index..<keyEnd]),
+                      options: [.fragmentsAllowed]
+                  ) as? String
+            else {
+                return nil
+            }
+            index = keyEnd
+            skipWhitespace(in: bytes, index: &index)
+            guard index < bytes.count, bytes[index] == UInt8(ascii: ":") else {
+                return nil
+            }
+            index += 1
+            skipWhitespace(in: bytes, index: &index)
+            let valueStart = index
+            guard let valueEnd = valueEnd(in: bytes, from: valueStart) else {
+                return nil
+            }
+            if key == field {
+                guard matchingRange == nil else {
+                    return nil
+                }
+                matchingRange = valueStart..<valueEnd
+            }
+            index = valueEnd
+            skipWhitespace(in: bytes, index: &index)
+            guard index < bytes.count else {
+                return nil
+            }
+            if bytes[index] == UInt8(ascii: ",") {
+                index += 1
+            } else if bytes[index] == UInt8(ascii: "}") {
+                return matchingRange
+            } else {
+                return nil
+            }
+        }
+        return nil
+    }
+
+    private static func skipWhitespace(in bytes: [UInt8], index: inout Int) {
+        while index < bytes.count,
+              bytes[index] == 0x20 || bytes[index] == 0x09
+                || bytes[index] == 0x0A || bytes[index] == 0x0D {
+            index += 1
+        }
+    }
+
+    private static func stringEnd(in bytes: [UInt8], from start: Int) -> Int? {
+        guard start < bytes.count, bytes[start] == UInt8(ascii: "\"") else {
+            return nil
+        }
+        var index = start + 1
+        var escaped = false
+        while index < bytes.count {
+            let byte = bytes[index]
+            if escaped {
+                escaped = false
+            } else if byte == UInt8(ascii: "\\") {
+                escaped = true
+            } else if byte == UInt8(ascii: "\"") {
+                return index + 1
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func valueEnd(in bytes: [UInt8], from start: Int) -> Int? {
+        guard start < bytes.count else {
+            return nil
+        }
+        if bytes[start] == UInt8(ascii: "\"") {
+            return stringEnd(in: bytes, from: start)
+        }
+        if bytes[start] == UInt8(ascii: "{") || bytes[start] == UInt8(ascii: "[") {
+            var index = start
+            var depth = 0
+            var inString = false
+            var escaped = false
+            while index < bytes.count {
+                let byte = bytes[index]
+                if inString {
+                    if escaped {
+                        escaped = false
+                    } else if byte == UInt8(ascii: "\\") {
+                        escaped = true
+                    } else if byte == UInt8(ascii: "\"") {
+                        inString = false
+                    }
+                } else if byte == UInt8(ascii: "\"") {
+                    inString = true
+                } else if byte == UInt8(ascii: "{") || byte == UInt8(ascii: "[") {
+                    depth += 1
+                } else if byte == UInt8(ascii: "}") || byte == UInt8(ascii: "]") {
+                    depth -= 1
+                    if depth == 0 {
+                        return index + 1
+                    }
+                }
+                index += 1
+            }
+            return nil
+        }
+
+        var index = start
+        while index < bytes.count,
+              bytes[index] != UInt8(ascii: ","),
+              bytes[index] != UInt8(ascii: "}") {
+            index += 1
+        }
+        var end = index
+        while end > start,
+              bytes[end - 1] == 0x20 || bytes[end - 1] == 0x09
+                || bytes[end - 1] == 0x0A || bytes[end - 1] == 0x0D {
+            end -= 1
+        }
+        return end > start ? end : nil
     }
 
     /// `JSONSerialization` accepts trailing commas on some platforms even
