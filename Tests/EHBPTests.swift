@@ -624,6 +624,30 @@ final class EHBPTests: XCTestCase {
         )
     }
 
+    func testStreamingCancellationDoesNotReturnPartialData() async throws {
+        server.responseBody = Data("partial".utf8)
+        let completionCalled = expectation(description: "completion handler")
+        let recorder = CancellationRecorder(completionCalled: completionCalled)
+        let session = EHBPStreamingSession(
+            baseURL: server.baseURL,
+            publicKey: testPublicKey,
+            delegate: recorder
+        )
+        let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
+
+        session.dataTask(with: request) { data, response, error in
+            recorder.recordCompletion(data: data, response: response, error: error)
+        }.resume()
+
+        await fulfillment(of: [completionCalled], timeout: 2)
+
+        XCTAssertEqual(recorder.receivedData, Data("partial".utf8))
+        XCTAssertNil(recorder.completionData)
+        XCTAssertNil(recorder.completionResponse)
+        XCTAssertTrue(recorder.completionError is CancellationError)
+        XCTAssertEqual(recorder.completionCount, 1)
+    }
+
     // MARK: - Protocol Constants Tests
 
     func testEHBPProtocolConstants() {
@@ -1814,6 +1838,92 @@ final class EHBPTests: XCTestCase {
 }
 
 // MARK: - Test Doubles
+
+private final class CancellationRecorder: URLSessionDataDelegateProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private let completionCalled: XCTestExpectation
+    private var cancelled = false
+    private var _receivedData = Data()
+    private var _completionData: Data?
+    private var _completionResponse: URLResponse?
+    private var _completionError: Error?
+    private var _completionCount = 0
+
+    var receivedData: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return _receivedData
+    }
+
+    var completionData: Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _completionData
+    }
+
+    var completionResponse: URLResponse? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _completionResponse
+    }
+
+    var completionError: Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _completionError
+    }
+
+    var completionCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _completionCount
+    }
+
+    init(completionCalled: XCTestExpectation) {
+        self.completionCalled = completionCalled
+    }
+
+    func recordCompletion(data: Data?, response: URLResponse?, error: Error?) {
+        lock.lock()
+        _completionData = data
+        _completionResponse = response
+        _completionError = error
+        _completionCount += 1
+        let shouldFulfill = _completionCount == 1
+        lock.unlock()
+        if shouldFulfill {
+            completionCalled.fulfill()
+        }
+    }
+
+    func urlSession(_ session: URLSessionProtocol, task: URLSessionTaskProtocol, didCompleteWithError error: Error?) {}
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {}
+
+    func urlSession(_ session: URLSessionProtocol, dataTask: URLSessionDataTaskProtocol, didReceive data: Data) {
+        lock.lock()
+        _receivedData.append(data)
+        let shouldCancel = !cancelled
+        cancelled = true
+        lock.unlock()
+        if shouldCancel {
+            dataTask.cancel()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSessionProtocol,
+        dataTask: URLSessionDataTaskProtocol,
+        didReceive response: URLResponse,
+        completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+    ) {
+        completionHandler(.allow)
+    }
+}
 
 /// Delegate stub for constructing streaming sessions without a real SDK consumer
 private final class NoopStreamingDelegate: URLSessionDataDelegateProtocol {
