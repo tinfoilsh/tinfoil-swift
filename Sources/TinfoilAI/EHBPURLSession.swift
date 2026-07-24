@@ -286,12 +286,13 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
 
             var accumulatedData = Data()
             for try await chunk in stream {
-                if Task.isCancelled { break }
+                try Task.checkCancellation()
                 if accumulatesResponse {
                     accumulatedData.append(chunk)
                 }
                 delegate?.urlSession(session, dataTask: self, didReceive: chunk)
             }
+            try Task.checkCancellation()
 
             completionHandler(accumulatedData, response, nil)
             delegate?.urlSession(session, task: self, didCompleteWithError: nil)
@@ -419,6 +420,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
             headers: headers,
             body: body
         )
+        try Task.checkCancellation()
 
         return (data, response)
     }
