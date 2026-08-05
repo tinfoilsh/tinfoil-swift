@@ -274,7 +274,10 @@ public struct VerificationDocument: Codable {
         securityVerified = try container.decode(Bool.self, forKey: .securityVerified)
         if schemaVersion == 0 {
             verifier = try container.decodeIfPresent(SoftwareIdentity.self, forKey: .verifier)
-                ?? SoftwareIdentity(name: "unknown", version: "unknown")
+                ?? SoftwareIdentity(
+                    name: TinfoilConstants.unknownVerifierValue,
+                    version: TinfoilConstants.unknownVerifierValue
+                )
         } else {
             verifier = try container.decode(SoftwareIdentity.self, forKey: .verifier)
         }

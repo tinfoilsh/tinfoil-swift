@@ -156,7 +156,8 @@ public class SecureClient {
             let decoder = JSONDecoder()
             let decodedGroundTruth = try decoder.decode(GroundTruth.self, from: groundTruthData)
             var document = try decoder.decode(VerificationDocument.self, from: verificationDocumentData)
-            if document.verifier.version == "devel" || document.verifier.version == "unknown" {
+            if document.verifier.version == TinfoilConstants.developmentVerifierVersion ||
+               document.verifier.version == TinfoilConstants.unknownVerifierValue {
                 document = document.replacingVerifier(
                     SoftwareIdentity(
                         name: document.verifier.name,
@@ -180,7 +181,7 @@ public class SecureClient {
                 document.releaseTag == decodedGroundTruth.releaseTag,
                 document.releaseDigest == decodedGroundTruth.digest,
                 document.tlsPublicKey == decodedGroundTruth.tlsPublicKey,
-                document.hpkePublicKey == decodedGroundTruth.hpkePublicKey,
+                document.hpkePublicKey == (decodedGroundTruth.hpkePublicKey ?? ""),
                 document.codeFingerprint == decodedGroundTruth.codeFingerprint,
                 document.enclaveFingerprint == decodedGroundTruth.enclaveFingerprint
             else {

@@ -18,6 +18,8 @@ public enum TinfoilConstants {
     /// Verifier implementation embedded by this SDK release
     public static let verifierName = "tinfoil-go"
     public static let verifierVersion = Tinfoil.ClientVersion
+    internal static let developmentVerifierVersion = "devel"
+    internal static let unknownVerifierValue = "unknown"
 
     /// Error domain for URL parsing errors
     internal static let urlHelpersErrorDomain = "sh.tinfoil.url-helpers"
