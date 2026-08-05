@@ -98,6 +98,9 @@ let verificationCallback: VerificationCallback = { verificationDocument in
         print("✅ Attestation verification successful")
         print("Code fingerprint: \(doc.codeFingerprint)")
         print("Enclave fingerprint: \(doc.enclaveFingerprint)")
+        print("Release: \(doc.releaseTag ?? "unavailable")")
+        print("Verifier: \(doc.verifier.name) \(doc.verifier.version)")
+        print("Verified at: \(doc.verifiedAt ?? "unknown")")
         print("Security verified: \(doc.securityVerified)")
         print("All steps succeeded: \(doc.allStepsSucceeded)")
     }

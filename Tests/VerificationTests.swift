@@ -42,13 +42,20 @@ final class VerificationTests: XCTestCase {
             XCTAssertEqual(verificationDoc?.codeFingerprint, groundTruth.codeFingerprint, "Code fingerprint should match")
             XCTAssertEqual(verificationDoc?.enclaveFingerprint, groundTruth.enclaveFingerprint, "Enclave fingerprint should match")
             XCTAssertFalse(verificationDoc?.selectedRouterEndpoint.isEmpty ?? true, "Router endpoint should be populated")
+            XCTAssertEqual(verificationDoc?.schemaVersion, 1)
+            XCTAssertEqual(verificationDoc?.verifier.name, TinfoilConstants.verifierName)
+            XCTAssertEqual(verificationDoc?.verifier.version, TinfoilConstants.verifierVersion)
+            XCTAssertNotNil(verificationDoc?.verifiedAt)
+            XCTAssertEqual(verificationDoc?.steps.fetchDigest.status, .skipped)
+            XCTAssertEqual(verificationDoc?.steps.verifyCertificate.status, .success)
+            XCTAssertTrue(verificationDoc?.allStepsSucceeded ?? false)
 
             // Verify verifiedEnclaveURL returns the discovered enclave
             let enclaveURL = secureClient.verifiedEnclaveURL
             XCTAssertNotNil(enclaveURL, "Enclave URL should be available after verification")
             XCTAssertTrue(enclaveURL?.starts(with: "https://") ?? false, "Enclave URL should be HTTPS")
         } catch {
-            // If this fails in CI, it might be due to network issues
+            throw XCTSkip("Network verification unavailable: \(error)")
         }
     }
 
@@ -154,34 +161,43 @@ final class VerificationTests: XCTestCase {
         // Test error prefix detection logic
         let testCases: [(error: String, expectedStep: String)] = [
             ("fetchDigest: failed to connect", "fetchDigest"),
+            ("fetchBundle: connection refused", "fetchDigest"),
             ("failed to fetch bundle: connection refused", "fetchDigest"),
             ("verifyCode: invalid repository", "verifyCode"),
             ("verifyEnclave: measurement mismatch", "verifyEnclave"),
-            ("verifyHardware: TDX attestation failed", "verifyHardware"),
-            ("validateTLS: certificate invalid", "validateTLS"),
-            ("measurements: comparison failed", "validateTLS"),
+            ("verifyHardware: TDX attestation failed", "compareMeasurements"),
+            ("validateTLS: certificate invalid", "verifyCertificate"),
+            ("verifyCertificate: binding failed", "verifyCertificate"),
+            ("measurements: comparison failed", "compareMeasurements"),
             ("unknown error without prefix", "other")
         ]
 
         for testCase in testCases {
-            let errorMessage = testCase.error
-            var detectedStep = "other"
+            let steps = SecureClient.stepsFromError(testCase.error)
+            let failedStep: String
+            if steps.fetchDigest.status == .failed { failedStep = "fetchDigest" }
+            else if steps.verifyCode.status == .failed { failedStep = "verifyCode" }
+            else if steps.verifyEnclave.status == .failed { failedStep = "verifyEnclave" }
+            else if steps.compareMeasurements.status == .failed { failedStep = "compareMeasurements" }
+            else if steps.verifyCertificate.status == .failed { failedStep = "verifyCertificate" }
+            else { failedStep = "other" }
 
-            if errorMessage.starts(with: "fetchDigest:") || errorMessage.starts(with: "failed to fetch bundle:") {
-                detectedStep = "fetchDigest"
-            } else if errorMessage.starts(with: "verifyCode:") {
-                detectedStep = "verifyCode"
-            } else if errorMessage.starts(with: "verifyEnclave:") {
-                detectedStep = "verifyEnclave"
-            } else if errorMessage.starts(with: "verifyHardware:") {
-                detectedStep = "verifyHardware"
-            } else if errorMessage.starts(with: "validateTLS:") || errorMessage.starts(with: "measurements:") {
-                detectedStep = "validateTLS"
-            }
-
-            XCTAssertEqual(detectedStep, testCase.expectedStep,
-                          "Error '\(errorMessage)' should be detected as '\(testCase.expectedStep)' step")
+            XCTAssertEqual(failedStep, testCase.expectedStep)
         }
+
+        let bundleCodeFailure = SecureClient.stepsFromError(
+            "verifyCode: invalid signature",
+            usesBundle: true
+        )
+        XCTAssertEqual(bundleCodeFailure.fetchDigest.status, .skipped)
+        XCTAssertEqual(bundleCodeFailure.verifyCode.status, .failed)
+
+        let bundleFetchFailure = SecureClient.stepsFromError(
+            "fetchBundle: connection refused",
+            usesBundle: true
+        )
+        XCTAssertEqual(bundleFetchFailure.fetchDigest.status, .skipped)
+        XCTAssertEqual(bundleFetchFailure.otherError?.status, .failed)
     }
 
     // MARK: - Verification Document Tests
@@ -211,14 +227,23 @@ final class VerificationTests: XCTestCase {
                 fetchDigest: .success(),
                 verifyCode: .success(),
                 verifyEnclave: .success(),
-                compareMeasurements: .success()
-            )
+                compareMeasurements: .success(),
+                verifyCertificate: .success()
+            ),
+            releaseTag: "v1.2.3",
+            verifier: SoftwareIdentity(name: "tinfoil-go", version: "0.15.0"),
+            verifiedAt: "2026-08-04T12:30:00Z"
         )
 
         // Verify all fields are accessible
         XCTAssertEqual(testDoc.configRepo, "test-repo")
         XCTAssertEqual(testDoc.enclaveHost, "test-url")
         XCTAssertEqual(testDoc.releaseDigest, "test-digest")
+        XCTAssertEqual(testDoc.schemaVersion, 1)
+        XCTAssertEqual(testDoc.releaseTag, "v1.2.3")
+        XCTAssertEqual(testDoc.verifier.name, "tinfoil-go")
+        XCTAssertEqual(testDoc.verifier.version, "0.15.0")
+        XCTAssertEqual(testDoc.verifiedAt, "2026-08-04T12:30:00Z")
         XCTAssertEqual(testDoc.tlsPublicKey, "test-tls")
         XCTAssertEqual(testDoc.hpkePublicKey, "test-hpke")
         XCTAssertEqual(testDoc.codeFingerprint, "code-fp")
@@ -227,6 +252,122 @@ final class VerificationTests: XCTestCase {
         XCTAssertTrue(testDoc.securityVerified)
         XCTAssertNotNil(testDoc.hardwareMeasurement)
         XCTAssertEqual(testDoc.hardwareMeasurement?.id, "TDX-1")
+    }
+
+    func testLegacyVerificationDocumentDecoding() throws {
+        let json = """
+        {
+          "configRepo":"owner/repo",
+          "enclaveHost":"router.example",
+          "releaseDigest":"digest",
+          "codeMeasurement":{"type":"type","registers":["code"]},
+          "enclaveMeasurement":{"measurement":{"type":"type","registers":["enclave"]}},
+          "tlsPublicKey":"tls",
+          "hpkePublicKey":"hpke",
+          "hardwareMeasurement":{"id":"id","mrtd":"mrtd","rtmr0":"rtmr0"},
+          "codeFingerprint":"code-fingerprint",
+          "enclaveFingerprint":"enclave-fingerprint",
+          "selectedRouterEndpoint":"router.example",
+          "securityVerified":true,
+          "steps":{
+            "fetchDigest":{"status":"success"},
+            "verifyCode":{"status":"success"},
+            "verifyEnclave":{"status":"success"},
+            "compareMeasurements":{"status":"success"}
+          }
+        }
+        """
+
+        let document = try JSONDecoder().decode(
+            VerificationDocument.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertEqual(document.schemaVersion, 0)
+        XCTAssertEqual(document.verifier.name, "unknown")
+        XCTAssertEqual(document.steps.verifyCertificate.status, .pending)
+        XCTAssertEqual(document.hardwareMeasurement?.id, "id")
+    }
+
+    func testCanonicalVerificationDocumentDecoding() throws {
+        let json = """
+        {
+          "schemaVersion":1,
+          "configRepo":"owner/repo",
+          "enclaveHost":"router.example",
+          "releaseTag":"v1.2.3",
+          "releaseDigest":"digest",
+          "codeMeasurement":{"type":"type","registers":["code"]},
+          "enclaveMeasurement":{"measurement":{"type":"type","registers":["enclave"]}},
+          "tlsPublicKey":"tls",
+          "hpkePublicKey":"hpke",
+          "hardwareMeasurement":{"ID":"id","MRTD":"mrtd","RTMR0":"rtmr0"},
+          "codeFingerprint":"code-fingerprint",
+          "enclaveFingerprint":"enclave-fingerprint",
+          "selectedRouterEndpoint":"router.example",
+          "securityVerified":true,
+          "verifier":{"name":"tinfoil-go","version":"0.15.0"},
+          "verifiedAt":"2026-08-04T12:30:00Z",
+          "steps":{
+            "fetchDigest":{"status":"success"},
+            "verifyCode":{"status":"success"},
+            "verifyEnclave":{"status":"success"},
+            "compareMeasurements":{"status":"success"},
+            "verifyCertificate":{"status":"success"}
+          }
+        }
+        """
+
+        let document = try JSONDecoder().decode(
+            VerificationDocument.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertTrue(document.allStepsSucceeded)
+        XCTAssertEqual(document.verifier.version, "0.15.0")
+        XCTAssertEqual(document.hardwareMeasurement?.id, "id")
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        var steps = try XCTUnwrap(object["steps"] as? [String: Any])
+        steps.removeValue(forKey: "verifyCertificate")
+        object["steps"] = steps
+        let missingCertificateStep = try JSONSerialization.data(withJSONObject: object)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(VerificationDocument.self, from: missingCertificateStep)
+        )
+    }
+
+    func testCanonicalDocumentRequiresVerifierIdentity() {
+        let json = """
+        {
+          "schemaVersion":1,
+          "configRepo":"owner/repo",
+          "enclaveHost":"router.example",
+          "releaseDigest":"digest",
+          "codeMeasurement":{"type":"type","registers":["code"]},
+          "enclaveMeasurement":{"measurement":{"type":"type","registers":["enclave"]}},
+          "tlsPublicKey":"tls",
+          "hpkePublicKey":"hpke",
+          "codeFingerprint":"code-fingerprint",
+          "enclaveFingerprint":"enclave-fingerprint",
+          "selectedRouterEndpoint":"router.example",
+          "securityVerified":true,
+          "verifiedAt":"2026-08-04T12:30:00Z",
+          "steps":{
+            "fetchDigest":{"status":"success"},
+            "verifyCode":{"status":"success"},
+            "verifyEnclave":{"status":"success"},
+            "compareMeasurements":{"status":"success"},
+            "verifyCertificate":{"status":"success"}
+          }
+        }
+        """
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(VerificationDocument.self, from: Data(json.utf8))
+        )
     }
 
     // MARK: - SecureClient HTTP Methods
