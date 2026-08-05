@@ -223,15 +223,7 @@ final class TinfoilAITests: XCTestCase {
             XCTAssertFalse(doc.selectedRouterEndpoint.isEmpty, "Selected router endpoint should be present")
             XCTAssertTrue(doc.securityVerified, "Security should be verified for successful flow")
 
-            // Verify all steps are successful
-            if doc.steps.fetchDigest.status == .success,
-               doc.steps.verifyCode.status == .success,
-               doc.steps.verifyEnclave.status == .success,
-               doc.steps.compareMeasurements.status == .success {
-                XCTAssertTrue(true, "All verification steps should be successful")
-            } else {
-                XCTFail("Not all verification steps were successful")
-            }
+            XCTAssertTrue(doc.allStepsSucceeded, "All verification steps should be complete")
         }
 
         let chatQuery = ChatQuery(
