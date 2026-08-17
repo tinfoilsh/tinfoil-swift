@@ -627,7 +627,11 @@ final class EHBPTests: XCTestCase {
     func testStreamingCancellationDoesNotReturnPartialData() async throws {
         server.responseBody = Data("partial".utf8)
         let completionCalled = expectation(description: "completion handler")
-        let recorder = CancellationRecorder(completionCalled: completionCalled)
+        let delegateCompleted = expectation(description: "delegate completion")
+        let recorder = CancellationRecorder(
+            completionCalled: completionCalled,
+            delegateCompleted: delegateCompleted
+        )
         let session = EHBPStreamingSession(
             baseURL: server.baseURL,
             publicKey: testPublicKey,
@@ -639,13 +643,75 @@ final class EHBPTests: XCTestCase {
             recorder.recordCompletion(data: data, response: response, error: error)
         }.resume()
 
-        await fulfillment(of: [completionCalled], timeout: 2)
+        await fulfillment(of: [completionCalled, delegateCompleted], timeout: 2)
 
         XCTAssertEqual(recorder.receivedData, Data("partial".utf8))
         XCTAssertNil(recorder.completionData)
         XCTAssertNil(recorder.completionResponse)
-        XCTAssertTrue(recorder.completionError is CancellationError)
+        XCTAssertEqual((recorder.completionError as? URLError)?.code, .cancelled)
         XCTAssertEqual(recorder.completionCount, 1)
+        XCTAssertEqual(recorder.delegateCompletionCount, 1)
+    }
+
+    func testStreamingTaskCancelledBeforeResumeNeverStartsRequest() async throws {
+        let completionCalled = expectation(description: "completion handler")
+        let delegateCompleted = expectation(description: "delegate completion")
+        let recorder = CancellationRecorder(
+            completionCalled: completionCalled,
+            delegateCompleted: delegateCompleted
+        )
+        let session = EHBPStreamingSession(
+            baseURL: server.baseURL,
+            publicKey: testPublicKey,
+            delegate: recorder
+        )
+        let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
+        let task = session.dataTask(with: request) { data, response, error in
+            recorder.recordCompletion(data: data, response: response, error: error)
+        }
+
+        task.cancel()
+        task.resume()
+
+        await fulfillment(of: [completionCalled, delegateCompleted], timeout: 2)
+
+        XCTAssertTrue(server.requestStore.requests.isEmpty)
+        XCTAssertNil(recorder.completionData)
+        XCTAssertNil(recorder.completionResponse)
+        XCTAssertEqual((recorder.completionError as? URLError)?.code, .cancelled)
+        XCTAssertEqual(recorder.completionCount, 1)
+        XCTAssertEqual(recorder.delegateCompletionCount, 1)
+    }
+
+    func testConcurrentStreamingResumeAndCancelCompletesOnce() async throws {
+        let completionCalled = expectation(description: "completion handler")
+        let delegateCompleted = expectation(description: "delegate completion")
+        let recorder = CancellationRecorder(
+            completionCalled: completionCalled,
+            delegateCompleted: delegateCompleted
+        )
+        let session = EHBPStreamingSession(
+            baseURL: server.baseURL,
+            publicKey: testPublicKey,
+            delegate: recorder
+        )
+        let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
+        let task = session.dataTask(with: request) { data, response, error in
+            recorder.recordCompletion(data: data, response: response, error: error)
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { task.resume() }
+            group.addTask { task.cancel() }
+        }
+
+        await fulfillment(of: [completionCalled, delegateCompleted], timeout: 2)
+
+        XCTAssertNil(recorder.completionData)
+        XCTAssertNil(recorder.completionResponse)
+        XCTAssertEqual((recorder.completionError as? URLError)?.code, .cancelled)
+        XCTAssertEqual(recorder.completionCount, 1)
+        XCTAssertEqual(recorder.delegateCompletionCount, 1)
     }
 
     // MARK: - Protocol Constants Tests
@@ -1842,12 +1908,14 @@ final class EHBPTests: XCTestCase {
 private final class CancellationRecorder: URLSessionDataDelegateProtocol, @unchecked Sendable {
     private let lock = NSLock()
     private let completionCalled: XCTestExpectation
+    private let delegateCompleted: XCTestExpectation
     private var cancelled = false
     private var _receivedData = Data()
     private var _completionData: Data?
     private var _completionResponse: URLResponse?
     private var _completionError: Error?
     private var _completionCount = 0
+    private var _delegateCompletionCount = 0
 
     var receivedData: Data {
         lock.lock()
@@ -1879,8 +1947,18 @@ private final class CancellationRecorder: URLSessionDataDelegateProtocol, @unche
         return _completionCount
     }
 
-    init(completionCalled: XCTestExpectation) {
+    var delegateCompletionCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _delegateCompletionCount
+    }
+
+    init(
+        completionCalled: XCTestExpectation,
+        delegateCompleted: XCTestExpectation
+    ) {
         self.completionCalled = completionCalled
+        self.delegateCompleted = delegateCompleted
     }
 
     func recordCompletion(data: Data?, response: URLResponse?, error: Error?) {
@@ -1896,7 +1974,15 @@ private final class CancellationRecorder: URLSessionDataDelegateProtocol, @unche
         }
     }
 
-    func urlSession(_ session: URLSessionProtocol, task: URLSessionTaskProtocol, didCompleteWithError error: Error?) {}
+    func urlSession(_ session: URLSessionProtocol, task: URLSessionTaskProtocol, didCompleteWithError error: Error?) {
+        lock.lock()
+        _delegateCompletionCount += 1
+        let shouldFulfill = _delegateCompletionCount == 1
+        lock.unlock()
+        if shouldFulfill {
+            delegateCompleted.fulfill()
+        }
+    }
 
     func urlSession(
         _ session: URLSession,
