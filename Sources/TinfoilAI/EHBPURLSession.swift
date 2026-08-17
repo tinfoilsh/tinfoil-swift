@@ -243,7 +243,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         lock.unlock()
         task?.cancel()
         if shouldCompleteImmediately {
-            finish(data: nil, response: nil, error: CancellationError())
+            finish(data: nil, response: nil, error: URLError(.cancelled))
         }
     }
 
@@ -326,7 +326,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         let wasCancelled = isCancellationRequested
         let finalData = wasCancelled ? nil : data
         let finalResponse = wasCancelled ? nil : response
-        let finalError: Error? = wasCancelled ? CancellationError() : error
+        let finalError: Error? = wasCancelled ? URLError(.cancelled) : error
         lock.unlock()
 
         completionHandler(finalData, finalResponse, finalError)
