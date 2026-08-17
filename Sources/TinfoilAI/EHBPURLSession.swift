@@ -218,7 +218,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
 
     func resume() {
         lock.lock()
-        guard !hasStarted, !isCancellationRequested, !hasCompleted else {
+        guard !hasStarted, !isCancellationRequested else {
             lock.unlock()
             return
         }
@@ -243,7 +243,9 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         lock.unlock()
         task?.cancel()
         if shouldCompleteImmediately {
-            finish(data: nil, response: nil, error: URLError(.cancelled))
+            Task { [self] in
+                finish(data: nil, response: nil, error: nil)
+            }
         }
     }
 
