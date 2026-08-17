@@ -223,9 +223,8 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             return
         }
         hasStarted = true
-        let task = Task { [weak self] in
-            guard let self = self else { return }
-            await self.performStreamingRequest()
+        let task = Task { [self] in
+            await performStreamingRequest()
         }
         underlyingTask = task
         lock.unlock()
