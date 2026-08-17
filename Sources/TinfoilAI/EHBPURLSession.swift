@@ -182,6 +182,8 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
 
     private var underlyingTask: Task<Void, Never>?
     private var hasStarted = false
+    private var isCancellationRequested = false
+    private var hasCompleted = false
     private let lock = NSLock()
     private var _originalRequest: URLRequest?
 
@@ -216,34 +218,47 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
 
     func resume() {
         lock.lock()
-        guard !hasStarted else {
+        guard !hasStarted, !isCancellationRequested, !hasCompleted else {
             lock.unlock()
             return
         }
         hasStarted = true
-        lock.unlock()
-
-        underlyingTask = Task { [weak self] in
+        let task = Task { [weak self] in
             guard let self = self else { return }
             await self.performStreamingRequest()
         }
+        underlyingTask = task
+        lock.unlock()
     }
 
     func cancel() {
         lock.lock()
+        guard !isCancellationRequested, !hasCompleted else {
+            lock.unlock()
+            return
+        }
+        isCancellationRequested = true
         let task = underlyingTask
+        let shouldCompleteImmediately = !hasStarted
         lock.unlock()
         task?.cancel()
-        session?.removeTask(self)
+        if shouldCompleteImmediately {
+            finish(data: nil, response: nil, error: CancellationError())
+        }
     }
 
     private func performStreamingRequest() async {
         guard let session = session else {
-            completionHandler(nil, nil, EHBPError.invalidInput("session was deallocated"))
+            finish(
+                data: nil,
+                response: nil,
+                error: EHBPError.invalidInput("session was deallocated")
+            )
             return
         }
 
         do {
+            try Task.checkCancellation()
             let ehbpClient = try EHBPClient(baseURL: baseURL, publicKey: publicKey)
 
             guard let url = request.url else {
@@ -294,14 +309,31 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             }
             try Task.checkCancellation()
 
-            completionHandler(accumulatedData, response, nil)
-            delegate?.urlSession(session, task: self, didCompleteWithError: nil)
+            finish(data: accumulatedData, response: response, error: nil)
         } catch {
-            completionHandler(nil, nil, error)
-            delegate?.urlSession(session, task: self, didCompleteWithError: error)
+            finish(data: nil, response: nil, error: error)
         }
+    }
 
-        session.removeTask(self)
+    private func finish(data: Data?, response: URLResponse?, error: Error?) {
+        lock.lock()
+        guard !hasCompleted else {
+            lock.unlock()
+            return
+        }
+        hasCompleted = true
+        underlyingTask = nil
+        let wasCancelled = isCancellationRequested
+        let finalData = wasCancelled ? nil : data
+        let finalResponse = wasCancelled ? nil : response
+        let finalError: Error? = wasCancelled ? CancellationError() : error
+        lock.unlock()
+
+        completionHandler(finalData, finalResponse, finalError)
+        if let session {
+            delegate?.urlSession(session, task: self, didCompleteWithError: finalError)
+            session.removeTask(self)
+        }
     }
 }
 

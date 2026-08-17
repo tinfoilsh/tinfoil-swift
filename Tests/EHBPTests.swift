@@ -648,6 +648,32 @@ final class EHBPTests: XCTestCase {
         XCTAssertEqual(recorder.completionCount, 1)
     }
 
+    func testStreamingTaskCancelledBeforeResumeNeverStartsRequest() async throws {
+        let completionCalled = expectation(description: "completion handler")
+        let recorder = CancellationRecorder(completionCalled: completionCalled)
+        let session = EHBPStreamingSession(
+            baseURL: server.baseURL,
+            publicKey: testPublicKey,
+            delegate: recorder
+        )
+        let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
+        let task = session.dataTask(with: request) { data, response, error in
+            recorder.recordCompletion(data: data, response: response, error: error)
+        }
+
+        task.cancel()
+        task.resume()
+
+        await fulfillment(of: [completionCalled], timeout: 2)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(server.requestStore.requests.isEmpty)
+        XCTAssertNil(recorder.completionData)
+        XCTAssertNil(recorder.completionResponse)
+        XCTAssertTrue(recorder.completionError is CancellationError)
+        XCTAssertEqual(recorder.completionCount, 1)
+    }
+
     // MARK: - Protocol Constants Tests
 
     func testEHBPProtocolConstants() {
