@@ -77,6 +77,21 @@ internal enum URLHelpers {
         return "\(components.scheme)://\(hostWithPort)"
     }
 
+    /// Returns the enclave identity implied by a stable, non-forwarding API
+    /// endpoint. Generic proxy URLs deliberately return nil so their verified
+    /// endpoint may be selected and rotated by the attestation bundle service.
+    static func enclaveURLForStableBase(_ baseURL: String?) throws -> String? {
+        guard let baseURL else { return nil }
+        let components = try parseHTTPURL(baseURL)
+        let effectivePort = components.port ?? (components.scheme == "https" ? 443 : 80)
+        if components.scheme == "https",
+           components.host.caseInsensitiveCompare("inference.tinfoil.sh") == .orderedSame,
+           effectivePort == 443 {
+            return TinfoilConstants.inferenceEnclaveURL
+        }
+        return nil
+    }
+
     /// Extracts the path and query string from a URL
     /// - Parameter url: The URL to extract path from
     /// - Returns: The path with query string if present (e.g., "/v1/chat?model=gpt-4")
@@ -103,4 +118,4 @@ internal enum URLHelpers {
             headers[enclaveURLHeaderName] = enclaveURL
         }
     }
-} 
+}

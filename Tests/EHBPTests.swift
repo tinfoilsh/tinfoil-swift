@@ -55,6 +55,8 @@ final class LocalTestServer: @unchecked Sendable {
     var responseNonce: String = Data(repeating: 0xAB, count: 32).hexString
     var responseBody: Data = Data()
     var responseStatusCode: Int = 200
+    var responseContentType: String = "application/json"
+    var includeResponseNonce = true
 
     init(port: UInt16 = 0) {
         self.port = port
@@ -231,8 +233,10 @@ final class LocalTestServer: @unchecked Sendable {
 
     private func buildHTTPResponse() -> Data {
         var response = "HTTP/1.1 \(responseStatusCode) OK\r\n"
-        response += "Content-Type: application/json\r\n"
-        response += "\(EHBPProtocol.responseNonceHeader): \(responseNonce)\r\n"
+        response += "Content-Type: \(responseContentType)\r\n"
+        if includeResponseNonce {
+            response += "\(EHBPProtocol.responseNonceHeader): \(responseNonce)\r\n"
+        }
         response += "Content-Length: \(responseBody.count)\r\n"
         response += "Connection: close\r\n"
         response += "\r\n"
@@ -474,6 +478,80 @@ final class EHBPTests: XCTestCase {
         }
 
         XCTAssertEqual(capturedRequest.path, "/v1/chat/completions", "URL path should be preserved")
+    }
+
+    func testKeyMismatchRefreshesOnceAndReplaysWithNewEnclaveRoute() async throws {
+        server.responseStatusCode = 422
+        server.responseContentType = "application/problem+json"
+        server.includeResponseNonce = false
+        server.responseBody = Data(
+            "{\"type\":\"urn:ietf:params:ehbp:error:key-config\",\"title\":\"stale key\"}".utf8
+        )
+
+        let refreshCounter = AsyncCounter()
+        let state = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: "https://old-router.example",
+                publicKey: testPublicKey
+            ),
+            refresh: {
+                await refreshCounter.increment()
+                return EHBPVerifiedEndpoint(
+                    enclaveURL: "https://new-router.example",
+                    publicKey: Data(repeating: 0x43, count: 32)
+                )
+            }
+        )
+        let session = try EHBPURLSession(
+            baseURL: server.baseURL,
+            verifiedState: state
+        )
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+
+        do {
+            _ = try await session.data(for: request, delegate: nil)
+            XCTFail("The second key mismatch must be surfaced after one safe replay")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("still mismatched after refresh"))
+        }
+
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshCount, 1)
+        XCTAssertEqual(server.requestStore.requests.count, 2)
+        let routes = server.requestStore.requests.compactMap { request in
+            request.headers.first {
+                $0.key.caseInsensitiveCompare(URLHelpers.enclaveURLHeaderName) == .orderedSame
+            }?.value
+        }
+        XCTAssertEqual(routes, ["https://old-router.example", "https://new-router.example"])
+    }
+
+    func testKeyMismatchProblemRecognitionIsStrictAndBounded() throws {
+        let url = try XCTUnwrap(URL(string: "https://proxy.example"))
+        let response = try XCTUnwrap(
+            HTTPURLResponse(
+                url: url,
+                statusCode: 422,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/problem+json; charset=utf-8"]
+            )
+        )
+        let body = Data(
+            "{\"type\":\"urn:ietf:params:ehbp:error:key-config\",\"title\":\"rotate\"}".utf8
+        )
+
+        XCTAssertEqual(
+            EHBPProblemResponse.keyConfigurationMismatchTitle(response: response, body: body),
+            "rotate"
+        )
+        XCTAssertNil(
+            EHBPProblemResponse.keyConfigurationMismatchTitle(
+                response: response,
+                body: Data(repeating: 0, count: EHBPProblemResponse.maximumDiagnosticBytes + 1)
+            )
+        )
     }
 
     // MARK: - Encapsulated Key Format Tests
@@ -1900,6 +1978,14 @@ final class EHBPTests: XCTestCase {
         let chunkLength: UInt32 = 0
         data.append(contentsOf: withUnsafeBytes(of: chunkLength.bigEndian) { Array($0) })
         return data
+    }
+}
+
+private actor AsyncCounter {
+    private(set) var value = 0
+
+    func increment() {
+        value += 1
     }
 }
 

@@ -67,10 +67,20 @@ public class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
 
-        let verifier = SecureClient(
-            githubRepo: githubRepo,
-            attestationBundleURL: attestationBundleURL
-        )
+        let bundleURL = attestationBundleURL ?? TinfoilConstants.attestationBaseURL
+        let stableEnclaveURL = try URLHelpers.enclaveURLForStableBase(baseURL)
+        let verifier = if let stableEnclaveURL {
+            SecureClient(
+                githubRepo: githubRepo,
+                enclaveURL: stableEnclaveURL,
+                attestationBundleURL: bundleURL
+            )
+        } else {
+            SecureClient(
+                githubRepo: githubRepo,
+                attestationBundleURL: attestationBundleURL
+            )
+        }
 
         do {
             let groundTruth = try await verifier.verify()
@@ -82,6 +92,44 @@ public class TinfoilAI {
             onVerification?(verifier.verificationDocument)
 
             let finalBaseURL = baseURL ?? enclaveURL
+            // A generic configured base URL is a forwarding proxy, so recovery
+            // may rotate its endpoint/key pair. Direct clients and the stable
+            // inference endpoint must instead refresh the selected domain.
+            let pinnedRefreshEnclaveURL = baseURL != nil && stableEnclaveURL == nil
+                ? nil
+                : enclaveURL
+            let refreshEndpoint: EHBPVerifiedState.Refresh = {
+                let refreshVerifier = if let pinnedRefreshEnclaveURL {
+                    SecureClient(
+                        githubRepo: githubRepo,
+                        enclaveURL: pinnedRefreshEnclaveURL,
+                        attestationBundleURL: bundleURL
+                    )
+                } else {
+                    SecureClient(
+                        githubRepo: githubRepo,
+                        attestationBundleURL: attestationBundleURL
+                    )
+                }
+
+                do {
+                    let refreshedTruth = try await refreshVerifier.verify()
+                    guard let refreshedURL = refreshVerifier.verifiedEnclaveURL,
+                          let keyHex = refreshedTruth.hpkePublicKey,
+                          let key = Data(hexString: keyHex),
+                          key.count == 32
+                    else {
+                        throw TinfoilError.invalidConfiguration(
+                            "Refreshed attestation did not provide a valid enclave HPKE key"
+                        )
+                    }
+                    onVerification?(refreshVerifier.verificationDocument)
+                    return EHBPVerifiedEndpoint(enclaveURL: refreshedURL, publicKey: key)
+                } catch {
+                    onVerification?(refreshVerifier.verificationDocument)
+                    throw error
+                }
+            }
 
             return try TinfoilAI(
                 apiKey: staticApiKey,
@@ -92,7 +140,8 @@ public class TinfoilAI {
                 parsingOptions: parsingOptions,
                 customHeaders: customHeaders,
                 tinfoilEvents: tinfoilEvents,
-                userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret)
+                userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
+                refreshEndpoint: refreshEndpoint
             )
         } catch {
             onVerification?(verifier.verificationDocument)
@@ -112,7 +161,8 @@ public class TinfoilAI {
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
         tinfoilEvents: Set<TinfoilEvent> = [],
-        userCacheSecret: String = ""
+        userCacheSecret: String = "",
+        refreshEndpoint: EHBPVerifiedState.Refresh? = nil
     ) throws {
         guard let hpkeKeyHex = hpkePublicKeyHex, !hpkeKeyHex.isEmpty else {
             throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
@@ -124,17 +174,23 @@ public class TinfoilAI {
 
         let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
 
+        let verifiedState = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: enclaveURL,
+                publicKey: hpkePublicKey
+            ),
+            refresh: refreshEndpoint
+        )
+
         let ehbpSession = try EHBPURLSession(
             baseURL: baseURL,
-            enclaveURL: enclaveURL,
-            publicKey: hpkePublicKey,
+            verifiedState: verifiedState,
             userCacheSecret: userCacheSecret
         )
 
         let ehbpStreamingFactory = EHBPURLSessionFactory(
             baseURL: baseURL,
-            enclaveURL: enclaveURL,
-            publicKey: hpkePublicKey,
+            verifiedState: verifiedState,
             userCacheSecret: userCacheSecret
         )
 

@@ -42,6 +42,21 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertEqual(try URLHelpers.parseURL("wss://enclave.example.com/realtime").scheme, "wss")
     }
 
+    func testStableInferenceBaseResolvesMatchingEnclaveIdentity() throws {
+        XCTAssertEqual(
+            try URLHelpers.enclaveURLForStableBase(
+                "https://INFERENCE.TINFOIL.SH:443/v1/"
+            ),
+            TinfoilConstants.inferenceEnclaveURL
+        )
+        XCTAssertNil(
+            try URLHelpers.enclaveURLForStableBase("https://proxy.example.com/v1/")
+        )
+        XCTAssertNil(
+            try URLHelpers.enclaveURLForStableBase("http://inference.tinfoil.sh/v1/")
+        )
+    }
+
     func testClientSucceedsWithCacheSecretWhenVerificationSucceeds() async throws {
         try skipIfNoAPIKey()
 

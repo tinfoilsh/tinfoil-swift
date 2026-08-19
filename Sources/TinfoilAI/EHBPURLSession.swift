@@ -14,8 +14,7 @@ import Combine
 /// Implements URLSessionFactory to integrate with OpenAI SDK's streaming infrastructure.
 public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
     private let baseURL: String
-    private let enclaveURL: String?
-    private let publicKey: Data
+    private let verifiedState: EHBPVerifiedState
     private let userCacheSecret: String
 
     /// Creates an EHBP URLSession factory
@@ -28,16 +27,29 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
     ///     request bodies before encryption. Empty values use the default.
     public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "") {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
-        self.enclaveURL = enclaveURL
-        self.publicKey = publicKey
+        self.verifiedState = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: enclaveURL ?? baseURL,
+                publicKey: publicKey
+            )
+        )
+        self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
+    }
+
+    internal init(
+        baseURL: String,
+        verifiedState: EHBPVerifiedState,
+        userCacheSecret: String = ""
+    ) {
+        self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        self.verifiedState = verifiedState
         self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
     }
 
     public func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
         return EHBPStreamingSession(
             baseURL: baseURL,
-            enclaveURL: enclaveURL,
-            publicKey: publicKey,
+            verifiedState: verifiedState,
             userCacheSecret: userCacheSecret,
             delegate: delegate
         )
@@ -48,8 +60,7 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
 /// Wraps requests with EHBP encryption and decrypts streaming responses on the fly.
 internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendable {
     private let baseURL: String
-    private let enclaveURL: String?
-    private let publicKey: Data
+    private let verifiedState: EHBPVerifiedState
     private let userCacheSecret: String
     private weak var delegate: URLSessionDataDelegateProtocol?
     private var activeTasks: [ObjectIdentifier: EHBPStreamingDataTask] = [:]
@@ -57,8 +68,24 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
 
     init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", delegate: URLSessionDataDelegateProtocol) {
         self.baseURL = baseURL
-        self.enclaveURL = enclaveURL
-        self.publicKey = publicKey
+        self.verifiedState = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: enclaveURL ?? baseURL,
+                publicKey: publicKey
+            )
+        )
+        self.userCacheSecret = userCacheSecret
+        self.delegate = delegate
+    }
+
+    init(
+        baseURL: String,
+        verifiedState: EHBPVerifiedState,
+        userCacheSecret: String = "",
+        delegate: URLSessionDataDelegateProtocol
+    ) {
+        self.baseURL = baseURL
+        self.verifiedState = verifiedState
         self.userCacheSecret = userCacheSecret
         self.delegate = delegate
     }
@@ -85,8 +112,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
         let task = EHBPStreamingDataTask(
             request: request,
             baseURL: baseURL,
-            enclaveURL: enclaveURL,
-            publicKey: publicKey,
+            verifiedState: verifiedState,
             userCacheSecret: userCacheSecret,
             delegate: delegate,
             session: self,
@@ -168,8 +194,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
 internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @unchecked Sendable {
     private let request: URLRequest
     private let baseURL: String
-    private let enclaveURL: String?
-    private let publicKey: Data
+    private let verifiedState: EHBPVerifiedState
     private let userCacheSecret: String
     private weak var delegate: URLSessionDataDelegateProtocol?
     private weak var session: EHBPStreamingSession?
@@ -196,8 +221,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     init(
         request: URLRequest,
         baseURL: String,
-        enclaveURL: String? = nil,
-        publicKey: Data,
+        verifiedState: EHBPVerifiedState,
         userCacheSecret: String = "",
         delegate: URLSessionDataDelegateProtocol?,
         session: EHBPStreamingSession,
@@ -206,8 +230,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     ) {
         self.request = request
         self.baseURL = baseURL
-        self.enclaveURL = enclaveURL
-        self.publicKey = publicKey
+        self.verifiedState = verifiedState
         self.userCacheSecret = userCacheSecret
         self.delegate = delegate
         self.session = session
@@ -260,57 +283,103 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
 
         do {
             try Task.checkCancellation()
-            let ehbpClient = try EHBPClient(baseURL: baseURL, publicKey: publicKey)
-
             guard let url = request.url else {
                 throw EHBPError.invalidInput("request has no URL")
             }
 
             let path = URLHelpers.extractPath(from: url)
             let method = request.httpMethod ?? "GET"
-            var headers: [String: String] = [:]
-            if let allHeaders = request.allHTTPHeaderFields {
-                headers = allHeaders
-            }
-            URLHelpers.addProxyHeaderIfNeeded(to: &headers, baseURL: baseURL, enclaveURL: enclaveURL)
+            for attempt in 0...1 {
+                let snapshot = await verifiedState.snapshot()
+                let ehbpClient = try EHBPClient(
+                    baseURL: baseURL,
+                    publicKey: snapshot.endpoint.publicKey
+                )
+                var headers = request.allHTTPHeaderFields ?? [:]
+                URLHelpers.addProxyHeaderIfNeeded(
+                    to: &headers,
+                    baseURL: baseURL,
+                    enclaveURL: snapshot.endpoint.enclaveURL
+                )
 
-            // The user-cache-secret field is added here, before EHBP seals
-            // the body, so the secret only ever travels inside the encrypted
-            // channel to the verified enclave.
-            let body = UserCacheSecret.provision(
-                request: request,
-                headers: &headers,
-                clientSecret: userCacheSecret
-            )
+                // The user-cache-secret field is added here, before EHBP seals
+                // the body, so the secret only ever travels inside the encrypted
+                // channel to the verified enclave.
+                let body = UserCacheSecret.provision(
+                    request: request,
+                    headers: &headers,
+                    clientSecret: userCacheSecret
+                )
 
-            let (stream, response) = try await ehbpClient.requestStream(
-                method: method,
-                path: path,
-                headers: headers,
-                body: body
-            )
+                let (stream, response) = try await ehbpClient.requestStream(
+                    method: method,
+                    path: path,
+                    headers: headers,
+                    body: body
+                )
+                var iterator = stream.makeAsyncIterator()
+                var prefetchedChunks: [Data] = []
+                var problemBody = Data()
+                var reachedEnd = false
 
-            delegate?.urlSession(
-                session,
-                dataTask: self,
-                didReceive: response
-            ) { disposition in
-                if disposition == .cancel {
-                    self.cancel()
+                if EHBPProblemResponse.mayBeKeyConfigurationMismatch(response) {
+                    while let chunk = try await iterator.next() {
+                        prefetchedChunks.append(chunk)
+                        problemBody.append(chunk)
+                        if problemBody.count > EHBPProblemResponse.maximumDiagnosticBytes {
+                            break
+                        }
+                    }
+                    reachedEnd = problemBody.count <= EHBPProblemResponse.maximumDiagnosticBytes
+                    if reachedEnd,
+                       let title = EHBPProblemResponse.keyConfigurationMismatchTitle(
+                           response: response,
+                           body: problemBody
+                       ) {
+                        guard attempt == 0 else {
+                            throw EHBPError.invalidResponse(
+                                "EHBP key configuration still mismatched after refresh: \(title)"
+                            )
+                        }
+                        _ = try await verifiedState.refresh(
+                            afterRejectedGeneration: snapshot.generation
+                        )
+                        continue
+                    }
                 }
-            }
 
-            var accumulatedData = Data()
-            for try await chunk in stream {
+                delegate?.urlSession(
+                    session,
+                    dataTask: self,
+                    didReceive: response
+                ) { disposition in
+                    if disposition == .cancel {
+                        self.cancel()
+                    }
+                }
+
+                var accumulatedData = Data()
+                for chunk in prefetchedChunks {
+                    try Task.checkCancellation()
+                    if accumulatesResponse {
+                        accumulatedData.append(chunk)
+                    }
+                    delegate?.urlSession(session, dataTask: self, didReceive: chunk)
+                }
+                if !reachedEnd {
+                    while let chunk = try await iterator.next() {
+                        try Task.checkCancellation()
+                        if accumulatesResponse {
+                            accumulatedData.append(chunk)
+                        }
+                        delegate?.urlSession(session, dataTask: self, didReceive: chunk)
+                    }
+                }
                 try Task.checkCancellation()
-                if accumulatesResponse {
-                    accumulatedData.append(chunk)
-                }
-                delegate?.urlSession(session, dataTask: self, didReceive: chunk)
-            }
-            try Task.checkCancellation()
 
-            finish(data: accumulatedData, response: response, error: nil)
+                finish(data: accumulatedData, response: response, error: nil)
+                return
+            }
         } catch {
             finish(data: nil, response: nil, error: error)
         }
@@ -342,10 +411,10 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
 /// Conforms to URLSessionProtocol so it can be injected into the OpenAI client.
 /// Delegates all crypto operations to the vetted EHBPClient.
 public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
-    private let ehbpClient: EHBPClient
     private let baseURL: String
-    private let enclaveURL: String?
+    private let verifiedState: EHBPVerifiedState
     private let userCacheSecret: String
+    private let session: URLSession
 
     /// Creates an EHBP URLSession with the given server public key
     ///
@@ -357,10 +426,26 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     ///     request bodies before encryption. Empty values use the default.
     ///   - session: Underlying URLSession to use (defaults to shared)
     public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
-        self.ehbpClient = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
-        self.enclaveURL = enclaveURL
+        self.verifiedState = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: enclaveURL ?? baseURL,
+                publicKey: publicKey
+            )
+        )
         self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
+        self.session = session
+    }
+
+    internal init(
+        baseURL: String,
+        verifiedState: EHBPVerifiedState,
+        userCacheSecret: String = ""
+    ) throws {
+        self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        self.verifiedState = verifiedState
+        self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
+        self.session = .shared
     }
 
     // MARK: - URLSessionProtocol
@@ -432,30 +517,55 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
 
         let path = URLHelpers.extractPath(from: url)
         let method = request.httpMethod ?? "GET"
-        var headers: [String: String] = [:]
-        if let allHeaders = request.allHTTPHeaderFields {
-            headers = allHeaders
+        for attempt in 0...1 {
+            let snapshot = await verifiedState.snapshot()
+            let ehbpClient = try EHBPClient(
+                baseURL: baseURL,
+                publicKey: snapshot.endpoint.publicKey,
+                session: session
+            )
+            var headers = request.allHTTPHeaderFields ?? [:]
+            URLHelpers.addProxyHeaderIfNeeded(
+                to: &headers,
+                baseURL: baseURL,
+                enclaveURL: snapshot.endpoint.enclaveURL
+            )
+
+            // The user-cache-secret field is added here, before EHBP seals the
+            // body, so the secret only ever travels inside the encrypted channel
+            // to the verified enclave.
+            let body = UserCacheSecret.provision(
+                request: request,
+                headers: &headers,
+                clientSecret: userCacheSecret
+            )
+
+            let (data, response) = try await ehbpClient.request(
+                method: method,
+                path: path,
+                headers: headers,
+                body: body
+            )
+            try Task.checkCancellation()
+
+            if let title = EHBPProblemResponse.keyConfigurationMismatchTitle(
+                response: response,
+                body: data
+            ) {
+                guard attempt == 0 else {
+                    throw EHBPError.invalidResponse(
+                        "EHBP key configuration still mismatched after refresh: \(title)"
+                    )
+                }
+                _ = try await verifiedState.refresh(
+                    afterRejectedGeneration: snapshot.generation
+                )
+                continue
+            }
+
+            return (data, response)
         }
-        URLHelpers.addProxyHeaderIfNeeded(to: &headers, baseURL: baseURL, enclaveURL: enclaveURL)
-
-        // The user-cache-secret field is added here, before EHBP seals the
-        // body, so the secret only ever travels inside the encrypted channel
-        // to the verified enclave.
-        let body = UserCacheSecret.provision(
-            request: request,
-            headers: &headers,
-            clientSecret: userCacheSecret
-        )
-
-        let (data, response) = try await ehbpClient.request(
-            method: method,
-            path: path,
-            headers: headers,
-            body: body
-        )
-        try Task.checkCancellation()
-
-        return (data, response)
+        throw EHBPError.invalidResponse("EHBP retry limit exhausted")
     }
 }
 
