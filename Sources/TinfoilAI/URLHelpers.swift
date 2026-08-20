@@ -83,13 +83,23 @@ internal enum URLHelpers {
     static func enclaveURLForStableBase(_ baseURL: String?) throws -> String? {
         guard let baseURL else { return nil }
         let components = try parseHTTPURL(baseURL)
+        let canonicalHost = components.host
+            .lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard canonicalHost == "inference.tinfoil.sh" else { return nil }
+
         let effectivePort = components.port ?? (components.scheme == "https" ? 443 : 80)
-        if components.scheme == "https",
-           components.host.caseInsensitiveCompare("inference.tinfoil.sh") == .orderedSame,
-           effectivePort == 443 {
-            return TinfoilConstants.inferenceEnclaveURL
+        guard components.scheme == "https", effectivePort == 443 else {
+            throw NSError(
+                domain: TinfoilConstants.urlHelpersErrorDomain,
+                code: TinfoilConstants.invalidURLErrorCode,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "The inference.tinfoil.sh base URL must use its standard HTTPS endpoint"
+                ]
+            )
         }
-        return nil
+        return TinfoilConstants.inferenceEnclaveURL
     }
 
     /// Extracts the path and query string from a URL

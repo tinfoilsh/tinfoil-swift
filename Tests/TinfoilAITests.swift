@@ -52,8 +52,15 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertNil(
             try URLHelpers.enclaveURLForStableBase("https://proxy.example.com/v1/")
         )
-        XCTAssertNil(
+        XCTAssertEqual(
+            try URLHelpers.enclaveURLForStableBase("https://inference.tinfoil.sh./v1/"),
+            TinfoilConstants.inferenceEnclaveURL
+        )
+        XCTAssertThrowsError(
             try URLHelpers.enclaveURLForStableBase("http://inference.tinfoil.sh/v1/")
+        )
+        XCTAssertThrowsError(
+            try URLHelpers.enclaveURLForStableBase("https://inference.tinfoil.sh:8443/v1/")
         )
     }
 
