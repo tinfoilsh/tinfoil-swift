@@ -480,6 +480,10 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
         // Preserve the eager URL/key validation this initializer provided
         // before endpoint rotation moved client construction to request time.
+        _ = try URLHelpers.parseHTTPURL(baseURL)
+        guard publicKey.count == 32 else {
+            throw EHBPError.invalidInput("public key must be 32 bytes")
+        }
         _ = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = EHBPVerifiedState(
