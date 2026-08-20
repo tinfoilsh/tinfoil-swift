@@ -480,6 +480,15 @@ final class EHBPTests: XCTestCase {
         XCTAssertEqual(capturedRequest.path, "/v1/chat/completions", "URL path should be preserved")
     }
 
+    func testURLSessionInitializerValidatesConfigurationImmediately() {
+        XCTAssertThrowsError(
+            try EHBPURLSession(baseURL: "not a URL", publicKey: testPublicKey)
+        )
+        XCTAssertThrowsError(
+            try EHBPURLSession(baseURL: server.baseURL, publicKey: Data(repeating: 0, count: 31))
+        )
+    }
+
     func testKeyMismatchRefreshesOnceAndReplaysWithNewEnclaveRoute() async throws {
         server.responseStatusCode = 422
         server.responseContentType = "application/problem+json"
@@ -552,6 +561,62 @@ final class EHBPTests: XCTestCase {
                 body: Data(repeating: 0, count: EHBPProblemResponse.maximumDiagnosticBytes + 1)
             )
         )
+
+        var diagnostic = Data()
+        XCTAssertTrue(
+            EHBPProblemResponse.appendDiagnosticPrefix(
+                Data(repeating: 0x41, count: EHBPProblemResponse.maximumDiagnosticBytes + 1),
+                to: &diagnostic
+            )
+        )
+        XCTAssertEqual(diagnostic.count, EHBPProblemResponse.maximumDiagnosticBytes)
+    }
+
+    func testCancelledRefreshWaiterDoesNotCancelOrBlockSharedRefresh() async throws {
+        let refreshStarted = expectation(description: "shared refresh started")
+        let cancelledWaiterFinished = expectation(description: "cancelled waiter finished")
+        let gate = AsyncGate()
+        let refreshCounter = AsyncCounter()
+        let refreshedEndpoint = EHBPVerifiedEndpoint(
+            enclaveURL: "https://new-router.example",
+            publicKey: Data(repeating: 0x44, count: 32)
+        )
+        let state = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: "https://old-router.example",
+                publicKey: testPublicKey
+            ),
+            refresh: {
+                await refreshCounter.increment()
+                refreshStarted.fulfill()
+                await gate.wait()
+                return refreshedEndpoint
+            }
+        )
+
+        let cancelledWaiter = Task {
+            defer { cancelledWaiterFinished.fulfill() }
+            return try await state.refresh(afterRejectedGeneration: 0)
+        }
+        await fulfillment(of: [refreshStarted], timeout: 1)
+        cancelledWaiter.cancel()
+        await fulfillment(of: [cancelledWaiterFinished], timeout: 1)
+
+        let survivingWaiter = Task {
+            try await state.refresh(afterRejectedGeneration: 0)
+        }
+        await gate.open()
+
+        do {
+            _ = try await cancelledWaiter.value
+            XCTFail("The cancelled waiter must return cancellation")
+        } catch is CancellationError {
+            // Expected: cancelling one waiter does not cancel shared refresh.
+        }
+        let refreshed = try await survivingWaiter.value
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshed.enclaveURL, refreshedEndpoint.enclaveURL)
+        XCTAssertEqual(refreshCount, 1)
     }
 
     // MARK: - Encapsulated Key Format Tests
@@ -1986,6 +2051,27 @@ private actor AsyncCounter {
 
     func increment() {
         value += 1
+    }
+}
+
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending {
+            waiter.resume()
+        }
     }
 }
 

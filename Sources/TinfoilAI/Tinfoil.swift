@@ -11,6 +11,25 @@ public class TinfoilAI {
         self.openAIClient = client
     }
 
+    private static func makeVerifier(
+        githubRepo: String,
+        enclaveURL: String?,
+        attestationBundleURL: String?
+    ) -> SecureClient {
+        if let enclaveURL {
+            return SecureClient(
+                githubRepo: githubRepo,
+                enclaveURL: enclaveURL,
+                attestationBundleURL: attestationBundleURL
+                    ?? TinfoilConstants.attestationBaseURL
+            )
+        }
+        return SecureClient(
+            githubRepo: githubRepo,
+            attestationBundleURL: attestationBundleURL
+        )
+    }
+
     /// Creates a new TinfoilAI client configured for communication with a Tinfoil enclave
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
@@ -67,20 +86,12 @@ public class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
 
-        let bundleURL = attestationBundleURL ?? TinfoilConstants.attestationBaseURL
         let stableEnclaveURL = try URLHelpers.enclaveURLForStableBase(baseURL)
-        let verifier = if let stableEnclaveURL {
-            SecureClient(
-                githubRepo: githubRepo,
-                enclaveURL: stableEnclaveURL,
-                attestationBundleURL: bundleURL
-            )
-        } else {
-            SecureClient(
-                githubRepo: githubRepo,
-                attestationBundleURL: attestationBundleURL
-            )
-        }
+        let verifier = makeVerifier(
+            githubRepo: githubRepo,
+            enclaveURL: stableEnclaveURL,
+            attestationBundleURL: attestationBundleURL
+        )
 
         do {
             let groundTruth = try await verifier.verify()
@@ -99,18 +110,11 @@ public class TinfoilAI {
                 ? nil
                 : enclaveURL
             let refreshEndpoint: EHBPVerifiedState.Refresh = {
-                let refreshVerifier = if let pinnedRefreshEnclaveURL {
-                    SecureClient(
-                        githubRepo: githubRepo,
-                        enclaveURL: pinnedRefreshEnclaveURL,
-                        attestationBundleURL: bundleURL
-                    )
-                } else {
-                    SecureClient(
-                        githubRepo: githubRepo,
-                        attestationBundleURL: attestationBundleURL
-                    )
-                }
+                let refreshVerifier = Self.makeVerifier(
+                    githubRepo: githubRepo,
+                    enclaveURL: pinnedRefreshEnclaveURL,
+                    attestationBundleURL: attestationBundleURL
+                )
 
                 do {
                     let refreshedTruth = try await refreshVerifier.verify()

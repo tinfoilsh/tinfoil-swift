@@ -10,6 +10,76 @@ import FoundationNetworking
 import Combine
 #endif
 
+private struct PreparedEHBPRequest {
+    let rejectedGeneration: UInt64
+    let client: EHBPClient
+    let method: String
+    let path: String
+    let headers: [String: String]
+    let body: Data?
+}
+
+private func prepareEHBPRequest(
+    _ request: URLRequest,
+    baseURL: String,
+    verifiedState: EHBPVerifiedState,
+    userCacheSecret: String,
+    session: URLSession
+) async throws -> PreparedEHBPRequest {
+    try Task.checkCancellation()
+    guard let url = request.url else {
+        throw EHBPError.invalidInput("request has no URL")
+    }
+
+    let snapshot = await verifiedState.snapshot()
+    try Task.checkCancellation()
+    let client = try EHBPClient(
+        baseURL: baseURL,
+        publicKey: snapshot.endpoint.publicKey,
+        session: session
+    )
+    var headers = request.allHTTPHeaderFields ?? [:]
+    URLHelpers.addProxyHeaderIfNeeded(
+        to: &headers,
+        baseURL: baseURL,
+        enclaveURL: snapshot.endpoint.enclaveURL
+    )
+    let body = UserCacheSecret.provision(
+        request: request,
+        headers: &headers,
+        clientSecret: userCacheSecret
+    )
+
+    return PreparedEHBPRequest(
+        rejectedGeneration: snapshot.generation,
+        client: client,
+        method: request.httpMethod ?? "GET",
+        path: URLHelpers.extractPath(from: url),
+        headers: headers,
+        body: body
+    )
+}
+
+private enum EHBPReplayPolicy {
+    static let maximumAttempts = 2
+
+    static func refresh(
+        _ verifiedState: EHBPVerifiedState,
+        afterRejectedGeneration generation: UInt64,
+        attempt: Int,
+        title: String
+    ) async throws {
+        guard attempt + 1 < maximumAttempts else {
+            throw EHBPError.invalidResponse(
+                "EHBP key configuration still mismatched after refresh: \(title)"
+            )
+        }
+        try Task.checkCancellation()
+        _ = try await verifiedState.refresh(afterRejectedGeneration: generation)
+        try Task.checkCancellation()
+    }
+}
+
 /// Factory for creating EHBP-enabled URLSession instances for streaming requests.
 /// Implements URLSessionFactory to integrate with OpenAI SDK's streaming infrastructure.
 public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
@@ -282,40 +352,20 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         }
 
         do {
-            try Task.checkCancellation()
-            guard let url = request.url else {
-                throw EHBPError.invalidInput("request has no URL")
-            }
-
-            let path = URLHelpers.extractPath(from: url)
-            let method = request.httpMethod ?? "GET"
-            for attempt in 0...1 {
-                let snapshot = await verifiedState.snapshot()
-                let ehbpClient = try EHBPClient(
+            for attempt in 0..<EHBPReplayPolicy.maximumAttempts {
+                let prepared = try await prepareEHBPRequest(
+                    request,
                     baseURL: baseURL,
-                    publicKey: snapshot.endpoint.publicKey
-                )
-                var headers = request.allHTTPHeaderFields ?? [:]
-                URLHelpers.addProxyHeaderIfNeeded(
-                    to: &headers,
-                    baseURL: baseURL,
-                    enclaveURL: snapshot.endpoint.enclaveURL
+                    verifiedState: verifiedState,
+                    userCacheSecret: userCacheSecret,
+                    session: .shared
                 )
 
-                // The user-cache-secret field is added here, before EHBP seals
-                // the body, so the secret only ever travels inside the encrypted
-                // channel to the verified enclave.
-                let body = UserCacheSecret.provision(
-                    request: request,
-                    headers: &headers,
-                    clientSecret: userCacheSecret
-                )
-
-                let (stream, response) = try await ehbpClient.requestStream(
-                    method: method,
-                    path: path,
-                    headers: headers,
-                    body: body
+                let (stream, response) = try await prepared.client.requestStream(
+                    method: prepared.method,
+                    path: prepared.path,
+                    headers: prepared.headers,
+                    body: prepared.body
                 )
                 var iterator = stream.makeAsyncIterator()
                 var prefetchedChunks: [Data] = []
@@ -323,26 +373,28 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                 var reachedEnd = false
 
                 if EHBPProblemResponse.mayBeKeyConfigurationMismatch(response) {
+                    var diagnosticWasTruncated = false
                     while let chunk = try await iterator.next() {
                         prefetchedChunks.append(chunk)
-                        problemBody.append(chunk)
-                        if problemBody.count > EHBPProblemResponse.maximumDiagnosticBytes {
+                        if EHBPProblemResponse.appendDiagnosticPrefix(
+                            chunk,
+                            to: &problemBody
+                        ) {
+                            diagnosticWasTruncated = true
                             break
                         }
                     }
-                    reachedEnd = problemBody.count <= EHBPProblemResponse.maximumDiagnosticBytes
+                    reachedEnd = !diagnosticWasTruncated
                     if reachedEnd,
                        let title = EHBPProblemResponse.keyConfigurationMismatchTitle(
                            response: response,
                            body: problemBody
                        ) {
-                        guard attempt == 0 else {
-                            throw EHBPError.invalidResponse(
-                                "EHBP key configuration still mismatched after refresh: \(title)"
-                            )
-                        }
-                        _ = try await verifiedState.refresh(
-                            afterRejectedGeneration: snapshot.generation
+                        try await EHBPReplayPolicy.refresh(
+                            verifiedState,
+                            afterRejectedGeneration: prepared.rejectedGeneration,
+                            attempt: attempt,
+                            title: title
                         )
                         continue
                     }
@@ -426,6 +478,9 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     ///     request bodies before encryption. Empty values use the default.
     ///   - session: Underlying URLSession to use (defaults to shared)
     public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
+        // Preserve the eager URL/key validation this initializer provided
+        // before endpoint rotation moved client construction to request time.
+        _ = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(
@@ -511,40 +566,19 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     // MARK: - Private
 
     private func performRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
-        guard let url = request.url else {
-            throw EHBPError.invalidInput("request has no URL")
-        }
-
-        let path = URLHelpers.extractPath(from: url)
-        let method = request.httpMethod ?? "GET"
-        for attempt in 0...1 {
-            let snapshot = await verifiedState.snapshot()
-            let ehbpClient = try EHBPClient(
+        for attempt in 0..<EHBPReplayPolicy.maximumAttempts {
+            let prepared = try await prepareEHBPRequest(
+                request,
                 baseURL: baseURL,
-                publicKey: snapshot.endpoint.publicKey,
+                verifiedState: verifiedState,
+                userCacheSecret: userCacheSecret,
                 session: session
             )
-            var headers = request.allHTTPHeaderFields ?? [:]
-            URLHelpers.addProxyHeaderIfNeeded(
-                to: &headers,
-                baseURL: baseURL,
-                enclaveURL: snapshot.endpoint.enclaveURL
-            )
-
-            // The user-cache-secret field is added here, before EHBP seals the
-            // body, so the secret only ever travels inside the encrypted channel
-            // to the verified enclave.
-            let body = UserCacheSecret.provision(
-                request: request,
-                headers: &headers,
-                clientSecret: userCacheSecret
-            )
-
-            let (data, response) = try await ehbpClient.request(
-                method: method,
-                path: path,
-                headers: headers,
-                body: body
+            let (data, response) = try await prepared.client.request(
+                method: prepared.method,
+                path: prepared.path,
+                headers: prepared.headers,
+                body: prepared.body
             )
             try Task.checkCancellation()
 
@@ -552,13 +586,11 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
                 response: response,
                 body: data
             ) {
-                guard attempt == 0 else {
-                    throw EHBPError.invalidResponse(
-                        "EHBP key configuration still mismatched after refresh: \(title)"
-                    )
-                }
-                _ = try await verifiedState.refresh(
-                    afterRejectedGeneration: snapshot.generation
+                try await EHBPReplayPolicy.refresh(
+                    verifiedState,
+                    afterRejectedGeneration: prepared.rejectedGeneration,
+                    attempt: attempt,
+                    title: title
                 )
                 continue
             }

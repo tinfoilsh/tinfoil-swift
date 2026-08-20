@@ -89,38 +89,54 @@ public class SecureClient {
     /// - Parameters:
     ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - enclaveURL: URL for the enclave attestation endpoint
-    public init(
+    public convenience init(
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         enclaveURL: String
     ) {
-        self.githubRepo = githubRepo
-        self.configuredEnclaveURL = enclaveURL
-        self.attestationBundleURL = nil
+        self.init(
+            githubRepo: githubRepo,
+            configuredEnclaveURL: enclaveURL,
+            attestationBundleURL: nil
+        )
     }
 
     /// Initialize a secure client that requests a bundle for one specific
     /// enclave. This binds the destination, certificate, and HPKE key to the
     /// same verified domain while retaining the single-request bundle flow.
-    public init(
+    public convenience init(
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         enclaveURL: String,
         attestationBundleURL: String
     ) {
-        self.githubRepo = githubRepo
-        self.configuredEnclaveURL = enclaveURL
-        self.attestationBundleURL = attestationBundleURL
+        self.init(
+            githubRepo: githubRepo,
+            configuredEnclaveURL: enclaveURL,
+            attestationBundleURL: attestationBundleURL
+        )
     }
 
     /// Initialize a secure client that fetches an attestation bundle for verification
     /// - Parameters:
     ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - attestationBundleURL: URL for fetching the attestation bundle. If nil, uses default Tinfoil endpoint.
-    public init(
+    public convenience init(
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         attestationBundleURL: String? = nil
     ) {
+        self.init(
+            githubRepo: githubRepo,
+            configuredEnclaveURL: nil,
+            attestationBundleURL: attestationBundleURL
+        )
+    }
+
+    private init(
+        githubRepo: String,
+        configuredEnclaveURL: String?,
+        attestationBundleURL: String?
+    ) {
         self.githubRepo = githubRepo
-        self.configuredEnclaveURL = nil
+        self.configuredEnclaveURL = configuredEnclaveURL
         self.attestationBundleURL = attestationBundleURL
     }
 
