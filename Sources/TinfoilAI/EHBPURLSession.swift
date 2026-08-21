@@ -103,7 +103,14 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
         publicKey: Data,
         userCacheSecret: String = "",
         session: URLSession = .shared
-    ) {
+    ) throws {
+        // Match EHBPURLSession's eager validation so an invalid streaming
+        // configuration fails at construction rather than on first use.
+        _ = try URLHelpers.parseHTTPURL(baseURL)
+        guard publicKey.count == TinfoilConstants.hpkePublicKeyByteCount else {
+            throw EHBPError.invalidInput("public key must be 32 bytes")
+        }
+        _ = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(
