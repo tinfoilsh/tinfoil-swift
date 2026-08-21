@@ -551,12 +551,11 @@ final class EHBPTests: XCTestCase {
             "{\"type\":\"urn:ietf:params:ehbp:error:key-config\",\"title\":\"rotate\"}".utf8
         )
 
-        XCTAssertEqual(
-            EHBPProblemResponse.keyConfigurationMismatchTitle(response: response, body: body),
-            "rotate"
+        XCTAssertTrue(
+            EHBPProblemResponse.isKeyConfigurationMismatch(response: response, body: body)
         )
-        XCTAssertNil(
-            EHBPProblemResponse.keyConfigurationMismatchTitle(
+        XCTAssertFalse(
+            EHBPProblemResponse.isKeyConfigurationMismatch(
                 response: response,
                 body: Data(repeating: 0, count: EHBPProblemResponse.maximumDiagnosticBytes + 1)
             )
@@ -570,6 +569,25 @@ final class EHBPTests: XCTestCase {
             )
         )
         XCTAssertEqual(diagnostic.count, EHBPProblemResponse.maximumDiagnosticBytes)
+
+        XCTAssertFalse(
+            EHBPProblemResponse.shouldInspectKeyConfigurationMismatch(response),
+            "unbounded streaming problems must be delivered without prefetching"
+        )
+        let boundedResponse = try XCTUnwrap(
+            HTTPURLResponse(
+                url: url,
+                statusCode: 422,
+                httpVersion: nil,
+                headerFields: [
+                    "Content-Type": "application/problem+json",
+                    "Content-Length": String(body.count)
+                ]
+            )
+        )
+        XCTAssertTrue(
+            EHBPProblemResponse.shouldInspectKeyConfigurationMismatch(boundedResponse)
+        )
     }
 
     func testCancelledRefreshWaiterDoesNotCancelOrBlockSharedRefresh() async throws {

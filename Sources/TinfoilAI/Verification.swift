@@ -265,7 +265,7 @@ public class SecureClient {
             clearVerifiedState()
             let steps = Self.stepsFromError(
                 error.localizedDescription,
-                usesBundle: configuredEnclaveURL == nil
+                usesBundle: attestationBundleURL != nil || configuredEnclaveURL == nil
             )
             buildFailureDocument(error: error, steps: steps)
             throw error

@@ -73,33 +73,18 @@ internal enum URLHelpers {
     /// - Returns: The origin string (scheme://host:port), or empty string if invalid
     static func origin(from urlString: String) -> String {
         guard let components = try? parseURL(urlString) else { return "" }
-        let hostWithPort = buildHostWithPort(host: components.host, port: components.port)
-        return "\(components.scheme)://\(hostWithPort)"
-    }
-
-    /// Returns the enclave identity implied by a stable, non-forwarding API
-    /// endpoint. Generic proxy URLs deliberately return nil so their verified
-    /// endpoint may be selected and rotated by the attestation bundle service.
-    static func enclaveURLForStableBase(_ baseURL: String?) throws -> String? {
-        guard let baseURL else { return nil }
-        let components = try parseHTTPURL(baseURL)
-        let canonicalHost = components.host
-            .lowercased()
-            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        guard canonicalHost == "inference.tinfoil.sh" else { return nil }
-
-        let effectivePort = components.port ?? (components.scheme == "https" ? 443 : 80)
-        guard components.scheme == "https", effectivePort == 443 else {
-            throw NSError(
-                domain: TinfoilConstants.urlHelpersErrorDomain,
-                code: TinfoilConstants.invalidURLErrorCode,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "The inference.tinfoil.sh base URL must use its standard HTTPS endpoint"
-                ]
-            )
+        let scheme = components.scheme.lowercased()
+        var host = components.host.lowercased()
+        // DNS permits an absolute name to end in a dot. Remove only that
+        // suffix; a leading dot is not an equivalent host identity.
+        while host.hasSuffix(".") {
+            host.removeLast()
         }
-        return TinfoilConstants.inferenceEnclaveURL
+        if host.contains(":"), !host.hasPrefix("[") {
+            host = "[\(host)]"
+        }
+        let effectivePort = components.port ?? (scheme == "https" ? 443 : 80)
+        return "\(scheme)://\(host):\(effectivePort)"
     }
 
     /// Extracts the path and query string from a URL

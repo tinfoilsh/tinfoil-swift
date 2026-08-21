@@ -42,25 +42,18 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertEqual(try URLHelpers.parseURL("wss://enclave.example.com/realtime").scheme, "wss")
     }
 
-    func testStableInferenceBaseResolvesMatchingEnclaveIdentity() throws {
+    func testOriginCanonicalizesDefaultPortsCaseAndTrailingDot() {
         XCTAssertEqual(
-            try URLHelpers.enclaveURLForStableBase(
-                "https://INFERENCE.TINFOIL.SH:443/v1/"
-            ),
-            TinfoilConstants.inferenceEnclaveURL
+            URLHelpers.origin(from: "https://ENCLAVE.example.com.:443/v1"),
+            URLHelpers.origin(from: "https://enclave.example.com/v1")
         )
-        XCTAssertNil(
-            try URLHelpers.enclaveURLForStableBase("https://proxy.example.com/v1/")
+        XCTAssertNotEqual(
+            URLHelpers.origin(from: "https://enclave.example.com:8443/v1"),
+            URLHelpers.origin(from: "https://enclave.example.com/v1")
         )
-        XCTAssertEqual(
-            try URLHelpers.enclaveURLForStableBase("https://inference.tinfoil.sh./v1/"),
-            TinfoilConstants.inferenceEnclaveURL
-        )
-        XCTAssertThrowsError(
-            try URLHelpers.enclaveURLForStableBase("http://inference.tinfoil.sh/v1/")
-        )
-        XCTAssertThrowsError(
-            try URLHelpers.enclaveURLForStableBase("https://inference.tinfoil.sh:8443/v1/")
+        XCTAssertNotEqual(
+            URLHelpers.origin(from: "https://.enclave.example.com/v1"),
+            URLHelpers.origin(from: "https://enclave.example.com/v1")
         )
     }
 

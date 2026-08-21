@@ -146,14 +146,11 @@ internal actor EHBPVerifiedState {
     }
 }
 
-private struct EHBPProblemDetails: Decodable {
-    let type: String?
-    let title: String?
-}
+private struct EHBPProblemDetails: Decodable { let type: String? }
 
 internal enum EHBPProblemResponse {
     static let keyConfigurationType = "urn:ietf:params:ehbp:error:key-config"
-    static let maximumDiagnosticBytes = 64 * 1024
+    static let maximumDiagnosticBytes = 4 * 1024
 
     /// Appends at most the remaining diagnostic budget. Returns true when the
     /// source chunk was truncated and therefore cannot be parsed as a complete
@@ -181,19 +178,27 @@ internal enum EHBPProblemResponse {
         return contentType == "application/problem+json"
     }
 
-    static func keyConfigurationMismatchTitle(
+    /// Streaming retries inspect only small, length-delimited problem bodies.
+    /// Generic or unbounded 422 responses reach the response delegate without
+    /// waiting for a diagnostic body to be accumulated first.
+    static func shouldInspectKeyConfigurationMismatch(_ response: HTTPURLResponse) -> Bool {
+        let length = response.expectedContentLength
+        return mayBeKeyConfigurationMismatch(response)
+            && length >= 0
+            && length <= Int64(maximumDiagnosticBytes)
+    }
+
+    static func isKeyConfigurationMismatch(
         response: HTTPURLResponse,
         body: Data
-    ) -> String? {
+    ) -> Bool {
         guard mayBeKeyConfigurationMismatch(response),
               body.count <= maximumDiagnosticBytes,
               let problem = try? JSONDecoder().decode(EHBPProblemDetails.self, from: body),
               problem.type == keyConfigurationType
         else {
-            return nil
+            return false
         }
-        return problem.title?.isEmpty == false
-            ? problem.title
-            : "key configuration mismatch"
+        return true
     }
 }

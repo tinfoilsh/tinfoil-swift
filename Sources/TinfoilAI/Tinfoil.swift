@@ -86,10 +86,9 @@ public class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
 
-        let stableEnclaveURL = try URLHelpers.enclaveURLForStableBase(baseURL)
         let verifier = makeVerifier(
             githubRepo: githubRepo,
-            enclaveURL: stableEnclaveURL,
+            enclaveURL: nil,
             attestationBundleURL: attestationBundleURL
         )
 
@@ -103,12 +102,10 @@ public class TinfoilAI {
             onVerification?(verifier.verificationDocument)
 
             let finalBaseURL = baseURL ?? enclaveURL
-            // A generic configured base URL is a forwarding proxy, so recovery
-            // may rotate its endpoint/key pair. Direct clients and the stable
-            // inference endpoint must instead refresh the selected domain.
-            let pinnedRefreshEnclaveURL = baseURL != nil && stableEnclaveURL == nil
-                ? nil
-                : enclaveURL
+            // A configured base URL is an EHBP forwarding proxy, so ATC may
+            // rotate the endpoint/key pair behind it. A direct client keeps its
+            // selected domain and refreshes that domain's bundle.
+            let pinnedRefreshEnclaveURL = baseURL == nil ? enclaveURL : nil
             let refreshEndpoint: EHBPVerifiedState.Refresh = {
                 let refreshVerifier = Self.makeVerifier(
                     githubRepo: githubRepo,
@@ -116,23 +113,18 @@ public class TinfoilAI {
                     attestationBundleURL: attestationBundleURL
                 )
 
-                do {
-                    let refreshedTruth = try await refreshVerifier.verify()
-                    guard let refreshedURL = refreshVerifier.verifiedEnclaveURL,
-                          let keyHex = refreshedTruth.hpkePublicKey,
-                          let key = Data(hexString: keyHex),
-                          key.count == 32
-                    else {
-                        throw TinfoilError.invalidConfiguration(
-                            "Refreshed attestation did not provide a valid enclave HPKE key"
-                        )
-                    }
-                    onVerification?(refreshVerifier.verificationDocument)
-                    return EHBPVerifiedEndpoint(enclaveURL: refreshedURL, publicKey: key)
-                } catch {
-                    onVerification?(refreshVerifier.verificationDocument)
-                    throw error
+                defer { onVerification?(refreshVerifier.verificationDocument) }
+                let refreshedTruth = try await refreshVerifier.verify()
+                guard let refreshedURL = refreshVerifier.verifiedEnclaveURL,
+                      let keyHex = refreshedTruth.hpkePublicKey,
+                      let key = Data(hexString: keyHex),
+                      key.count == TinfoilConstants.hpkePublicKeyByteCount
+                else {
+                    throw TinfoilError.invalidConfiguration(
+                        "Refreshed attestation did not provide a valid enclave HPKE key"
+                    )
                 }
+                return EHBPVerifiedEndpoint(enclaveURL: refreshedURL, publicKey: key)
             }
 
             return try TinfoilAI(
@@ -172,7 +164,8 @@ public class TinfoilAI {
             throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
         }
 
-        guard let hpkePublicKey = Data(hexString: hpkeKeyHex), hpkePublicKey.count == 32 else {
+        guard let hpkePublicKey = Data(hexString: hpkeKeyHex),
+              hpkePublicKey.count == TinfoilConstants.hpkePublicKeyByteCount else {
             throw TinfoilError.invalidConfiguration("Invalid HPKE public key format (expected 32 bytes)")
         }
 

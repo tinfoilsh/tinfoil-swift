@@ -66,12 +66,11 @@ private enum EHBPReplayPolicy {
     static func refresh(
         _ verifiedState: EHBPVerifiedState,
         afterRejectedGeneration generation: UInt64,
-        attempt: Int,
-        title: String
+        attempt: Int
     ) async throws {
         guard attempt + 1 < maximumAttempts else {
             throw EHBPError.invalidResponse(
-                "EHBP key configuration still mismatched after refresh: \(title)"
+                "EHBP key configuration still mismatched after refresh"
             )
         }
         try Task.checkCancellation()
@@ -86,6 +85,7 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
     private let userCacheSecret: String
+    private let networkSession: URLSession
 
     /// Creates an EHBP URLSession factory
     ///
@@ -95,7 +95,15 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
     ///   - publicKey: Server's X25519 public key (32 bytes)
     ///   - userCacheSecret: Prompt-cache scoping secret injected into eligible
     ///     request bodies before encryption. Empty values use the default.
-    public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "") {
+    ///   - session: Underlying network session, including any proxy or
+    ///     authentication-delegate configuration.
+    public init(
+        baseURL: String,
+        enclaveURL: String? = nil,
+        publicKey: Data,
+        userCacheSecret: String = "",
+        session: URLSession = .shared
+    ) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(
@@ -104,16 +112,19 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
             )
         )
         self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
+        self.networkSession = session
     }
 
     internal init(
         baseURL: String,
         verifiedState: EHBPVerifiedState,
-        userCacheSecret: String = ""
+        userCacheSecret: String = "",
+        session: URLSession = .shared
     ) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = verifiedState
         self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
+        self.networkSession = session
     }
 
     public func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
@@ -121,6 +132,7 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
             baseURL: baseURL,
             verifiedState: verifiedState,
             userCacheSecret: userCacheSecret,
+            networkSession: networkSession,
             delegate: delegate
         )
     }
@@ -132,11 +144,19 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
     private let userCacheSecret: String
+    private let networkSession: URLSession
     private weak var delegate: URLSessionDataDelegateProtocol?
     private var activeTasks: [ObjectIdentifier: EHBPStreamingDataTask] = [:]
     private let lock = NSLock()
 
-    init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", delegate: URLSessionDataDelegateProtocol) {
+    init(
+        baseURL: String,
+        enclaveURL: String? = nil,
+        publicKey: Data,
+        userCacheSecret: String = "",
+        networkSession: URLSession = .shared,
+        delegate: URLSessionDataDelegateProtocol
+    ) {
         self.baseURL = baseURL
         self.verifiedState = EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(
@@ -145,6 +165,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
             )
         )
         self.userCacheSecret = userCacheSecret
+        self.networkSession = networkSession
         self.delegate = delegate
     }
 
@@ -152,11 +173,13 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
         baseURL: String,
         verifiedState: EHBPVerifiedState,
         userCacheSecret: String = "",
+        networkSession: URLSession = .shared,
         delegate: URLSessionDataDelegateProtocol
     ) {
         self.baseURL = baseURL
         self.verifiedState = verifiedState
         self.userCacheSecret = userCacheSecret
+        self.networkSession = networkSession
         self.delegate = delegate
     }
 
@@ -186,6 +209,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
             userCacheSecret: userCacheSecret,
             delegate: delegate,
             session: self,
+            networkSession: networkSession,
             accumulatesResponse: accumulatesResponse,
             completionHandler: completionHandler
         )
@@ -266,6 +290,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
     private let userCacheSecret: String
+    private let networkSession: URLSession
     private weak var delegate: URLSessionDataDelegateProtocol?
     private weak var session: EHBPStreamingSession?
     /// Whether the full decrypted response is buffered for the completion
@@ -295,6 +320,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         userCacheSecret: String = "",
         delegate: URLSessionDataDelegateProtocol?,
         session: EHBPStreamingSession,
+        networkSession: URLSession,
         accumulatesResponse: Bool = true,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) {
@@ -304,6 +330,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         self.userCacheSecret = userCacheSecret
         self.delegate = delegate
         self.session = session
+        self.networkSession = networkSession
         self.accumulatesResponse = accumulatesResponse
         self.completionHandler = completionHandler
         self._originalRequest = request
@@ -358,7 +385,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                     baseURL: baseURL,
                     verifiedState: verifiedState,
                     userCacheSecret: userCacheSecret,
-                    session: .shared
+                    session: networkSession
                 )
 
                 let (stream, response) = try await prepared.client.requestStream(
@@ -372,7 +399,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                 var problemBody = Data()
                 var reachedEnd = false
 
-                if EHBPProblemResponse.mayBeKeyConfigurationMismatch(response) {
+                if EHBPProblemResponse.shouldInspectKeyConfigurationMismatch(response) {
                     var diagnosticWasTruncated = false
                     while let chunk = try await iterator.next() {
                         prefetchedChunks.append(chunk)
@@ -386,15 +413,14 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                     }
                     reachedEnd = !diagnosticWasTruncated
                     if reachedEnd,
-                       let title = EHBPProblemResponse.keyConfigurationMismatchTitle(
+                       EHBPProblemResponse.isKeyConfigurationMismatch(
                            response: response,
                            body: problemBody
                        ) {
                         try await EHBPReplayPolicy.refresh(
                             verifiedState,
                             afterRejectedGeneration: prepared.rejectedGeneration,
-                            attempt: attempt,
-                            title: title
+                            attempt: attempt
                         )
                         continue
                     }
@@ -481,7 +507,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         // Preserve the eager URL/key validation this initializer provided
         // before endpoint rotation moved client construction to request time.
         _ = try URLHelpers.parseHTTPURL(baseURL)
-        guard publicKey.count == 32 else {
+        guard publicKey.count == TinfoilConstants.hpkePublicKeyByteCount else {
             throw EHBPError.invalidInput("public key must be 32 bytes")
         }
         _ = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
@@ -586,15 +612,14 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
             )
             try Task.checkCancellation()
 
-            if let title = EHBPProblemResponse.keyConfigurationMismatchTitle(
+            if EHBPProblemResponse.isKeyConfigurationMismatch(
                 response: response,
                 body: data
             ) {
                 try await EHBPReplayPolicy.refresh(
                     verifiedState,
                     afterRejectedGeneration: prepared.rejectedGeneration,
-                    attempt: attempt,
-                    title: title
+                    attempt: attempt
                 )
                 continue
             }

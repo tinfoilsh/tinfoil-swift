@@ -12,10 +12,6 @@ public enum TinfoilConstants {
     /// Default URL for fetching attestation bundles
     public static let defaultAttestationBundleURL = "\(attestationBaseURL)/attestation"
 
-    /// Stable legacy inference enclave. This endpoint does not forward the
-    /// per-request enclave routing header used by generic EHBP proxies.
-    public static let inferenceEnclaveURL = "https://inference.tinfoil.sh"
-
     /// Placeholder for unknown host values
     internal static let unknownHost = "unknown"
 
@@ -30,4 +26,7 @@ public enum TinfoilConstants {
 
     /// Error code for invalid URL
     internal static let invalidURLErrorCode = 1001
+
+    /// X25519 public keys used by EHBP are always 32 bytes.
+    internal static let hpkePublicKeyByteCount = 32
 }
