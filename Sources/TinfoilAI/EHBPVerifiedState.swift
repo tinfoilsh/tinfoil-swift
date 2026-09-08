@@ -79,9 +79,7 @@ internal actor EHBPVerifiedState {
             // alive so another in-flight request can safely reuse it.
             throw CancellationError()
         } catch {
-            if refreshOperation?.id == operation.id {
-                refreshOperation = nil
-            }
+            clearRefreshOperation(operation)
             throw error
         }
     }
@@ -95,10 +93,16 @@ internal actor EHBPVerifiedState {
             endpoint = refreshed
             generation &+= 1
         }
+        clearRefreshOperation(operation)
+        return endpoint
+    }
+
+    /// Only the operation that is still current may clear the single-flight
+    /// slot, so a stale completion cannot discard a newer refresh.
+    private func clearRefreshOperation(_ operation: RefreshOperation) {
         if refreshOperation?.id == operation.id {
             refreshOperation = nil
         }
-        return endpoint
     }
 
     private func complete(
@@ -114,9 +118,7 @@ internal actor EHBPVerifiedState {
                 afterRejectedGeneration: rejectedGeneration
             )
         case .failure:
-            if refreshOperation?.id == operation.id {
-                refreshOperation = nil
-            }
+            clearRefreshOperation(operation)
         }
     }
 
