@@ -187,11 +187,10 @@ public class SecureClient {
             let decoder = JSONDecoder()
             let decodedGroundTruth = try decoder.decode(GroundTruth.self, from: groundTruthData)
             var document = try decoder.decode(VerificationDocument.self, from: verificationDocumentData)
-            if let configuredEnclaveURL {
-                let configuredHost = try URLHelpers.parseURL(configuredEnclaveURL).host
-                guard decodedGroundTruth.enclaveHost?.caseInsensitiveCompare(configuredHost) == .orderedSame else {
+            if configuredEnclaveURL != nil {
+                guard decodedGroundTruth.enclaveHost?.caseInsensitiveCompare(host) == .orderedSame else {
                     throw VerificationError.verificationFailed(
-                        "Attestation bundle domain does not match configured enclave \(configuredHost)"
+                        "Attestation bundle domain does not match configured enclave \(host)"
                     )
                 }
             }
