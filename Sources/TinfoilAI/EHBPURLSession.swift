@@ -82,6 +82,13 @@ private func makePinnedVerifiedState(
 private enum EHBPReplayPolicy {
     static let maximumAttempts = 2
 
+    /// Every replay loop either returns, refreshes and continues, or throws
+    /// from `refresh`, so this is unreachable in practice. It exists so a
+    /// future edit to the loop cannot silently leave a request unfinished.
+    static var attemptsExhausted: Error {
+        EHBPError.invalidResponse("EHBP retry limit exhausted")
+    }
+
     static func refresh(
         _ verifiedState: EHBPVerifiedState,
         afterRejectedGeneration generation: UInt64,
@@ -459,6 +466,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                 finish(data: accumulatedData, response: response, error: nil)
                 return
             }
+            throw EHBPReplayPolicy.attemptsExhausted
         } catch {
             finish(data: nil, response: nil, error: error)
         }
@@ -623,7 +631,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
 
             return (data, response)
         }
-        throw EHBPError.invalidResponse("EHBP retry limit exhausted")
+        throw EHBPReplayPolicy.attemptsExhausted
     }
 }
 
