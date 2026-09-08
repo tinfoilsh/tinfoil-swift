@@ -26,4 +26,7 @@ public enum TinfoilConstants {
 
     /// Error code for invalid URL
     internal static let invalidURLErrorCode = 1001
+
+    /// X25519 public keys used by EHBP are always 32 bytes.
+    internal static let hpkePublicKeyByteCount = 32
 }

@@ -52,9 +52,21 @@ final class LocalTestServer: @unchecked Sendable {
     let requestStore = HTTPRequestStore()
     let port: UInt16
 
+    struct Response {
+        var statusCode: Int
+        var contentType: String
+        var body: Data
+        var includeNonce: Bool
+    }
+
     var responseNonce: String = Data(repeating: 0xAB, count: 32).hexString
     var responseBody: Data = Data()
     var responseStatusCode: Int = 200
+    var responseContentType: String = "application/json"
+    var includeResponseNonce = true
+    /// Responses served in order, one per request, before falling back to the
+    /// default fields above.
+    var queuedResponses: [Response] = []
 
     init(port: UInt16 = 0) {
         self.port = port
@@ -230,15 +242,25 @@ final class LocalTestServer: @unchecked Sendable {
     }
 
     private func buildHTTPResponse() -> Data {
-        var response = "HTTP/1.1 \(responseStatusCode) OK\r\n"
-        response += "Content-Type: application/json\r\n"
-        response += "\(EHBPProtocol.responseNonceHeader): \(responseNonce)\r\n"
-        response += "Content-Length: \(responseBody.count)\r\n"
+        let next = queuedResponses.isEmpty
+            ? Response(
+                statusCode: responseStatusCode,
+                contentType: responseContentType,
+                body: responseBody,
+                includeNonce: includeResponseNonce
+            )
+            : queuedResponses.removeFirst()
+        var response = "HTTP/1.1 \(next.statusCode) OK\r\n"
+        response += "Content-Type: \(next.contentType)\r\n"
+        if next.includeNonce {
+            response += "\(EHBPProtocol.responseNonceHeader): \(responseNonce)\r\n"
+        }
+        response += "Content-Length: \(next.body.count)\r\n"
         response += "Connection: close\r\n"
         response += "\r\n"
 
         var responseData = Data(response.utf8)
-        responseData.append(responseBody)
+        responseData.append(next.body)
         return responseData
     }
 }
@@ -263,6 +285,22 @@ final class EHBPTests: XCTestCase {
         server.stop()
         server = nil
         try await super.tearDown()
+    }
+
+    private func makeStreamingSession(
+        delegate: URLSessionDataDelegateProtocol,
+        verifiedState: EHBPVerifiedState? = nil
+    ) -> EHBPStreamingSession {
+        EHBPStreamingSession(
+            baseURL: server.baseURL,
+            verifiedState: verifiedState ?? EHBPVerifiedState(
+                endpoint: EHBPVerifiedEndpoint(
+                    enclaveURL: server.baseURL,
+                    publicKey: testPublicKey
+                )
+            ),
+            delegate: delegate
+        )
     }
 
     // MARK: - EHBP Header Tests
@@ -476,6 +514,283 @@ final class EHBPTests: XCTestCase {
         XCTAssertEqual(capturedRequest.path, "/v1/chat/completions", "URL path should be preserved")
     }
 
+    func testURLSessionInitializerValidatesConfigurationImmediately() {
+        XCTAssertThrowsError(
+            try EHBPURLSession(baseURL: "not a URL", publicKey: testPublicKey)
+        )
+        XCTAssertThrowsError(
+            try EHBPURLSession(baseURL: server.baseURL, publicKey: Data(repeating: 0, count: 31))
+        )
+        XCTAssertThrowsError(
+            try EHBPURLSessionFactory(
+                baseURL: server.baseURL,
+                publicKey: Data(repeating: 0, count: 31)
+            )
+        )
+        XCTAssertThrowsError(
+            try EHBPURLSession(baseURL: server.baseURL, enclaveURL: "not a URL", publicKey: testPublicKey)
+        )
+    }
+
+    func testKeyMismatchRefreshesOnceAndReplaysWithNewEnclaveRoute() async throws {
+        server.responseStatusCode = 422
+        server.responseContentType = "application/problem+json"
+        server.includeResponseNonce = false
+        server.responseBody = Self.keyConfigProblemBody
+
+        let refreshCounter = AsyncCounter()
+        let session = EHBPURLSession(
+            baseURL: server.baseURL,
+            verifiedState: makeRotatingState(refreshCounter: refreshCounter)
+        )
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+
+        do {
+            _ = try await session.data(for: request, delegate: nil)
+            XCTFail("The second key mismatch must be surfaced after one safe replay")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("still mismatched after refresh"))
+        }
+
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshCount, 1)
+        XCTAssertEqual(server.requestStore.requests.count, 2)
+        XCTAssertEqual(enclaveRoutes(), ["https://old-router.example", "https://new-router.example"])
+    }
+
+    private static let keyConfigProblemBody = Data(
+        "{\"type\":\"urn:ietf:params:ehbp:error:key-config\",\"title\":\"stale key\"}".utf8
+    )
+
+    private func makeRotatingState(refreshCounter: AsyncCounter) -> EHBPVerifiedState {
+        EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: "https://old-router.example",
+                publicKey: testPublicKey
+            ),
+            refresh: {
+                await refreshCounter.increment()
+                return EHBPVerifiedEndpoint(
+                    enclaveURL: "https://new-router.example",
+                    publicKey: Data(repeating: 0x43, count: 32)
+                )
+            }
+        )
+    }
+
+    private func enclaveRoutes() -> [String] {
+        server.requestStore.requests.compactMap { request in
+            request.headers.first {
+                $0.key.caseInsensitiveCompare(URLHelpers.enclaveURLHeaderName) == .orderedSame
+            }?.value
+        }
+    }
+
+    func testStreamingKeyMismatchReplaysOnceAndDeliversOnlyReplayedResponse() async throws {
+        server.queuedResponses = [
+            .init(
+                statusCode: 422,
+                contentType: "application/problem+json",
+                body: Self.keyConfigProblemBody,
+                includeNonce: false
+            ),
+            .init(
+                statusCode: 200,
+                contentType: "text/event-stream",
+                body: makeEncryptedResponse(),
+                includeNonce: true
+            )
+        ]
+
+        let refreshCounter = AsyncCounter()
+        let recorder = StreamingRecorder()
+        let session = makeStreamingSession(
+            delegate: recorder,
+            verifiedState: makeRotatingState(refreshCounter: refreshCounter)
+        )
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+
+        let (data, response) = try await session.data(for: request, delegate: nil)
+        await fulfillment(of: [recorder.delegateCompleted], timeout: 2)
+
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshCount, 1)
+        XCTAssertEqual(enclaveRoutes(), ["https://old-router.example", "https://new-router.example"])
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(data, Data(), "the fixture's encrypted stream decrypts to an empty body")
+        XCTAssertEqual(recorder.responseStatusCodes, [200], "the rejected 422 must never reach the delegate")
+        XCTAssertTrue(recorder.receivedData.isEmpty, "no bytes from the rejected 422 may leak to the delegate")
+        XCTAssertEqual(recorder.completionCount, 1)
+        XCTAssertNil(recorder.completionError)
+    }
+
+    func testStreamingSecondKeyMismatchIsSurfacedWithoutDeliveringResponse() async throws {
+        server.responseStatusCode = 422
+        server.responseContentType = "application/problem+json"
+        server.includeResponseNonce = false
+        server.responseBody = Self.keyConfigProblemBody
+
+        let refreshCounter = AsyncCounter()
+        let recorder = StreamingRecorder()
+        let session = makeStreamingSession(
+            delegate: recorder,
+            verifiedState: makeRotatingState(refreshCounter: refreshCounter)
+        )
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+
+        do {
+            _ = try await session.data(for: request, delegate: nil)
+            XCTFail("The second key mismatch must be surfaced after one safe replay")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("still mismatched after refresh"))
+        }
+        await fulfillment(of: [recorder.delegateCompleted], timeout: 2)
+
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshCount, 1)
+        XCTAssertEqual(server.requestStore.requests.count, 2)
+        XCTAssertTrue(recorder.responseStatusCodes.isEmpty)
+        XCTAssertTrue(recorder.receivedData.isEmpty)
+        XCTAssertEqual(recorder.completionCount, 1)
+        XCTAssertNotNil(recorder.completionError)
+    }
+
+    func testStreamingBoundedProblemThatIsNotKeyMismatchIsDeliveredIntact() async throws {
+        let problem = Data("{\"type\":\"about:blank\",\"title\":\"bad request body\"}".utf8)
+        server.responseStatusCode = 422
+        server.responseContentType = "application/problem+json"
+        server.includeResponseNonce = false
+        server.responseBody = problem
+
+        let refreshCounter = AsyncCounter()
+        let recorder = StreamingRecorder()
+        let session = makeStreamingSession(
+            delegate: recorder,
+            verifiedState: makeRotatingState(refreshCounter: refreshCounter)
+        )
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+
+        let (data, response) = try await session.data(for: request, delegate: nil)
+        await fulfillment(of: [recorder.delegateCompleted], timeout: 2)
+
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshCount, 0, "a generic problem must not trigger attestation refresh")
+        XCTAssertEqual(server.requestStore.requests.count, 1)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 422)
+        XCTAssertEqual(data, problem)
+        XCTAssertEqual(recorder.responseStatusCodes, [422])
+        XCTAssertEqual(recorder.receivedData, problem, "prefetched chunks must be replayed to the delegate")
+        XCTAssertEqual(recorder.completionCount, 1)
+    }
+
+    func testKeyMismatchProblemRecognitionIsStrictAndBounded() throws {
+        let url = try XCTUnwrap(URL(string: "https://proxy.example"))
+        let response = try XCTUnwrap(
+            HTTPURLResponse(
+                url: url,
+                statusCode: 422,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/problem+json; charset=utf-8"]
+            )
+        )
+        let body = Data(
+            "{\"type\":\"urn:ietf:params:ehbp:error:key-config\",\"title\":\"rotate\"}".utf8
+        )
+
+        XCTAssertTrue(
+            EHBPProblemResponse.isKeyConfigurationMismatch(response: response, body: body)
+        )
+        XCTAssertFalse(
+            EHBPProblemResponse.isKeyConfigurationMismatch(
+                response: response,
+                body: Data(repeating: 0, count: EHBPProblemResponse.maximumDiagnosticBytes + 1)
+            )
+        )
+
+        var diagnostic = Data()
+        XCTAssertTrue(
+            EHBPProblemResponse.appendDiagnosticPrefix(
+                Data(repeating: 0x41, count: EHBPProblemResponse.maximumDiagnosticBytes + 1),
+                to: &diagnostic
+            )
+        )
+        XCTAssertEqual(diagnostic.count, EHBPProblemResponse.maximumDiagnosticBytes)
+
+        XCTAssertFalse(
+            EHBPProblemResponse.shouldInspectKeyConfigurationMismatch(response),
+            "unbounded streaming problems must be delivered without prefetching"
+        )
+        let boundedResponse = try XCTUnwrap(
+            HTTPURLResponse(
+                url: url,
+                statusCode: 422,
+                httpVersion: nil,
+                headerFields: [
+                    "Content-Type": "application/problem+json",
+                    "Content-Length": String(body.count)
+                ]
+            )
+        )
+        XCTAssertTrue(
+            EHBPProblemResponse.shouldInspectKeyConfigurationMismatch(boundedResponse)
+        )
+    }
+
+    func testCancelledRefreshWaiterDoesNotCancelOrBlockSharedRefresh() async throws {
+        let refreshStarted = expectation(description: "shared refresh started")
+        let cancelledWaiterFinished = expectation(description: "cancelled waiter finished")
+        let gate = AsyncGate()
+        let refreshCounter = AsyncCounter()
+        let refreshedEndpoint = EHBPVerifiedEndpoint(
+            enclaveURL: "https://new-router.example",
+            publicKey: Data(repeating: 0x44, count: 32)
+        )
+        let state = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: "https://old-router.example",
+                publicKey: testPublicKey
+            ),
+            refresh: {
+                await refreshCounter.increment()
+                refreshStarted.fulfill()
+                await gate.wait()
+                return refreshedEndpoint
+            }
+        )
+
+        let cancelledWaiter = Task {
+            defer { cancelledWaiterFinished.fulfill() }
+            return try await state.refresh(afterRejectedGeneration: 0)
+        }
+        await fulfillment(of: [refreshStarted], timeout: 1)
+        cancelledWaiter.cancel()
+        await fulfillment(of: [cancelledWaiterFinished], timeout: 1)
+
+        let survivingWaiter = Task {
+            try await state.refresh(afterRejectedGeneration: 0)
+        }
+        await gate.open()
+
+        do {
+            _ = try await cancelledWaiter.value
+            XCTFail("The cancelled waiter must return cancellation")
+        } catch is CancellationError {
+            // Expected: cancelling one waiter does not cancel shared refresh.
+        }
+        let refreshed = try await survivingWaiter.value
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshed.enclaveURL, refreshedEndpoint.enclaveURL)
+        XCTAssertEqual(refreshCount, 1)
+    }
+
     // MARK: - Encapsulated Key Format Tests
 
     func testEncapsulatedKeyIsValidHex() async throws {
@@ -600,11 +915,7 @@ final class EHBPTests: XCTestCase {
 
     func testStreamingSessionOnlyBuffersResponsesForCompletionHandlers() throws {
         let delegate = NoopStreamingDelegate()
-        let session = EHBPStreamingSession(
-            baseURL: server.baseURL,
-            publicKey: testPublicKey,
-            delegate: delegate
-        )
+        let session = makeStreamingSession(delegate: delegate)
         let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
 
         let delegateDrivenTask = try XCTUnwrap(
@@ -632,11 +943,7 @@ final class EHBPTests: XCTestCase {
             completionCalled: completionCalled,
             delegateCompleted: delegateCompleted
         )
-        let session = EHBPStreamingSession(
-            baseURL: server.baseURL,
-            publicKey: testPublicKey,
-            delegate: recorder
-        )
+        let session = makeStreamingSession(delegate: recorder)
         let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
 
         session.dataTask(with: request) { data, response, error in
@@ -660,11 +967,7 @@ final class EHBPTests: XCTestCase {
             completionCalled: completionCalled,
             delegateCompleted: delegateCompleted
         )
-        let session = EHBPStreamingSession(
-            baseURL: server.baseURL,
-            publicKey: testPublicKey,
-            delegate: recorder
-        )
+        let session = makeStreamingSession(delegate: recorder)
         let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
         let task = session.dataTask(with: request) { data, response, error in
             recorder.recordCompletion(data: data, response: response, error: error)
@@ -690,11 +993,7 @@ final class EHBPTests: XCTestCase {
             completionCalled: completionCalled,
             delegateCompleted: delegateCompleted
         )
-        let session = EHBPStreamingSession(
-            baseURL: server.baseURL,
-            publicKey: testPublicKey,
-            delegate: recorder
-        )
+        let session = makeStreamingSession(delegate: recorder)
         let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
         let task = session.dataTask(with: request) { data, response, error in
             recorder.recordCompletion(data: data, response: response, error: error)
@@ -1903,6 +2202,35 @@ final class EHBPTests: XCTestCase {
     }
 }
 
+private actor AsyncCounter {
+    private(set) var value = 0
+
+    func increment() {
+        value += 1
+    }
+}
+
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending {
+            waiter.resume()
+        }
+    }
+}
+
 // MARK: - Test Doubles
 
 private final class CancellationRecorder: URLSessionDataDelegateProtocol, @unchecked Sendable {
@@ -2007,6 +2335,76 @@ private final class CancellationRecorder: URLSessionDataDelegateProtocol, @unche
         didReceive response: URLResponse,
         completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
     ) {
+        completionHandler(.allow)
+    }
+}
+
+/// Records every delegate callback so tests can assert exactly which responses
+/// and chunks a streaming consumer observed.
+private final class StreamingRecorder: URLSessionDataDelegateProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _responseStatusCodes: [Int] = []
+    private var _receivedData = Data()
+    private var _completionCount = 0
+    private var _completionError: Error?
+    /// The task's completion handler resumes the awaiting caller before the
+    /// delegate completion callback runs, so tests must await this before
+    /// asserting on completion state.
+    let delegateCompleted = XCTestExpectation(description: "delegate completion")
+
+    var responseStatusCodes: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _responseStatusCodes
+    }
+
+    var receivedData: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return _receivedData
+    }
+
+    var completionCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _completionCount
+    }
+
+    var completionError: Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _completionError
+    }
+
+    func urlSession(_ session: URLSessionProtocol, task: URLSessionTaskProtocol, didCompleteWithError error: Error?) {
+        lock.lock()
+        _completionCount += 1
+        _completionError = error
+        lock.unlock()
+        delegateCompleted.fulfill()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {}
+
+    func urlSession(_ session: URLSessionProtocol, dataTask: URLSessionDataTaskProtocol, didReceive data: Data) {
+        lock.lock()
+        _receivedData.append(data)
+        lock.unlock()
+    }
+
+    func urlSession(
+        _ session: URLSessionProtocol,
+        dataTask: URLSessionDataTaskProtocol,
+        didReceive response: URLResponse,
+        completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+    ) {
+        lock.lock()
+        _responseStatusCodes.append((response as? HTTPURLResponse)?.statusCode ?? -1)
+        lock.unlock()
         completionHandler(.allow)
     }
 }

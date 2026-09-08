@@ -89,25 +89,54 @@ public class SecureClient {
     /// - Parameters:
     ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - enclaveURL: URL for the enclave attestation endpoint
-    public init(
+    public convenience init(
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         enclaveURL: String
     ) {
-        self.githubRepo = githubRepo
-        self.configuredEnclaveURL = enclaveURL
-        self.attestationBundleURL = nil
+        self.init(
+            githubRepo: githubRepo,
+            configuredEnclaveURL: enclaveURL,
+            attestationBundleURL: nil
+        )
+    }
+
+    /// Initialize a secure client that requests a bundle for one specific
+    /// enclave. This binds the destination, certificate, and HPKE key to the
+    /// same verified domain while retaining the single-request bundle flow.
+    public convenience init(
+        githubRepo: String = TinfoilConstants.defaultGithubRepo,
+        enclaveURL: String,
+        attestationBundleURL: String
+    ) {
+        self.init(
+            githubRepo: githubRepo,
+            configuredEnclaveURL: enclaveURL,
+            attestationBundleURL: attestationBundleURL
+        )
     }
 
     /// Initialize a secure client that fetches an attestation bundle for verification
     /// - Parameters:
     ///   - githubRepo: GitHub repository in the format "org/repo"
     ///   - attestationBundleURL: URL for fetching the attestation bundle. If nil, uses default Tinfoil endpoint.
-    public init(
+    public convenience init(
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         attestationBundleURL: String? = nil
     ) {
+        self.init(
+            githubRepo: githubRepo,
+            configuredEnclaveURL: nil,
+            attestationBundleURL: attestationBundleURL
+        )
+    }
+
+    private init(
+        githubRepo: String,
+        configuredEnclaveURL: String?,
+        attestationBundleURL: String?
+    ) {
         self.githubRepo = githubRepo
-        self.configuredEnclaveURL = nil
+        self.configuredEnclaveURL = configuredEnclaveURL
         self.attestationBundleURL = attestationBundleURL
     }
 
@@ -134,8 +163,10 @@ public class SecureClient {
             guard let client = ClientNewSecureClient(host, githubRepo) else {
                 throw VerificationError.verificationFailed("Failed to create secure verifier")
             }
-            if configuredEnclaveURL == nil {
-                client.setAttestationBundleURL(attestationBundleURL ?? TinfoilConstants.attestationBaseURL)
+            if let attestationBundleURL {
+                client.setAttestationBundleURL(attestationBundleURL)
+            } else if configuredEnclaveURL == nil {
+                client.setAttestationBundleURL(TinfoilConstants.attestationBaseURL)
             }
 
             _ = try client.verify()
@@ -156,6 +187,13 @@ public class SecureClient {
             let decoder = JSONDecoder()
             let decodedGroundTruth = try decoder.decode(GroundTruth.self, from: groundTruthData)
             var document = try decoder.decode(VerificationDocument.self, from: verificationDocumentData)
+            if configuredEnclaveURL != nil {
+                guard decodedGroundTruth.enclaveHost?.caseInsensitiveCompare(host) == .orderedSame else {
+                    throw VerificationError.verificationFailed(
+                        "Attestation bundle domain does not match configured enclave \(host)"
+                    )
+                }
+            }
             if document.verifier.version == TinfoilConstants.developmentVerifierVersion ||
                document.verifier.version == TinfoilConstants.unknownVerifierValue {
                 document = document.replacingVerifier(
@@ -226,7 +264,7 @@ public class SecureClient {
             clearVerifiedState()
             let steps = Self.stepsFromError(
                 error.localizedDescription,
-                usesBundle: configuredEnclaveURL == nil
+                usesBundle: attestationBundleURL != nil || configuredEnclaveURL == nil
             )
             buildFailureDocument(error: error, steps: steps)
             throw error

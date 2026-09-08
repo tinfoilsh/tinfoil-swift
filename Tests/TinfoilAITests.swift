@@ -42,6 +42,21 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertEqual(try URLHelpers.parseURL("wss://enclave.example.com/realtime").scheme, "wss")
     }
 
+    func testOriginCanonicalizesDefaultPortsCaseAndTrailingDot() {
+        XCTAssertEqual(
+            URLHelpers.origin(from: "https://ENCLAVE.example.com.:443/v1"),
+            URLHelpers.origin(from: "https://enclave.example.com/v1")
+        )
+        XCTAssertNotEqual(
+            URLHelpers.origin(from: "https://enclave.example.com:8443/v1"),
+            URLHelpers.origin(from: "https://enclave.example.com/v1")
+        )
+        XCTAssertNotEqual(
+            URLHelpers.origin(from: "https://.enclave.example.com/v1"),
+            URLHelpers.origin(from: "https://enclave.example.com/v1")
+        )
+    }
+
     func testClientSucceedsWithCacheSecretWhenVerificationSucceeds() async throws {
         try skipIfNoAPIKey()
 

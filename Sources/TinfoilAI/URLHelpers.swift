@@ -58,23 +58,24 @@ internal enum URLHelpers {
         }
         return components
     }
-    
-    /// Builds a host string with port if needed
-    /// - Parameters:
-    ///   - host: The hostname
-    ///   - port: Optional port number
-    /// - Returns: Host string with port appended if provided
-    static func buildHostWithPort(host: String, port: Int?) -> String {
-        return port.map { "\(host):\($0)" } ?? host
-    }
 
     /// Extracts the origin (scheme://host:port) from a URL string for comparison
     /// - Parameter urlString: The URL string to extract origin from
     /// - Returns: The origin string (scheme://host:port), or empty string if invalid
     static func origin(from urlString: String) -> String {
         guard let components = try? parseURL(urlString) else { return "" }
-        let hostWithPort = buildHostWithPort(host: components.host, port: components.port)
-        return "\(components.scheme)://\(hostWithPort)"
+        let scheme = components.scheme.lowercased()
+        var host = components.host.lowercased()
+        // DNS permits an absolute name to end in a dot. Remove only that
+        // suffix; a leading dot is not an equivalent host identity.
+        while host.hasSuffix(".") {
+            host.removeLast()
+        }
+        if host.contains(":"), !host.hasPrefix("[") {
+            host = "[\(host)]"
+        }
+        let effectivePort = components.port ?? (scheme == "https" ? 443 : 80)
+        return "\(scheme)://\(host):\(effectivePort)"
     }
 
     /// Extracts the path and query string from a URL
@@ -103,4 +104,4 @@ internal enum URLHelpers {
             headers[enclaveURLHeaderName] = enclaveURL
         }
     }
-} 
+}
