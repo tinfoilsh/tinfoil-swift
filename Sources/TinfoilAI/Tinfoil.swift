@@ -58,7 +58,10 @@ public class TinfoilAI {
     ///     the `user_cache_secret` field per request (e.g. via
     ///     `ChatQuery.extraBody`). A non-empty per-request string wins over the
     ///     client-level secret; an empty string is replaced with it.
-    ///   - onVerification: Optional callback for verification results
+    ///   - onVerification: Optional callback for verification results. Invoked
+    ///     once during `create`, and again from the request's task context
+    ///     whenever the enclave rotates its key and the client re-attests
+    ///     before replaying the request.
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     ///
     /// When using a proxy, set both `baseURL` and `attestationBundleURL` to your proxy server
