@@ -527,6 +527,9 @@ final class EHBPTests: XCTestCase {
                 publicKey: Data(repeating: 0, count: 31)
             )
         )
+        XCTAssertThrowsError(
+            try EHBPURLSession(baseURL: server.baseURL, enclaveURL: "not a URL", publicKey: testPublicKey)
+        )
     }
 
     func testKeyMismatchRefreshesOnceAndReplaysWithNewEnclaveRoute() async throws {

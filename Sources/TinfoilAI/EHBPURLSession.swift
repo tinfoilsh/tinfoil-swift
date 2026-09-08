@@ -70,6 +70,9 @@ private func makePinnedVerifiedState(
     session: URLSession
 ) throws -> EHBPVerifiedState {
     _ = try URLHelpers.parseHTTPURL(baseURL)
+    if let enclaveURL {
+        _ = try URLHelpers.parseHTTPURL(enclaveURL)
+    }
     _ = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
     return EHBPVerifiedState(
         endpoint: EHBPVerifiedEndpoint(
