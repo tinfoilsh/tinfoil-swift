@@ -60,6 +60,25 @@ private func prepareEHBPRequest(
     )
 }
 
+/// Pins a static endpoint/key pair as the initial verified state. Building a
+/// throwaway client runs the same URL and X25519 key checks that requests rely
+/// on later, so a misconfiguration fails at construction rather than on first use.
+private func makePinnedVerifiedState(
+    baseURL: String,
+    enclaveURL: String?,
+    publicKey: Data,
+    session: URLSession
+) throws -> EHBPVerifiedState {
+    _ = try URLHelpers.parseHTTPURL(baseURL)
+    _ = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
+    return EHBPVerifiedState(
+        endpoint: EHBPVerifiedEndpoint(
+            enclaveURL: enclaveURL ?? baseURL,
+            publicKey: publicKey
+        )
+    )
+}
+
 private enum EHBPReplayPolicy {
     static let maximumAttempts = 2
 
@@ -97,29 +116,24 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
     ///     request bodies before encryption. Empty values use the default.
     ///   - session: Underlying network session, including any proxy or
     ///     authentication-delegate configuration.
-    public init(
+    public convenience init(
         baseURL: String,
         enclaveURL: String? = nil,
         publicKey: Data,
         userCacheSecret: String = "",
         session: URLSession = .shared
     ) throws {
-        // Match EHBPURLSession's eager validation so an invalid streaming
-        // configuration fails at construction rather than on first use.
-        _ = try URLHelpers.parseHTTPURL(baseURL)
-        guard publicKey.count == TinfoilConstants.hpkePublicKeyByteCount else {
-            throw EHBPError.invalidInput("public key must be 32 bytes")
-        }
-        _ = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
-        self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
-        self.verifiedState = EHBPVerifiedState(
-            endpoint: EHBPVerifiedEndpoint(
-                enclaveURL: enclaveURL ?? baseURL,
-                publicKey: publicKey
-            )
+        self.init(
+            baseURL: baseURL,
+            verifiedState: try makePinnedVerifiedState(
+                baseURL: baseURL,
+                enclaveURL: enclaveURL,
+                publicKey: publicKey,
+                session: session
+            ),
+            userCacheSecret: userCacheSecret,
+            session: session
         )
-        self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
-        self.networkSession = session
     }
 
     internal init(
@@ -155,26 +169,6 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
     private weak var delegate: URLSessionDataDelegateProtocol?
     private var activeTasks: [ObjectIdentifier: EHBPStreamingDataTask] = [:]
     private let lock = NSLock()
-
-    init(
-        baseURL: String,
-        enclaveURL: String? = nil,
-        publicKey: Data,
-        userCacheSecret: String = "",
-        networkSession: URLSession = .shared,
-        delegate: URLSessionDataDelegateProtocol
-    ) {
-        self.baseURL = baseURL
-        self.verifiedState = EHBPVerifiedState(
-            endpoint: EHBPVerifiedEndpoint(
-                enclaveURL: enclaveURL ?? baseURL,
-                publicKey: publicKey
-            )
-        )
-        self.userCacheSecret = userCacheSecret
-        self.networkSession = networkSession
-        self.delegate = delegate
-    }
 
     init(
         baseURL: String,
@@ -510,34 +504,30 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     ///   - userCacheSecret: Prompt-cache scoping secret injected into eligible
     ///     request bodies before encryption. Empty values use the default.
     ///   - session: Underlying URLSession to use (defaults to shared)
-    public init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
-        // Preserve the eager URL/key validation this initializer provided
-        // before endpoint rotation moved client construction to request time.
-        _ = try URLHelpers.parseHTTPURL(baseURL)
-        guard publicKey.count == TinfoilConstants.hpkePublicKeyByteCount else {
-            throw EHBPError.invalidInput("public key must be 32 bytes")
-        }
-        _ = try EHBPClient(baseURL: baseURL, publicKey: publicKey, session: session)
-        self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
-        self.verifiedState = EHBPVerifiedState(
-            endpoint: EHBPVerifiedEndpoint(
-                enclaveURL: enclaveURL ?? baseURL,
-                publicKey: publicKey
-            )
+    public convenience init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
+        self.init(
+            baseURL: baseURL,
+            verifiedState: try makePinnedVerifiedState(
+                baseURL: baseURL,
+                enclaveURL: enclaveURL,
+                publicKey: publicKey,
+                session: session
+            ),
+            userCacheSecret: userCacheSecret,
+            session: session
         )
-        self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
-        self.session = session
     }
 
     internal init(
         baseURL: String,
         verifiedState: EHBPVerifiedState,
-        userCacheSecret: String = ""
-    ) throws {
+        userCacheSecret: String = "",
+        session: URLSession = .shared
+    ) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = verifiedState
         self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
-        self.session = .shared
+        self.session = session
     }
 
     // MARK: - URLSessionProtocol

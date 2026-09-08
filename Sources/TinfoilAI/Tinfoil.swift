@@ -179,7 +179,7 @@ public class TinfoilAI {
             refresh: refreshEndpoint
         )
 
-        let ehbpSession = try EHBPURLSession(
+        let ehbpSession = EHBPURLSession(
             baseURL: baseURL,
             verifiedState: verifiedState,
             userCacheSecret: userCacheSecret

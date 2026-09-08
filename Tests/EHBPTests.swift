@@ -269,6 +269,22 @@ final class EHBPTests: XCTestCase {
         try await super.tearDown()
     }
 
+    private func makeStreamingSession(
+        delegate: URLSessionDataDelegateProtocol,
+        verifiedState: EHBPVerifiedState? = nil
+    ) -> EHBPStreamingSession {
+        EHBPStreamingSession(
+            baseURL: server.baseURL,
+            verifiedState: verifiedState ?? EHBPVerifiedState(
+                endpoint: EHBPVerifiedEndpoint(
+                    enclaveURL: server.baseURL,
+                    publicKey: testPublicKey
+                )
+            ),
+            delegate: delegate
+        )
+    }
+
     // MARK: - EHBP Header Tests
 
     func testEHBPRequestContainsEncapsulatedKeyHeader() async throws {
@@ -767,11 +783,7 @@ final class EHBPTests: XCTestCase {
 
     func testStreamingSessionOnlyBuffersResponsesForCompletionHandlers() throws {
         let delegate = NoopStreamingDelegate()
-        let session = EHBPStreamingSession(
-            baseURL: server.baseURL,
-            publicKey: testPublicKey,
-            delegate: delegate
-        )
+        let session = makeStreamingSession(delegate: delegate)
         let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
 
         let delegateDrivenTask = try XCTUnwrap(
@@ -799,11 +811,7 @@ final class EHBPTests: XCTestCase {
             completionCalled: completionCalled,
             delegateCompleted: delegateCompleted
         )
-        let session = EHBPStreamingSession(
-            baseURL: server.baseURL,
-            publicKey: testPublicKey,
-            delegate: recorder
-        )
+        let session = makeStreamingSession(delegate: recorder)
         let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
 
         session.dataTask(with: request) { data, response, error in
@@ -827,11 +835,7 @@ final class EHBPTests: XCTestCase {
             completionCalled: completionCalled,
             delegateCompleted: delegateCompleted
         )
-        let session = EHBPStreamingSession(
-            baseURL: server.baseURL,
-            publicKey: testPublicKey,
-            delegate: recorder
-        )
+        let session = makeStreamingSession(delegate: recorder)
         let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
         let task = session.dataTask(with: request) { data, response, error in
             recorder.recordCompletion(data: data, response: response, error: error)
@@ -857,11 +861,7 @@ final class EHBPTests: XCTestCase {
             completionCalled: completionCalled,
             delegateCompleted: delegateCompleted
         )
-        let session = EHBPStreamingSession(
-            baseURL: server.baseURL,
-            publicKey: testPublicKey,
-            delegate: recorder
-        )
+        let session = makeStreamingSession(delegate: recorder)
         let request = URLRequest(url: URL(string: "\(server.baseURL)/v1/models")!)
         let task = session.dataTask(with: request) { data, response, error in
             recorder.recordCompletion(data: data, response: response, error: error)
