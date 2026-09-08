@@ -612,6 +612,7 @@ final class EHBPTests: XCTestCase {
         request.httpBody = Data("{}".utf8)
 
         let (data, response) = try await session.data(for: request, delegate: nil)
+        await fulfillment(of: [recorder.delegateCompleted], timeout: 2)
 
         let refreshCount = await refreshCounter.value
         XCTAssertEqual(refreshCount, 1)
@@ -646,6 +647,7 @@ final class EHBPTests: XCTestCase {
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("still mismatched after refresh"))
         }
+        await fulfillment(of: [recorder.delegateCompleted], timeout: 2)
 
         let refreshCount = await refreshCounter.value
         XCTAssertEqual(refreshCount, 1)
@@ -674,6 +676,7 @@ final class EHBPTests: XCTestCase {
         request.httpBody = Data("{}".utf8)
 
         let (data, response) = try await session.data(for: request, delegate: nil)
+        await fulfillment(of: [recorder.delegateCompleted], timeout: 2)
 
         let refreshCount = await refreshCounter.value
         XCTAssertEqual(refreshCount, 0, "a generic problem must not trigger attestation refresh")
@@ -2341,6 +2344,10 @@ private final class StreamingRecorder: URLSessionDataDelegateProtocol, @unchecke
     private var _receivedData = Data()
     private var _completionCount = 0
     private var _completionError: Error?
+    /// The task's completion handler resumes the awaiting caller before the
+    /// delegate completion callback runs, so tests must await this before
+    /// asserting on completion state.
+    let delegateCompleted = XCTestExpectation(description: "delegate completion")
 
     var responseStatusCodes: [Int] {
         lock.lock()
@@ -2371,6 +2378,7 @@ private final class StreamingRecorder: URLSessionDataDelegateProtocol, @unchecke
         _completionCount += 1
         _completionError = error
         lock.unlock()
+        delegateCompleted.fulfill()
     }
 
     func urlSession(
