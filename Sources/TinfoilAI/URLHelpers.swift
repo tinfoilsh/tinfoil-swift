@@ -58,15 +58,6 @@ internal enum URLHelpers {
         }
         return components
     }
-    
-    /// Builds a host string with port if needed
-    /// - Parameters:
-    ///   - host: The hostname
-    ///   - port: Optional port number
-    /// - Returns: Host string with port appended if provided
-    static func buildHostWithPort(host: String, port: Int?) -> String {
-        return port.map { "\(host):\($0)" } ?? host
-    }
 
     /// Extracts the origin (scheme://host:port) from a URL string for comparison
     /// - Parameter urlString: The URL string to extract origin from
