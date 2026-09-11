@@ -453,9 +453,12 @@ public class SecureClient {
                 compareMeasurements: .failed(errorMessage)
             )
         } else {
+            // Without a recognized step prefix nothing is known to have run, but
+            // a pinned client never performs the provenance steps at all.
+            let provenance: VerificationStepState = pinnedMeasurement ? .skipped() : .pending()
             return VerificationDocument.Steps(
-                fetchDigest: .pending(),
-                verifyCode: .pending(),
+                fetchDigest: provenance,
+                verifyCode: provenance,
                 verifyEnclave: .pending(),
                 compareMeasurements: .pending(),
                 otherError: .failed(errorMessage)
@@ -481,8 +484,8 @@ public class SecureClient {
         lastVerificationDocument = VerificationDocument(
             configRepo: githubRepo,
             enclaveHost: host,
-            releaseDigest: "",
-            codeMeasurement: AttestationMeasurement(type: "", registers: []),
+            releaseDigest: pinnedMeasurement == nil ? "" : TinfoilConstants.pinnedNoDigest,
+            codeMeasurement: pinnedMeasurement ?? AttestationMeasurement(type: "", registers: []),
             enclaveMeasurement: AttestationResponse(
                 measurement: AttestationMeasurement(type: "", registers: [])
             ),

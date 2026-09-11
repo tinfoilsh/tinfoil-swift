@@ -259,9 +259,11 @@ final class VerificationTests: XCTestCase {
         let response = try await pinned.get(url: "/.well-known/tinfoil-attestation")
         XCTAssertEqual(response.statusCode, 200)
 
-        // A tampered pin is rejected at measurement comparison.
+        // A tampered pin is rejected at measurement comparison. Flip the first
+        // nibble so the value is guaranteed to differ while staying valid hex.
         var tamperedRegisters = measurement.registers
-        tamperedRegisters[0] = "00" + tamperedRegisters[0].dropFirst(2)
+        let first = tamperedRegisters[0]
+        tamperedRegisters[0] = (first.hasPrefix("0") ? "1" : "0") + first.dropFirst()
         let tampered = SecureClient(
             enclaveURL: enclaveURL,
             pinnedMeasurement: AttestationMeasurement(type: measurement.type, registers: tamperedRegisters)
@@ -281,21 +283,51 @@ final class VerificationTests: XCTestCase {
     }
 
     func testPinnedMeasurementRejectsMalformedMeasurement() async throws {
-        let client = SecureClient(
+        let validRegister = String(repeating: "a", count: 96)
+        // The gomobile Tinfoil module also exports an AttestationMeasurement
+        // class, so let the element type be inferred from the Swift struct init.
+        let malformed = [
+            ("empty", AttestationMeasurement(type: "", registers: [])),
+            ("short register", AttestationMeasurement(type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: ["abc"])),
+            ("wrong count", AttestationMeasurement(type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [validRegister, validRegister])),
+            ("unsupported type", AttestationMeasurement(type: "https://tinfoil.sh/predicate/unknown/v1", registers: [validRegister])),
+        ]
+        for (name, pin) in malformed {
+            let client = SecureClient(enclaveURL: "https://enclave.example.com", pinnedMeasurement: pin)
+            do {
+                _ = try await client.verify()
+                XCTFail("\(name): malformed pinned measurement should be rejected before any network access")
+            } catch {
+                XCTAssertTrue(
+                    error.localizedDescription.contains("invalid pinned measurement"),
+                    "\(name): \(error.localizedDescription)"
+                )
+                let document = client.verificationDocument
+                XCTAssertEqual(document?.securityVerified, false)
+                XCTAssertEqual(document?.configRepo, TinfoilConstants.pinnedNoRepo)
+                XCTAssertEqual(document?.releaseDigest, TinfoilConstants.pinnedNoDigest)
+                XCTAssertEqual(document?.codeMeasurement.type, pin.type)
+                XCTAssertEqual(document?.steps.fetchDigest.status, .skipped)
+                XCTAssertEqual(document?.steps.verifyCode.status, .skipped)
+                XCTAssertEqual(document?.steps.otherError?.status, .failed)
+            }
+        }
+
+        // A nil hardware entry is rejected the same way.
+        let nilHardware = SecureClient(
             enclaveURL: "https://enclave.example.com",
-            pinnedMeasurement: AttestationMeasurement(type: "", registers: [])
+            pinnedMeasurement: AttestationMeasurement(type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [validRegister]),
+            hardwareMeasurements: [HardwareMeasurement(id: "", mrtd: validRegister, rtmr0: validRegister)]
         )
         do {
-            _ = try await client.verify()
-            XCTFail("Empty pinned measurement should be rejected before any network access")
+            _ = try await nilHardware.verify()
+            XCTFail("Hardware entry without an ID should be rejected")
         } catch {
-            XCTAssertTrue(
-                error.localizedDescription.contains("at least one register"),
-                error.localizedDescription
-            )
-            XCTAssertEqual(client.verificationDocument?.securityVerified, false)
+            XCTAssertTrue(error.localizedDescription.contains("invalid hardware measurements"), error.localizedDescription)
         }
     }
+
+
 
     // MARK: - Verification Document Tests
 
