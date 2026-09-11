@@ -148,6 +148,41 @@ final class TinfoilAITests: XCTestCase {
         } catch let error as TinfoilError {
             XCTAssertEqual(error, .invalidConfiguration("pinnedMeasurement cannot be combined with githubRepo"))
         }
+
+        do {
+            _ = try await TinfoilAI.create(
+                apiKey: "test-key",
+                enclaveURL: "https://enclave.example.com",
+                hardwareMeasurements: [HardwareMeasurement(id: "p", mrtd: "m", rtmr0: "r")]
+            )
+            XCTFail("hardwareMeasurements without pinnedMeasurement should be rejected")
+        } catch let error as TinfoilError {
+            XCTAssertEqual(error, .invalidConfiguration("hardwareMeasurements requires pinnedMeasurement"))
+        }
+    }
+
+    func testRefreshKeepsCallerSelectedEnclave() {
+        let verified = "https://verified.example.com"
+
+        // Direct clients always re-verify the enclave they selected.
+        XCTAssertEqual(
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: nil, pinned: false),
+            verified
+        )
+        // A discovered enclave behind a forwarding proxy may be rotated by ATC.
+        XCTAssertNil(
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: "https://proxy.example.com", pinned: false)
+        )
+        // An explicitly configured enclave is a destination constraint even behind a proxy.
+        XCTAssertEqual(
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: verified, baseURL: "https://proxy.example.com", pinned: false),
+            verified
+        )
+        // So is a pinned measurement.
+        XCTAssertEqual(
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: verified, baseURL: "https://proxy.example.com", pinned: true),
+            verified
+        )
     }
 
     func testPinnedMeasurementClientCompletesChat() async throws {
