@@ -109,6 +109,79 @@ final class TinfoilAITests: XCTestCase {
         }
     }
 
+    // MARK: - Pinned Measurement Tests
+
+    func testPinnedMeasurementRequiresEnclaveURL() async throws {
+        let measurement = AttestationMeasurement(type: "type", registers: ["abc"])
+        do {
+            _ = try await TinfoilAI.create(apiKey: "test-key", pinnedMeasurement: measurement)
+            XCTFail("pinnedMeasurement without enclaveURL should be rejected")
+        } catch let error as TinfoilError {
+            XCTAssertEqual(
+                error,
+                .invalidConfiguration(
+                    "pinnedMeasurement requires enclaveURL: a pinned measurement cannot be verified against an auto-selected router"
+                )
+            )
+        }
+
+        do {
+            _ = try await TinfoilAI.create(
+                apiKey: "test-key",
+                enclaveURL: "https://enclave.example.com",
+                attestationBundleURL: "https://atc.example.com",
+                pinnedMeasurement: measurement
+            )
+            XCTFail("pinnedMeasurement with attestationBundleURL should be rejected")
+        } catch let error as TinfoilError {
+            XCTAssertEqual(error, .invalidConfiguration("pinnedMeasurement cannot be combined with attestationBundleURL"))
+        }
+
+        do {
+            _ = try await TinfoilAI.create(
+                apiKey: "test-key",
+                enclaveURL: "https://enclave.example.com",
+                githubRepo: "org/repo",
+                pinnedMeasurement: measurement
+            )
+            XCTFail("pinnedMeasurement with githubRepo should be rejected")
+        } catch let error as TinfoilError {
+            XCTAssertEqual(error, .invalidConfiguration("pinnedMeasurement cannot be combined with githubRepo"))
+        }
+    }
+
+    func testPinnedMeasurementClientCompletesChat() async throws {
+        try skipIfNoAPIKey()
+
+        // Learn the current enclave and its measurement through the default flow.
+        let discovery = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+        let discovered = try await discovery.verify()
+        guard let enclaveURL = discovery.verifiedEnclaveURL,
+              let measurement = discovered.enclaveMeasurement else {
+            throw XCTSkip("Discovery did not yield an enclave measurement")
+        }
+
+        let documents = Box<[VerificationDocument?]>(value: [])
+        let client = try await TinfoilAI.create(
+            apiKey: try getAPIKey(),
+            enclaveURL: enclaveURL,
+            pinnedMeasurement: AttestationMeasurement(type: measurement.type, registers: measurement.registers),
+            onVerification: { documents.value.append($0) }
+        )
+
+        XCTAssertEqual(documents.value.count, 1)
+        XCTAssertEqual(documents.value.first??.configRepo, TinfoilConstants.pinnedNoRepo)
+        XCTAssertEqual(documents.value.first??.steps.fetchDigest.status, .skipped)
+        XCTAssertEqual(documents.value.first??.steps.verifyCode.status, .skipped)
+        XCTAssertEqual(documents.value.first??.enclaveFingerprint, discovered.enclaveFingerprint)
+
+        let response = try await client.chats(query: ChatQuery(
+            messages: [.user(.init(content: .string("Say 'Done' and nothing else.")))],
+            model: "gpt-oss-120b"
+        ))
+        XCTAssertFalse(response.choices.isEmpty)
+    }
+
     // MARK: - Streaming Tests
 
     func testStreamingChatCompletion() async throws {

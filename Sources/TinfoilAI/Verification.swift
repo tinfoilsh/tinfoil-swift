@@ -80,6 +80,8 @@ public class SecureClient {
     private let githubRepo: String
     private let configuredEnclaveURL: String?
     private let attestationBundleURL: String?
+    private let pinnedMeasurement: AttestationMeasurement?
+    private let hardwareMeasurements: [HardwareMeasurement]
     private var discoveredEnclaveURL: String?
     private var groundTruth: GroundTruth?
     private var lastVerificationDocument: VerificationDocument?
@@ -130,14 +132,68 @@ public class SecureClient {
         )
     }
 
+    /// Initialize a secure client that verifies the enclave against a
+    /// caller-supplied measurement instead of the latest signed release of a
+    /// config repo. The GitHub release lookup and Sigstore code verification
+    /// are skipped, so the measurement's provenance must be established out of
+    /// band; the verification document reports those steps as skipped.
+    /// - Parameters:
+    ///   - enclaveURL: URL for the enclave attestation endpoint
+    ///   - pinnedMeasurement: Expected enclave code measurement
+    ///   - hardwareMeasurements: Optional TDX platform measurements that replace
+    ///     the Sigstore-published values. When empty, they are still fetched from
+    ///     Sigstore for TDX enclaves.
+    public convenience init(
+        enclaveURL: String,
+        pinnedMeasurement: AttestationMeasurement,
+        hardwareMeasurements: [HardwareMeasurement] = []
+    ) {
+        self.init(
+            githubRepo: TinfoilConstants.pinnedNoRepo,
+            configuredEnclaveURL: enclaveURL,
+            attestationBundleURL: nil,
+            pinnedMeasurement: pinnedMeasurement,
+            hardwareMeasurements: hardwareMeasurements
+        )
+    }
+
     private init(
         githubRepo: String,
         configuredEnclaveURL: String?,
-        attestationBundleURL: String?
+        attestationBundleURL: String?,
+        pinnedMeasurement: AttestationMeasurement? = nil,
+        hardwareMeasurements: [HardwareMeasurement] = []
     ) {
         self.githubRepo = githubRepo
         self.configuredEnclaveURL = configuredEnclaveURL
         self.attestationBundleURL = attestationBundleURL
+        self.pinnedMeasurement = pinnedMeasurement
+        self.hardwareMeasurements = hardwareMeasurements
+    }
+
+    /// Creates the Go verifier for `host`, in pinned-measurement mode when a
+    /// measurement was supplied. The pinned Go constructor takes the
+    /// measurements as JSON because gomobile cannot bind the struct types.
+    private func makeGoClient(host: String) throws -> ClientSecureClient {
+        guard let pinnedMeasurement else {
+            guard let client = ClientNewSecureClient(host, githubRepo) else {
+                throw VerificationError.verificationFailed("Failed to create secure verifier for \(host)")
+            }
+            return client
+        }
+
+        let encoder = JSONEncoder()
+        let measurementJSON = String(decoding: try encoder.encode(pinnedMeasurement), as: UTF8.self)
+        let hardwareJSON = hardwareMeasurements.isEmpty
+            ? ""
+            : String(decoding: try encoder.encode(hardwareMeasurements), as: UTF8.self)
+
+        var error: NSError?
+        guard let client = ClientNewPinnedSecureClientJSON(host, measurementJSON, hardwareJSON, &error) else {
+            if let error { throw error }
+            throw VerificationError.verificationFailed("Failed to create pinned secure verifier for \(host)")
+        }
+        return client
     }
 
     /// The verified enclave URL (available after successful verification)
@@ -160,9 +216,7 @@ public class SecureClient {
                 host = ""
             }
 
-            guard let client = ClientNewSecureClient(host, githubRepo) else {
-                throw VerificationError.verificationFailed("Failed to create secure verifier")
-            }
+            let client = try makeGoClient(host: host)
             if let attestationBundleURL {
                 client.setAttestationBundleURL(attestationBundleURL)
             } else if configuredEnclaveURL == nil {
@@ -264,7 +318,8 @@ public class SecureClient {
             clearVerifiedState()
             let steps = Self.stepsFromError(
                 error.localizedDescription,
-                usesBundle: attestationBundleURL != nil || configuredEnclaveURL == nil
+                usesBundle: attestationBundleURL != nil || configuredEnclaveURL == nil,
+                pinnedMeasurement: pinnedMeasurement != nil
             )
             buildFailureDocument(error: error, steps: steps)
             throw error
@@ -291,9 +346,7 @@ public class SecureClient {
             throw VerificationError.verificationFailed("No enclave host available")
         }
 
-        guard let client = ClientNewSecureClient(host, githubRepo) else {
-            throw VerificationError.verificationFailed("Failed to create secure client for \(host)")
-        }
+        let client = try makeGoClient(host: host)
         goClient = client
         return client
     }
@@ -344,9 +397,13 @@ public class SecureClient {
     /// Maps error message prefixes to verification step states
     internal static func stepsFromError(
         _ errorMessage: String,
-        usesBundle: Bool = false
+        usesBundle: Bool = false,
+        pinnedMeasurement: Bool = false
     ) -> VerificationDocument.Steps {
-        let completedFetch: VerificationStepState = usesBundle ? .skipped() : .success()
+        // A pinned measurement skips the release lookup and code verification
+        // entirely, so those steps are reported as skipped rather than succeeded.
+        let completedFetch: VerificationStepState = usesBundle || pinnedMeasurement ? .skipped() : .success()
+        let completedCode: VerificationStepState = pinnedMeasurement ? .skipped() : .success()
         if usesBundle && (errorMessage.starts(with: "fetchBundle:") || errorMessage.starts(with: "failed to fetch bundle:")) {
             return VerificationDocument.Steps(
                 fetchDigest: .skipped(),
@@ -374,7 +431,7 @@ public class SecureClient {
         } else if errorMessage.starts(with: "verifyEnclave:") {
             return VerificationDocument.Steps(
                 fetchDigest: completedFetch,
-                verifyCode: .success(),
+                verifyCode: completedCode,
                 verifyEnclave: .failed(errorMessage),
                 compareMeasurements: .pending()
             )
@@ -382,7 +439,7 @@ public class SecureClient {
                   errorMessage.starts(with: "verifyCertificate:") {
             return VerificationDocument.Steps(
                 fetchDigest: completedFetch,
-                verifyCode: .success(),
+                verifyCode: completedCode,
                 verifyEnclave: .success(),
                 compareMeasurements: usesBundle ? .success() : .pending(),
                 verifyCertificate: .failed(errorMessage)
@@ -391,7 +448,7 @@ public class SecureClient {
                   errorMessage.starts(with: "measurements:") {
             return VerificationDocument.Steps(
                 fetchDigest: completedFetch,
-                verifyCode: .success(),
+                verifyCode: completedCode,
                 verifyEnclave: .success(),
                 compareMeasurements: .failed(errorMessage)
             )

@@ -153,6 +153,8 @@ let client = try await TinfoilAI.create(
     baseURL: String? = nil,             // Proxy server URL (requests go directly to enclave if nil)
     enclaveURL: String? = nil,          // Custom enclave URL (auto-selects router if nil)
     githubRepo: String = "tinfoilsh/confidential-model-router", // GitHub repo for verification
+    attestationBundleURL: String? = nil,        // Fetch the attestation bundle from a proxy instead
+    pinnedMeasurement: AttestationMeasurement? = nil, // Verify against a known measurement (see below)
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
     userCacheSecret: String? = nil,             // Prompt cache scoping secret (see "Prompt Cache Scoping")
     onVerification: VerificationCallback? = nil // Verification callback
@@ -160,6 +162,22 @@ let client = try await TinfoilAI.create(
 
 // Returns: TinfoilAI - A client with the same API as OpenAI
 ```
+
+### Pinning a Measurement
+
+By default the client fetches the expected code measurement from the latest signed release of `githubRepo`. To verify against a measurement you obtained out of band instead, pin it explicitly. This skips the GitHub release lookup and Sigstore code verification, so the measurement's provenance is your responsibility; the verification document reports those steps as `skipped`.
+
+```swift
+let client = try await TinfoilAI.create(
+    enclaveURL: "https://enclave.example.com",
+    pinnedMeasurement: AttestationMeasurement(
+        type: "https://tinfoil.sh/predicate/sev-snp-guest/v2",
+        registers: ["<hex measurement>"]
+    )
+)
+```
+
+`pinnedMeasurement` requires `enclaveURL` and cannot be combined with `githubRepo` or `attestationBundleURL`. `SecureClient(enclaveURL:pinnedMeasurement:)` offers the same mode for verification without the OpenAI wrapper.
 
 ### Proxy Server Support
 
