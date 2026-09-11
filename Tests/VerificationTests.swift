@@ -198,6 +198,103 @@ final class VerificationTests: XCTestCase {
         )
         XCTAssertEqual(bundleFetchFailure.fetchDigest.status, .skipped)
         XCTAssertEqual(bundleFetchFailure.otherError?.status, .failed)
+
+        let pinnedMismatch = SecureClient.stepsFromError(
+            "measurements: measurement mismatch",
+            pinnedMeasurement: true
+        )
+        XCTAssertEqual(pinnedMismatch.fetchDigest.status, .skipped)
+        XCTAssertEqual(pinnedMismatch.verifyCode.status, .skipped)
+        XCTAssertEqual(pinnedMismatch.verifyEnclave.status, .success)
+        XCTAssertEqual(pinnedMismatch.compareMeasurements.status, .failed)
+
+        let pinnedEnclaveFailure = SecureClient.stepsFromError(
+            "verifyEnclave: bad report",
+            pinnedMeasurement: true
+        )
+        XCTAssertEqual(pinnedEnclaveFailure.fetchDigest.status, .skipped)
+        XCTAssertEqual(pinnedEnclaveFailure.verifyCode.status, .skipped)
+        XCTAssertEqual(pinnedEnclaveFailure.verifyEnclave.status, .failed)
+    }
+
+    // MARK: - Pinned Measurement Tests
+
+    func testPinnedMeasurementVerification() async throws {
+        // Learn a live enclave's measurement through the normal Sigstore-backed flow.
+        let discovery = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+        let discovered: GroundTruth
+        do {
+            discovered = try await discovery.verify()
+        } catch {
+            throw XCTSkip("Network verification unavailable: \(error)")
+        }
+        guard let enclaveURL = discovery.verifiedEnclaveURL,
+              let measurement = discovered.enclaveMeasurement else {
+            throw XCTSkip("Discovery did not yield an enclave measurement")
+        }
+
+        let pinned = SecureClient(
+            enclaveURL: enclaveURL,
+            pinnedMeasurement: AttestationMeasurement(type: measurement.type, registers: measurement.registers)
+        )
+        let groundTruth = try await pinned.verify()
+
+        XCTAssertEqual(groundTruth.configRepo, TinfoilConstants.pinnedNoRepo)
+        XCTAssertEqual(groundTruth.digest, "pinned_no_digest")
+        XCTAssertNil(groundTruth.releaseTag)
+        XCTAssertEqual(groundTruth.enclaveFingerprint, discovered.enclaveFingerprint)
+        XCTAssertEqual(groundTruth.codeFingerprint, groundTruth.enclaveFingerprint)
+        XCTAssertEqual(groundTruth.hpkePublicKey, discovered.hpkePublicKey)
+
+        let document = pinned.verificationDocument
+        XCTAssertEqual(document?.securityVerified, true)
+        XCTAssertEqual(document?.steps.fetchDigest.status, .skipped)
+        XCTAssertEqual(document?.steps.verifyCode.status, .skipped)
+        XCTAssertEqual(document?.steps.verifyEnclave.status, .success)
+        XCTAssertEqual(document?.steps.compareMeasurements.status, .success)
+        XCTAssertEqual(document?.steps.verifyCertificate.status, .success)
+        XCTAssertEqual(document?.allStepsSucceeded, true)
+
+        // Attested requests work against the pinned enclave.
+        let response = try await pinned.get(url: "/.well-known/tinfoil-attestation")
+        XCTAssertEqual(response.statusCode, 200)
+
+        // A tampered pin is rejected at measurement comparison.
+        var tamperedRegisters = measurement.registers
+        tamperedRegisters[0] = "00" + tamperedRegisters[0].dropFirst(2)
+        let tampered = SecureClient(
+            enclaveURL: enclaveURL,
+            pinnedMeasurement: AttestationMeasurement(type: measurement.type, registers: tamperedRegisters)
+        )
+        do {
+            _ = try await tampered.verify()
+            XCTFail("Tampered pinned measurement should be rejected")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("measurements:"), error.localizedDescription)
+            let failure = tampered.verificationDocument
+            XCTAssertEqual(failure?.securityVerified, false)
+            XCTAssertEqual(failure?.configRepo, TinfoilConstants.pinnedNoRepo)
+            XCTAssertEqual(failure?.steps.fetchDigest.status, .skipped)
+            XCTAssertEqual(failure?.steps.verifyCode.status, .skipped)
+            XCTAssertEqual(failure?.steps.compareMeasurements.status, .failed)
+        }
+    }
+
+    func testPinnedMeasurementRejectsMalformedMeasurement() async throws {
+        let client = SecureClient(
+            enclaveURL: "https://enclave.example.com",
+            pinnedMeasurement: AttestationMeasurement(type: "", registers: [])
+        )
+        do {
+            _ = try await client.verify()
+            XCTFail("Empty pinned measurement should be rejected before any network access")
+        } catch {
+            XCTAssertTrue(
+                error.localizedDescription.contains("at least one register"),
+                error.localizedDescription
+            )
+            XCTAssertEqual(client.verificationDocument?.securityVerified, false)
+        }
     }
 
     // MARK: - Verification Document Tests

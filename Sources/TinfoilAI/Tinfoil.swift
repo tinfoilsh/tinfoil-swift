@@ -14,8 +14,12 @@ public class TinfoilAI {
     private static func makeVerifier(
         githubRepo: String,
         enclaveURL: String?,
-        attestationBundleURL: String?
+        attestationBundleURL: String?,
+        pinnedMeasurement: AttestationMeasurement? = nil
     ) -> SecureClient {
+        if let pinnedMeasurement, let enclaveURL {
+            return SecureClient(enclaveURL: enclaveURL, pinnedMeasurement: pinnedMeasurement)
+        }
         if let enclaveURL {
             return SecureClient(
                 githubRepo: githubRepo,
@@ -34,10 +38,16 @@ public class TinfoilAI {
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
+    ///   - enclaveURL: Optional enclave to verify and connect to. If not provided, the enclave
+    ///     is discovered from the attestation bundle. Required with `pinnedMeasurement`.
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - attestationBundleURL: Optional URL to fetch a precomputed attestation bundle from.
     ///     If not provided, uses the default Tinfoil endpoint. The enclave URL is discovered from
     ///     the attestation bundle during verification.
+    ///   - pinnedMeasurement: Verify the enclave against this measurement instead of the
+    ///     latest signed release of `githubRepo`. Skips the GitHub release lookup and Sigstore
+    ///     code verification, so the measurement's provenance must be established out of band.
+    ///     Requires `enclaveURL`; cannot be combined with `githubRepo` or `attestationBundleURL`.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - customHeaders: Additional request headers to forward verbatim on
     ///     every outbound request (merged over the headers synthesized by
@@ -72,8 +82,10 @@ public class TinfoilAI {
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         baseURL: String? = nil,
+        enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         attestationBundleURL: String? = nil,
+        pinnedMeasurement: AttestationMeasurement? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
         tinfoilEvents: Set<TinfoilEvent> = [],
@@ -89,10 +101,25 @@ public class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
 
+        if pinnedMeasurement != nil {
+            guard enclaveURL != nil else {
+                throw TinfoilError.invalidConfiguration(
+                    "pinnedMeasurement requires enclaveURL: a pinned measurement cannot be verified against an auto-selected router"
+                )
+            }
+            guard attestationBundleURL == nil else {
+                throw TinfoilError.invalidConfiguration("pinnedMeasurement cannot be combined with attestationBundleURL")
+            }
+            guard githubRepo == TinfoilConstants.defaultGithubRepo else {
+                throw TinfoilError.invalidConfiguration("pinnedMeasurement cannot be combined with githubRepo")
+            }
+        }
+
         let verifier = makeVerifier(
             githubRepo: githubRepo,
-            enclaveURL: nil,
-            attestationBundleURL: attestationBundleURL
+            enclaveURL: enclaveURL,
+            attestationBundleURL: attestationBundleURL,
+            pinnedMeasurement: pinnedMeasurement
         )
 
         do {
@@ -107,13 +134,16 @@ public class TinfoilAI {
             let finalBaseURL = baseURL ?? enclaveURL
             // A configured base URL is an EHBP forwarding proxy, so ATC may
             // rotate the endpoint/key pair behind it. A direct client keeps its
-            // selected domain and refreshes that domain's bundle.
-            let pinnedRefreshEnclaveURL = baseURL == nil ? enclaveURL : nil
+            // selected domain and refreshes that domain's bundle. A pinned
+            // measurement is bound to one enclave, so it always re-verifies
+            // the configured enclave.
+            let pinnedRefreshEnclaveURL = baseURL == nil || pinnedMeasurement != nil ? enclaveURL : nil
             let refreshEndpoint: EHBPVerifiedState.Refresh = {
                 let refreshVerifier = Self.makeVerifier(
                     githubRepo: githubRepo,
                     enclaveURL: pinnedRefreshEnclaveURL,
-                    attestationBundleURL: attestationBundleURL
+                    attestationBundleURL: attestationBundleURL,
+                    pinnedMeasurement: pinnedMeasurement
                 )
 
                 defer { onVerification?(refreshVerifier.verificationDocument) }
