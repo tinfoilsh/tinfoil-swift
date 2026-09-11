@@ -15,6 +15,11 @@ public enum TinfoilConstants {
     /// Placeholder for unknown host values
     internal static let unknownHost = "unknown"
 
+    /// Sentinels reported by the verifier when the expected measurement was
+    /// pinned by the caller instead of derived from a release.
+    public static let pinnedNoRepo = "pinned_no_repo"
+    public static let pinnedNoDigest = "pinned_no_digest"
+
     /// Verifier implementation embedded by this SDK release
     public static let verifierName = "tinfoil-go"
     public static let verifierVersion = Tinfoil.ClientVersion
