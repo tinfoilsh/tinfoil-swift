@@ -1078,6 +1078,82 @@ final class EHBPTests: XCTestCase {
         XCTAssertNotNil(capturedRequest.headers["Authorization"], "TinfoilAI.chats() should include Authorization header")
     }
 
+    /// Verifies that per-request headers reach the wire alongside the client's
+    /// customHeaders, and override them on collision, through the EHBP transport.
+    func testTinfoilAIChatsForwardsPerRequestHeaders() async throws {
+        let tinfoilClient = try TinfoilAI(
+            apiKey: "test-api-key",
+            baseURL: server.baseURL,
+            enclaveURL: server.baseURL,
+            hpkePublicKeyHex: testPublicKey.hexString,
+            customHeaders: ["X-Configured": "config", "X-Both": "config"]
+        )
+
+        let query = ChatQuery(
+            messages: [.user(.init(content: .string("headers test")))],
+            model: "gpt-oss-120b"
+        )
+
+        do {
+            _ = try await tinfoilClient.chats(
+                query: query,
+                headers: ["X-Tinfoil-Conversation-Id": "chat-123", "X-Both": "request"]
+            )
+        } catch {
+            // Expected to fail since our mock response is not properly encrypted
+        }
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let capturedRequest = server.requestStore.lastRequest else {
+            XCTFail("No request was captured from TinfoilAI.chats(query:headers:)")
+            return
+        }
+        XCTAssertEqual(capturedRequest.headers["X-Configured"], "config")
+        XCTAssertEqual(capturedRequest.headers["X-Tinfoil-Conversation-Id"], "chat-123")
+        XCTAssertEqual(capturedRequest.headers["X-Both"], "request")
+        XCTAssertNotNil(capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader])
+    }
+
+    func testTinfoilAIChatsStreamForwardsPerRequestHeaders() async throws {
+        let tinfoilClient = try TinfoilAI(
+            apiKey: "test-api-key",
+            baseURL: server.baseURL,
+            enclaveURL: server.baseURL,
+            hpkePublicKeyHex: testPublicKey.hexString,
+            customHeaders: ["X-Configured": "config", "X-Both": "config"]
+        )
+
+        let query = ChatQuery(
+            messages: [.user(.init(content: .string("headers stream test")))],
+            model: "gpt-oss-120b",
+            stream: true
+        )
+
+        let stream = tinfoilClient.chatsStream(
+            query: query,
+            headers: ["X-Tinfoil-Conversation-Id": "chat-123", "X-Both": "request"]
+        )
+        do {
+            for try await _ in stream {
+                // Consume stream
+            }
+        } catch {
+            // Expected to fail since our mock response is not properly encrypted
+        }
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let capturedRequest = server.requestStore.lastRequest else {
+            XCTFail("No request was captured from TinfoilAI.chatsStream(query:headers:)")
+            return
+        }
+        XCTAssertEqual(capturedRequest.headers["X-Configured"], "config")
+        XCTAssertEqual(capturedRequest.headers["X-Tinfoil-Conversation-Id"], "chat-123")
+        XCTAssertEqual(capturedRequest.headers["X-Both"], "request")
+        XCTAssertNotNil(capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader])
+    }
+
     /// Verifies that TinfoilAI.chatsStream() uses EHBP encryption end-to-end
     func testTinfoilAIChatsStreamUsesEHBPEncryption() async throws {
         let tinfoilClient = try TinfoilAI(
