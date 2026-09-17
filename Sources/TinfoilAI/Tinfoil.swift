@@ -227,8 +227,22 @@ public class TinfoilAI {
         try await openAIClient.chats(query: query)
     }
 
+    /// Sends a chat completion with additional headers applied to this call
+    /// only, on top of the client's `customHeaders`. Use this for values that
+    /// change per request, such as a conversation id.
+    public func chats(query: ChatQuery, headers: [String: String]) async throws -> ChatResult {
+        try await openAIClient.chats(query: query, headers: headers)
+    }
+
     public func chatsStream(query: ChatQuery) -> AsyncThrowingStream<ChatStreamResult, Error> {
         openAIClient.chatsStream(query: query)
+    }
+
+    /// Streams a chat completion with additional headers applied to this call
+    /// only, on top of the client's `customHeaders`. Use this for values that
+    /// change per request, such as a conversation id.
+    public func chatsStream(query: ChatQuery, headers: [String: String]) -> AsyncThrowingStream<ChatStreamResult, Error> {
+        openAIClient.chatsStream(query: query, headers: headers)
     }
 
     public func images(query: ImagesQuery) async throws -> ImagesResult {
