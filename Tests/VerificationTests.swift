@@ -240,7 +240,7 @@ final class VerificationTests: XCTestCase {
         let groundTruth = try await pinned.verify()
 
         XCTAssertEqual(groundTruth.configRepo, TinfoilConstants.pinnedNoRepo)
-        XCTAssertEqual(groundTruth.digest, "pinned_no_digest")
+        XCTAssertEqual(groundTruth.digest, TinfoilConstants.pinnedNoDigest)
         XCTAssertNil(groundTruth.releaseTag)
         XCTAssertEqual(groundTruth.enclaveFingerprint, discovered.enclaveFingerprint)
         XCTAssertEqual(groundTruth.codeFingerprint, groundTruth.enclaveFingerprint)
@@ -326,8 +326,6 @@ final class VerificationTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("invalid hardware measurements"), error.localizedDescription)
         }
     }
-
-
 
     // MARK: - Verification Document Tests
 

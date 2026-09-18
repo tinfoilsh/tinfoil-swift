@@ -17,8 +17,14 @@ public class TinfoilAI {
         attestationBundleURL: String?,
         pinnedMeasurement: AttestationMeasurement? = nil,
         hardwareMeasurements: [HardwareMeasurement] = []
-    ) -> SecureClient {
-        if let pinnedMeasurement, let enclaveURL {
+    ) throws -> SecureClient {
+        // A pin without an enclave must never degrade to release-based
+        // verification, so the invariant is enforced here rather than relying
+        // on every caller's guard.
+        if let pinnedMeasurement {
+            guard let enclaveURL else {
+                throw TinfoilError.invalidConfiguration("pinnedMeasurement requires enclaveURL")
+            }
             return SecureClient(
                 enclaveURL: enclaveURL,
                 pinnedMeasurement: pinnedMeasurement,
@@ -146,7 +152,7 @@ public class TinfoilAI {
         }
 
         let configuredEnclaveURL = enclaveURL
-        let verifier = makeVerifier(
+        let verifier = try makeVerifier(
             githubRepo: githubRepo,
             enclaveURL: configuredEnclaveURL,
             attestationBundleURL: attestationBundleURL,
@@ -171,7 +177,7 @@ public class TinfoilAI {
                 pinned: pinnedMeasurement != nil
             )
             let refreshEndpoint: EHBPVerifiedState.Refresh = {
-                let refreshVerifier = Self.makeVerifier(
+                let refreshVerifier = try Self.makeVerifier(
                     githubRepo: githubRepo,
                     enclaveURL: pinnedRefreshEnclaveURL,
                     attestationBundleURL: attestationBundleURL,
