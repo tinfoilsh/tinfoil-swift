@@ -157,7 +157,7 @@ let client = try await TinfoilAI.create(
     githubRepo: String = "tinfoilsh/confidential-model-router", // GitHub repo for verification
     attestationBundleURL: String? = nil,        // Fetch the attestation bundle from a proxy instead
     pinnedMeasurement: AttestationMeasurement? = nil, // Verify against a known measurement (see below)
-    hardwareMeasurements: [HardwareMeasurement] = [], // With pinnedMeasurement: TDX platform values to trust
+    vmShape: VMShape? = nil,                    // With pinnedMeasurement: VM shape for TDX enclaves
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
     userCacheSecret: String? = nil,             // Prompt cache scoping secret (see "Prompt Cache Scoping")
     onVerification: VerificationCallback? = nil // Verification callback
@@ -168,7 +168,7 @@ let client = try await TinfoilAI.create(
 
 ### Pinning a Measurement
 
-By default the client fetches the expected code measurement from the latest signed release of `githubRepo`. To verify against a measurement you obtained out of band instead, pin it explicitly. This skips the GitHub release lookup and Sigstore code verification, so the measurement's provenance is your responsibility; the verification document reports those steps as `skipped`.
+By default the client trusts the code measurement proven by the Sigstore code provenance carried in the enclave's attestation document. To verify against a measurement you obtained out of band instead, pin it explicitly. Only the code-provenance check is skipped: the platform endorsements and their freshness proof, the CPU quote chain, and channel binding are all still verified. The measurement's provenance is your responsibility; the verification document reports the skipped steps as `skipped`.
 
 ```swift
 let client = try await TinfoilAI.create(
@@ -180,9 +180,9 @@ let client = try await TinfoilAI.create(
 )
 ```
 
-`pinnedMeasurement` requires `enclaveURL` and cannot be combined with `githubRepo` or `attestationBundleURL`. The measurement must carry the register layout of its type (1 register for SEV-SNP, 5 for TDX, 3 for multi-platform) as 48-byte hex; a malformed pin fails verification before any network access. A five-register TDX pin also fixes the RTMR3 value the enclave must report. For TDX enclaves, `hardwareMeasurements` replaces the Sigstore-published platform values; when empty they are still fetched from Sigstore. `SecureClient(enclaveURL:pinnedMeasurement:hardwareMeasurements:)` offers the same mode for verification without the OpenAI wrapper.
+`pinnedMeasurement` requires `enclaveURL` and cannot be combined with `githubRepo` or `attestationBundleURL`. The measurement must carry the register layout of its type (1 register for SEV-SNP, 5 for TDX, 3 for multi-platform) as 48-byte hex; a malformed pin fails verification before any network access. A five-register TDX pin fixes every register including RTMR3. A TDX enclave additionally needs `vmShape` declaring the VM shape the code was built for, since the attestation document's endorsed platform measurement is resolved under that shape. `SecureClient(enclaveURL:pinnedMeasurement:vmShape:)` offers the same mode for verification without the OpenAI wrapper.
 
-Explicit enclave URLs must use HTTPS; schemeless hosts default to HTTPS. Verification and key refresh preserve the configured host and port. A non-empty `hardwareMeasurements` array without `pinnedMeasurement` is rejected.
+Explicit enclave URLs must use HTTPS; schemeless hosts default to HTTPS. Verification and key refresh preserve the configured host and port. A `vmShape` without `pinnedMeasurement` is rejected.
 
 ### Proxy Server Support
 

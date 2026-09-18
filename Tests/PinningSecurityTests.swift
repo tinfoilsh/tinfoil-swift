@@ -184,20 +184,17 @@ final class PinningSecurityTests: XCTestCase {
         }
     }
 
-    func testHardwareMeasurementsEncodeGoJSONFieldNames() throws {
-        let hardware = HardwareMeasurement(id: "platform@digest", mrtd: Self.register.uppercased(), rtmr0: Self.register)
-        let data = try JSONEncoder().encode([hardware])
-        let objects = try JSONDecoder().decode([[String: String]].self, from: data)
-        XCTAssertEqual(objects, [[
-            "ID": hardware.id,
-            "MRTD": hardware.mrtd,
-            "RTMR0": hardware.rtmr0,
-        ]])
-        let decoded = try JSONDecoder().decode([HardwareMeasurementData].self, from: data)
-        XCTAssertEqual(decoded.count, 1)
-        XCTAssertEqual(decoded.first?.id, hardware.id)
-        XCTAssertEqual(decoded.first?.mrtd, hardware.mrtd)
-        XCTAssertEqual(decoded.first?.rtmr0, hardware.rtmr0)
+    func testVMShapeEncodesGoJSONFieldNames() throws {
+        let shape = VMShape(cpus: 8, memoryMB: 32768, disks: 1, gpus: 2)
+        let data = try JSONEncoder().encode(shape)
+        let object = try JSONDecoder().decode([String: Int].self, from: data)
+        XCTAssertEqual(object, ["cpus": 8, "memory_mb": 32768, "disks": 1, "gpus": 2])
+
+        // gpus is optional in Go's policy.Shape and must be omitted, not null.
+        let noGPU = try JSONEncoder().encode(VMShape(cpus: 1, memoryMB: 1, disks: 1))
+        let noGPUObject = try JSONDecoder().decode([String: Int].self, from: noGPU)
+        XCTAssertNil(noGPUObject["gpus"])
+        XCTAssertEqual(noGPUObject.count, 3)
     }
 
     func testLegacyHardwareMeasurementsReencodeWithGoFieldNames() throws {

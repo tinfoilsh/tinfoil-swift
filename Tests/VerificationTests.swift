@@ -313,18 +313,6 @@ final class VerificationTests: XCTestCase {
             }
         }
 
-        // A nil hardware entry is rejected the same way.
-        let nilHardware = SecureClient(
-            enclaveURL: "https://enclave.example.com",
-            pinnedMeasurement: AttestationMeasurement(type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [validRegister]),
-            hardwareMeasurements: [HardwareMeasurement(id: "", mrtd: validRegister, rtmr0: validRegister)]
-        )
-        do {
-            _ = try await nilHardware.verify()
-            XCTFail("Hardware entry without an ID should be rejected")
-        } catch {
-            XCTAssertTrue(error.localizedDescription.contains("invalid hardware measurements"), error.localizedDescription)
-        }
     }
 
     // MARK: - Verification Document Tests

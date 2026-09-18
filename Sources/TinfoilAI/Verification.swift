@@ -81,7 +81,7 @@ public class SecureClient {
     private let configuredEnclaveURL: String?
     private let attestationBundleURL: String?
     private let pinnedMeasurement: AttestationMeasurement?
-    private let hardwareMeasurements: [HardwareMeasurement]
+    private let vmShape: VMShape?
     private var discoveredEnclaveURL: String?
     private var groundTruth: GroundTruth?
     private var lastVerificationDocument: VerificationDocument?
@@ -133,27 +133,28 @@ public class SecureClient {
     }
 
     /// Initialize a secure client that verifies the enclave against a
-    /// caller-supplied measurement instead of the latest signed release of a
-    /// config repo. The GitHub release lookup and Sigstore code verification
-    /// are skipped, so the measurement's provenance must be established out of
-    /// band; the verification document reports those steps as skipped.
+    /// caller-supplied measurement instead of the code provenance carried in
+    /// its attestation document. Only the code-provenance check is skipped: the
+    /// platform endorsements, their freshness proof, the CPU quote chain, and
+    /// channel binding are still verified. The measurement's provenance must be
+    /// established out of band; the verification document reports the skipped
+    /// steps as skipped.
     /// - Parameters:
     ///   - enclaveURL: URL for the enclave attestation endpoint
     ///   - pinnedMeasurement: Expected enclave code measurement
-    ///   - hardwareMeasurements: Optional TDX platform measurements that replace
-    ///     the Sigstore-published values. When empty, they are still fetched from
-    ///     Sigstore for TDX enclaves.
+    ///   - vmShape: The VM shape the pinned code was built for. Required for
+    ///     TDX enclaves, ignored for SEV-SNP.
     public convenience init(
         enclaveURL: String,
         pinnedMeasurement: AttestationMeasurement,
-        hardwareMeasurements: [HardwareMeasurement] = []
+        vmShape: VMShape? = nil
     ) {
         self.init(
             githubRepo: TinfoilConstants.pinnedNoRepo,
             configuredEnclaveURL: enclaveURL,
             attestationBundleURL: nil,
             pinnedMeasurement: pinnedMeasurement,
-            hardwareMeasurements: hardwareMeasurements
+            vmShape: vmShape
         )
     }
 
@@ -162,13 +163,13 @@ public class SecureClient {
         configuredEnclaveURL: String?,
         attestationBundleURL: String?,
         pinnedMeasurement: AttestationMeasurement? = nil,
-        hardwareMeasurements: [HardwareMeasurement] = []
+        vmShape: VMShape? = nil
     ) {
         self.githubRepo = githubRepo
         self.configuredEnclaveURL = configuredEnclaveURL
         self.attestationBundleURL = attestationBundleURL
         self.pinnedMeasurement = pinnedMeasurement
-        self.hardwareMeasurements = hardwareMeasurements
+        self.vmShape = vmShape
     }
 
     /// Creates the Go verifier for `host`, in pinned-measurement mode when a
@@ -184,12 +185,10 @@ public class SecureClient {
 
         let encoder = JSONEncoder()
         let measurementJSON = String(decoding: try encoder.encode(pinnedMeasurement), as: UTF8.self)
-        let hardwareJSON = hardwareMeasurements.isEmpty
-            ? ""
-            : String(decoding: try encoder.encode(hardwareMeasurements), as: UTF8.self)
+        let shapeJSON = try vmShape.map { String(decoding: try encoder.encode($0), as: UTF8.self) } ?? ""
 
         var error: NSError?
-        guard let client = ClientNewPinnedSecureClientJSON(host, measurementJSON, hardwareJSON, &error) else {
+        guard let client = ClientNewPinnedSecureClientJSON(host, measurementJSON, shapeJSON, &error) else {
             if let error { throw error }
             throw VerificationError.verificationFailed("Failed to create pinned secure verifier for \(host)")
         }

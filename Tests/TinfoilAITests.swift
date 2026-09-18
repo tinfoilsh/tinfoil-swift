@@ -153,11 +153,11 @@ final class TinfoilAITests: XCTestCase {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
                 enclaveURL: "https://enclave.example.com",
-                hardwareMeasurements: [HardwareMeasurement(id: "p", mrtd: "m", rtmr0: "r")]
+                vmShape: VMShape(cpus: 1, memoryMB: 1, disks: 1)
             )
-            XCTFail("hardwareMeasurements without pinnedMeasurement should be rejected")
+            XCTFail("vmShape without pinnedMeasurement should be rejected")
         } catch let error as TinfoilError {
-            XCTAssertEqual(error, .invalidConfiguration("hardwareMeasurements requires pinnedMeasurement"))
+            XCTAssertEqual(error, .invalidConfiguration("vmShape requires pinnedMeasurement"))
         }
     }
 

@@ -16,7 +16,7 @@ public class TinfoilAI {
         enclaveURL: String?,
         attestationBundleURL: String?,
         pinnedMeasurement: AttestationMeasurement? = nil,
-        hardwareMeasurements: [HardwareMeasurement] = []
+        vmShape: VMShape? = nil
     ) throws -> SecureClient {
         // A pin without an enclave must never degrade to release-based
         // verification, so the invariant is enforced here rather than relying
@@ -28,7 +28,7 @@ public class TinfoilAI {
             return SecureClient(
                 enclaveURL: enclaveURL,
                 pinnedMeasurement: pinnedMeasurement,
-                hardwareMeasurements: hardwareMeasurements
+                vmShape: vmShape
             )
         }
         if let enclaveURL {
@@ -78,9 +78,9 @@ public class TinfoilAI {
     ///     latest signed release of `githubRepo`. Skips the GitHub release lookup and Sigstore
     ///     code verification, so the measurement's provenance must be established out of band.
     ///     Requires `enclaveURL`; cannot be combined with `githubRepo` or `attestationBundleURL`.
-    ///   - hardwareMeasurements: With `pinnedMeasurement`, TDX platform measurements that
-    ///     replace the Sigstore-published values. When empty, they are still fetched from
-    ///     Sigstore for TDX enclaves. Non-empty values require `pinnedMeasurement`.
+    ///   - vmShape: With `pinnedMeasurement`, the VM shape the pinned code was built for.
+    ///     Required for TDX enclaves (the endorsed platform measurement is resolved under
+    ///     it); ignored for SEV-SNP. Rejected without `pinnedMeasurement`.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - customHeaders: Additional request headers to forward verbatim on
     ///     every outbound request (merged over the headers synthesized by
@@ -119,7 +119,7 @@ public class TinfoilAI {
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
         attestationBundleURL: String? = nil,
         pinnedMeasurement: AttestationMeasurement? = nil,
-        hardwareMeasurements: [HardwareMeasurement] = [],
+        vmShape: VMShape? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
         tinfoilEvents: Set<TinfoilEvent> = [],
@@ -147,8 +147,8 @@ public class TinfoilAI {
             guard githubRepo == TinfoilConstants.defaultGithubRepo else {
                 throw TinfoilError.invalidConfiguration("pinnedMeasurement cannot be combined with githubRepo")
             }
-        } else if !hardwareMeasurements.isEmpty {
-            throw TinfoilError.invalidConfiguration("hardwareMeasurements requires pinnedMeasurement")
+        } else if vmShape != nil {
+            throw TinfoilError.invalidConfiguration("vmShape requires pinnedMeasurement")
         }
 
         let configuredEnclaveURL = enclaveURL
@@ -157,7 +157,7 @@ public class TinfoilAI {
             enclaveURL: configuredEnclaveURL,
             attestationBundleURL: attestationBundleURL,
             pinnedMeasurement: pinnedMeasurement,
-            hardwareMeasurements: hardwareMeasurements
+            vmShape: vmShape
         )
 
         do {
@@ -182,7 +182,7 @@ public class TinfoilAI {
                     enclaveURL: pinnedRefreshEnclaveURL,
                     attestationBundleURL: attestationBundleURL,
                     pinnedMeasurement: pinnedMeasurement,
-                    hardwareMeasurements: hardwareMeasurements
+                    vmShape: vmShape
                 )
 
                 defer { onVerification?(refreshVerifier.verificationDocument) }
