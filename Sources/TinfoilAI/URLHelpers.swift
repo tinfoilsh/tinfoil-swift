@@ -2,6 +2,8 @@ import Foundation
 
 /// Helper functions for URL handling
 internal enum URLHelpers {
+    private static let validEnclavePortRange = 1...65535
+
     private static func hasSchemeWithoutAuthority(_ urlString: String) -> Bool {
         guard let separator = urlString.firstIndex(of: ":") else { return false }
         let candidate = urlString[..<separator]
@@ -57,6 +59,47 @@ internal enum URLHelpers {
                           userInfo: [NSLocalizedDescriptionKey: "Invalid HTTP(S) URL: \(urlString)"])
         }
         return components
+    }
+
+    /// Returns an HTTPS enclave origin and the host:port authority expected by Go.
+    static func parseEnclaveURL(_ urlString: String) throws -> (url: String, authority: String) {
+        guard let components = URLComponents(string: normalizeURL(urlString)),
+              components.scheme?.lowercased() == "https",
+              components.user == nil, components.password == nil,
+              let parsedURL = components.url,
+              var host = parsedURL.host, !host.isEmpty,
+              components.rangeOfPort == nil || components.port != nil,
+              components.port.map({ validEnclavePortRange.contains($0) }) ?? true else {
+            throw NSError(domain: TinfoilConstants.urlHelpersErrorDomain,
+                          code: TinfoilConstants.invalidURLErrorCode,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid enclaveURL: expected an HTTPS host with a valid port and no user information"])
+        }
+
+        if host.contains(":") {
+            if !host.hasPrefix("[") {
+                host = "[\(host)]"
+            }
+        } else {
+            host = host.lowercased()
+            while host.hasSuffix(".") {
+                host.removeLast()
+            }
+        }
+
+        var origin = URLComponents()
+        origin.scheme = "https"
+        origin.host = host
+        origin.port = components.port
+        guard !host.isEmpty, let url = origin.url else {
+            throw NSError(domain: TinfoilConstants.urlHelpersErrorDomain,
+                          code: TinfoilConstants.invalidURLErrorCode,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid enclaveURL: expected a non-empty HTTPS host"])
+        }
+
+        // URLComponents escapes IPv6 zone identifiers for the URL; Go's Host
+        // field needs the unescaped, bracketed authority instead.
+        let authority = components.port.map { "\(host):\($0)" } ?? host
+        return (url.absoluteString, authority)
     }
 
     /// Extracts the origin (scheme://host:port) from a URL string for comparison

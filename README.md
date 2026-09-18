@@ -5,7 +5,7 @@
 [![Tests](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/badge/Docs-Swift%20SDK-blue.svg)](https://docs.tinfoil.sh/sdk/swift-sdk)
 
-A secure Swift SDK for communicating with AI models running in Tinfoil's confidential computing enclaves. This SDK configures the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with additional security features including automatic enclave attestation verification and certificate pinning for direct-to-enclave encrypted communication.
+A secure Swift SDK for communicating with AI models running in Tinfoil's confidential computing enclaves. This SDK configures the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with automatic enclave attestation verification and EHBP request/response body encryption.
 
 ## Installation
 
@@ -36,7 +36,7 @@ import OpenAI
 // This automatically:
 // - Fetches an available router from Tinfoil's network
 // - Verifies the enclave is running genuine Tinfoil code
-// - Sets up certificate pinning for all requests
+// - Sets up EHBP body encryption using the attested enclave key
 let client = try await TinfoilAI.create(
     apiKey: "YOUR_API_KEY" // Optional, uses TINFOIL_API_KEY env var if not provided
 )
@@ -59,7 +59,7 @@ print(response.choices.first?.message.content ?? "No response")
 - **Automatic Router Selection**: Dynamically selects from available Tinfoil routers
 - **Enclave Verification**: Verifies code integrity via GitHub and Sigstore
 - **Remote Attestation**: Validates the enclave runtime environment (AMD SEV-SNP / Intel TDX)
-- **Certificate Pinning**: Ensures direct-to-enclave encrypted communication
+- **Attested Body Encryption**: Protects request/response bodies with EHBP, including through proxies
 - **OpenAI Compatible**: Drop-in replacement for OpenAI SDK
 
 ## Advanced Features
@@ -86,7 +86,9 @@ for try await chunk in client.chatsStream(query: chatQuery) {
 
 ### Security Architecture
 
-Tinfoil Swift combines **remote attestation** and **certificate pinning** to ensure your data only reaches verified enclave code. During setup, the SDK requests an attestation report that cryptographically proves the exact code running in the enclave and includes the enclave's TLS public key fingerprint. On every API request, the SDK validates the server's TLS certificate matches this attested fingerprint. This creates a cryptographic chain from GitHub source code → attestation → TLS connection, preventing man-in-the-middle attacks even if DNS or router selection is compromised.
+`TinfoilAI` combines **remote attestation** with **EHBP body encryption** using the enclave's attested HPKE public key. It does not pin each API request's TLS connection to the attested TLS key. EHBP protects non-empty request bodies and their encrypted responses, not HTTP headers or other transport metadata; bodyless requests do not use EHBP encryption. Use HTTPS for production proxy connections.
+
+The lower-level `SecureClient.get` and `SecureClient.post` methods instead use HTTPS with the attested TLS public-key fingerprint enforced on each connection before application data is sent. Verification alone does not establish that live TLS channel binding.
 
 #### Verification Callback
 
@@ -179,6 +181,8 @@ let client = try await TinfoilAI.create(
 ```
 
 `pinnedMeasurement` requires `enclaveURL` and cannot be combined with `githubRepo` or `attestationBundleURL`. The measurement must carry the register layout of its type (1 register for SEV-SNP, 5 for TDX, 3 for multi-platform) as 48-byte hex; a malformed pin fails verification before any network access. A five-register TDX pin also fixes the RTMR3 value the enclave must report. For TDX enclaves, `hardwareMeasurements` replaces the Sigstore-published platform values; when empty they are still fetched from Sigstore. `SecureClient(enclaveURL:pinnedMeasurement:hardwareMeasurements:)` offers the same mode for verification without the OpenAI wrapper.
+
+Explicit enclave URLs must use HTTPS; schemeless hosts default to HTTPS. Verification and key refresh preserve the configured host and port. A non-empty `hardwareMeasurements` array without `pinnedMeasurement` is rejected.
 
 ### Proxy Server Support
 

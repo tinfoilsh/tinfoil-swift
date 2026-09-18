@@ -62,7 +62,8 @@ public class TinfoilAI {
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
     ///   - enclaveURL: Optional enclave to verify and connect to. If not provided, the enclave
-    ///     is discovered from the attestation bundle. Required with `pinnedMeasurement`.
+    ///     is discovered from the attestation bundle. Explicit URLs must use HTTPS;
+    ///     schemeless hosts default to HTTPS. Required with `pinnedMeasurement`.
     ///   - githubRepo: GitHub repository containing the enclave config
     ///   - attestationBundleURL: Optional URL to fetch a precomputed attestation bundle from.
     ///     If not provided, uses the default Tinfoil endpoint. The enclave URL is discovered from
@@ -73,7 +74,7 @@ public class TinfoilAI {
     ///     Requires `enclaveURL`; cannot be combined with `githubRepo` or `attestationBundleURL`.
     ///   - hardwareMeasurements: With `pinnedMeasurement`, TDX platform measurements that
     ///     replace the Sigstore-published values. When empty, they are still fetched from
-    ///     Sigstore for TDX enclaves. Ignored without `pinnedMeasurement`.
+    ///     Sigstore for TDX enclaves. Non-empty values require `pinnedMeasurement`.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - customHeaders: Additional request headers to forward verbatim on
     ///     every outbound request (merged over the headers synthesized by

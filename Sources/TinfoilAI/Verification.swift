@@ -209,12 +209,8 @@ public class SecureClient {
     /// - Returns: The ground truth containing all verification results
     public func verify() async throws -> GroundTruth {
         do {
-            let host: String
-            if let configuredEnclaveURL = configuredEnclaveURL {
-                host = try URLHelpers.parseURL(configuredEnclaveURL).host
-            } else {
-                host = ""
-            }
+            let configuredOrigin = try configuredEnclaveURL.map { try URLHelpers.parseEnclaveURL($0) }
+            let host = configuredOrigin?.authority ?? ""
 
             let client = try makeGoClient(host: host)
             if let attestationBundleURL {
@@ -241,8 +237,10 @@ public class SecureClient {
             let decoder = JSONDecoder()
             let decodedGroundTruth = try decoder.decode(GroundTruth.self, from: groundTruthData)
             var document = try decoder.decode(VerificationDocument.self, from: verificationDocumentData)
-            if configuredEnclaveURL != nil {
-                guard decodedGroundTruth.enclaveHost?.caseInsensitiveCompare(host) == .orderedSame else {
+            let discoveredURL = decodedGroundTruth.enclaveHost.flatMap { $0.isEmpty ? nil : "https://\($0)" }
+            if let configuredOrigin {
+                guard let discoveredURL,
+                      URLHelpers.origin(from: discoveredURL) == URLHelpers.origin(from: configuredOrigin.url) else {
                     throw VerificationError.verificationFailed(
                         "Attestation bundle domain does not match configured enclave \(host)"
                     )
@@ -300,9 +298,7 @@ public class SecureClient {
             self.lastVerificationDocument = document
             self.goClient = client
 
-            if let host = groundTruth.enclaveHost, !host.isEmpty {
-                self.discoveredEnclaveURL = "https://\(host)"
-            }
+            self.discoveredEnclaveURL = configuredOrigin?.url ?? discoveredURL
 
             return groundTruth
         } catch let error as VerificationError {
@@ -342,7 +338,8 @@ public class SecureClient {
             throw VerificationError.notVerified
         }
 
-        guard let host = groundTruth.enclaveHost ?? (configuredEnclaveURL.flatMap { try? URLHelpers.parseURL($0).host }) else {
+        let configuredHost = try configuredEnclaveURL.map { try URLHelpers.parseEnclaveURL($0).authority }
+        guard let host = configuredHost ?? groundTruth.enclaveHost else {
             throw VerificationError.verificationFailed("No enclave host available")
         }
 
@@ -476,14 +473,44 @@ public class SecureClient {
     private func buildFailureDocument(error: Error, steps: VerificationDocument.Steps) {
         let host: String
         if let url = discoveredEnclaveURL ?? configuredEnclaveURL {
-            host = (try? URLHelpers.parseURL(url))?.host ?? url
+            host = (try? URLHelpers.parseEnclaveURL(url))?.authority ?? url
         } else {
             host = TinfoilConstants.unknownHost
         }
 
-        lastVerificationDocument = VerificationDocument(
+        lastVerificationDocument = Self.makeFailureDocument(
             configRepo: githubRepo,
             enclaveHost: host,
+            pinnedMeasurement: pinnedMeasurement,
+            steps: steps
+        )
+    }
+
+    internal static func makeFailureDocument(
+        configRepo: String,
+        enclaveHost: String,
+        pinnedMeasurement: AttestationMeasurement?,
+        steps: VerificationDocument.Steps
+    ) -> VerificationDocument {
+        let failureSteps: VerificationDocument.Steps
+        if pinnedMeasurement != nil {
+            failureSteps = VerificationDocument.Steps(
+                fetchDigest: .skipped(),
+                verifyCode: .skipped(),
+                verifyEnclave: steps.verifyEnclave,
+                compareMeasurements: steps.compareMeasurements,
+                verifyCertificate: steps.verifyCertificate,
+                createTransport: steps.createTransport,
+                verifyHPKEKey: steps.verifyHPKEKey,
+                otherError: steps.otherError
+            )
+        } else {
+            failureSteps = steps
+        }
+
+        return VerificationDocument(
+            configRepo: configRepo,
+            enclaveHost: enclaveHost,
             releaseDigest: pinnedMeasurement == nil ? "" : TinfoilConstants.pinnedNoDigest,
             codeMeasurement: pinnedMeasurement ?? AttestationMeasurement(type: "", registers: []),
             enclaveMeasurement: AttestationResponse(
@@ -494,9 +521,9 @@ public class SecureClient {
             hardwareMeasurement: nil,
             codeFingerprint: "",
             enclaveFingerprint: "",
-            selectedRouterEndpoint: host,
+            selectedRouterEndpoint: enclaveHost,
             securityVerified: false,
-            steps: steps
+            steps: failureSteps
         )
     }
 }
