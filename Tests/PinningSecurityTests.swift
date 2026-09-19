@@ -19,6 +19,7 @@ final class PinningSecurityTests: XCTestCase {
             ("https://[::1]", "https://[::1]", "[::1]"),
             ("https://[2001:db8::1]:443", "https://[2001:db8::1]:443", "[2001:db8::1]:443"),
             ("https://[fe80::1%25en0]:8443", "https://[fe80::1%25en0]:8443", "[fe80::1%en0]:8443"),
+            ("https://[FE80::1%25En0]:8443", "https://[fe80::1%25En0]:8443", "[fe80::1%En0]:8443"),
             ("https://bücher.example:8443", "https://xn--bcher-kva.example:8443", "xn--bcher-kva.example:8443"),
             ("https://enclave.example:1", "https://enclave.example:1", "enclave.example:1"),
             ("https://enclave.example:65535", "https://enclave.example:65535", "enclave.example:65535"),
@@ -51,6 +52,17 @@ final class PinningSecurityTests: XCTestCase {
                 XCTAssertTrue(error.localizedDescription.contains("enclaveURL"), url)
             }
         }
+    }
+
+    func testIPv6OriginNormalizationPreservesZoneIdentifiers() {
+        XCTAssertEqual(
+            URLHelpers.origin(from: "https://[FE80::1%25En0]:8443"),
+            URLHelpers.origin(from: "https://[fe80::1%25En0]:8443")
+        )
+        XCTAssertNotEqual(
+            URLHelpers.origin(from: "https://[fe80::1%25En0]:8443"),
+            URLHelpers.origin(from: "https://[fe80::1%25en0]:8443")
+        )
     }
 
     func testEnclaveOriginComparisonIncludesEffectivePort() throws {
@@ -196,13 +208,16 @@ final class PinningSecurityTests: XCTestCase {
     }
 
     func testLegacyHardwareMeasurementsReencodeWithGoFieldNames() throws {
+        let rtmr0 = String(repeating: "b", count: VerificationTestSupport.registerHexLength)
         let data = try JSONEncoder().encode([
-            "id": "platform@digest", "mrtd": Self.register, "rtmr0": Self.register,
+            "id": "platform@digest", "mrtd": Self.register, "rtmr0": rtmr0,
         ])
         let hardware = try JSONDecoder().decode(HardwareMeasurement.self, from: data)
+        XCTAssertEqual(hardware.mrtd, Self.register)
+        XCTAssertEqual(hardware.rtmr0, rtmr0)
         let encoded = try JSONEncoder().encode(hardware)
         XCTAssertEqual(try JSONDecoder().decode([String: String].self, from: encoded), [
-            "ID": hardware.id, "MRTD": hardware.mrtd, "RTMR0": hardware.rtmr0,
+            "ID": "platform@digest", "MRTD": Self.register, "RTMR0": rtmr0,
         ])
     }
 

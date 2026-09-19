@@ -166,7 +166,7 @@ final class TinfoilAITests: XCTestCase {
         )
         // So is a pinned measurement.
         XCTAssertEqual(
-            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: verified, baseURL: "https://proxy.example.com", pinned: true),
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: "https://proxy.example.com", pinned: true),
             verified
         )
     }

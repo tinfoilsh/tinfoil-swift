@@ -4,6 +4,22 @@ import Foundation
 internal enum URLHelpers {
     private static let validEnclavePortRange = 1...65535
 
+    private static func canonicalHost(_ host: String) -> String {
+        if host.contains(":") {
+            // IPv6 hexadecimal is case-insensitive; zone identifiers are not.
+            let zone = host.firstIndex(of: "%") ?? host.endIndex
+            let normalized = host[..<zone].lowercased() + host[zone...]
+            return normalized.hasPrefix("[") ? normalized : "[\(normalized)]"
+        }
+        var normalized = host.lowercased()
+        // DNS permits an absolute name to end in a dot. Remove only that
+        // suffix; a leading dot is not an equivalent host identity.
+        while normalized.hasSuffix(".") {
+            normalized.removeLast()
+        }
+        return normalized
+    }
+
     private static func hasSchemeWithoutAuthority(_ urlString: String) -> Bool {
         guard let separator = urlString.firstIndex(of: ":") else { return false }
         let candidate = urlString[..<separator]
@@ -67,7 +83,7 @@ internal enum URLHelpers {
               components.scheme?.lowercased() == "https",
               components.user == nil, components.password == nil,
               let parsedURL = components.url,
-              var host = parsedURL.host, !host.isEmpty,
+              let parsedHost = parsedURL.host, !parsedHost.isEmpty,
               components.rangeOfPort == nil || components.port != nil,
               components.port.map({ validEnclavePortRange.contains($0) }) ?? true else {
             throw NSError(domain: TinfoilConstants.urlHelpersErrorDomain,
@@ -75,16 +91,7 @@ internal enum URLHelpers {
                           userInfo: [NSLocalizedDescriptionKey: "Invalid enclaveURL: expected an HTTPS host with a valid port and no user information"])
         }
 
-        if host.contains(":") {
-            if !host.hasPrefix("[") {
-                host = "[\(host)]"
-            }
-        } else {
-            host = host.lowercased()
-            while host.hasSuffix(".") {
-                host.removeLast()
-            }
-        }
+        let host = canonicalHost(parsedHost)
 
         var origin = URLComponents()
         origin.scheme = "https"
@@ -108,15 +115,7 @@ internal enum URLHelpers {
     static func origin(from urlString: String) -> String {
         guard let components = try? parseURL(urlString) else { return "" }
         let scheme = components.scheme.lowercased()
-        var host = components.host.lowercased()
-        // DNS permits an absolute name to end in a dot. Remove only that
-        // suffix; a leading dot is not an equivalent host identity.
-        while host.hasSuffix(".") {
-            host.removeLast()
-        }
-        if host.contains(":"), !host.hasPrefix("[") {
-            host = "[\(host)]"
-        }
+        let host = canonicalHost(components.host)
         let effectivePort = components.port ?? (scheme == "https" ? 443 : 80)
         return "\(scheme)://\(host):\(effectivePort)"
     }
