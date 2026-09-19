@@ -22,7 +22,9 @@ public class TinfoilAI {
         // on every caller's guard.
         if let pinnedMeasurement {
             guard let enclaveURL else {
-                throw TinfoilError.invalidConfiguration("pinnedMeasurement requires enclaveURL")
+                throw TinfoilError.invalidConfiguration(
+                    "pinnedMeasurement requires enclaveURL: a pinned measurement cannot be verified against an auto-selected router"
+                )
             }
             return SecureClient(
                 enclaveURL: enclaveURL,
@@ -123,11 +125,6 @@ public class TinfoilAI {
         }
 
         if pinnedMeasurement != nil {
-            guard enclaveURL != nil else {
-                throw TinfoilError.invalidConfiguration(
-                    "pinnedMeasurement requires enclaveURL: a pinned measurement cannot be verified against an auto-selected router"
-                )
-            }
             guard githubRepo == TinfoilConstants.defaultGithubRepo else {
                 throw TinfoilError.invalidConfiguration("pinnedMeasurement cannot be combined with githubRepo")
             }

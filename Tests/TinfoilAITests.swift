@@ -181,6 +181,9 @@ final class TinfoilAITests: XCTestCase {
               let measurement = discovered.enclaveMeasurement else {
             throw XCTSkip("Discovery did not yield an enclave measurement")
         }
+        guard measurement.type == VerificationTestSupport.sevGuestType else {
+            throw XCTSkip("This live pinning test requires SEV-SNP; TDX needs a known VM shape")
+        }
 
         let documents = Box<[VerificationDocument?]>(value: [])
         let client = try await TinfoilAI.create(
