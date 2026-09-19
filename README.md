@@ -184,6 +184,12 @@ let client = try await TinfoilAI.create(
 
 Explicit enclave URLs must use HTTPS; schemeless hosts default to HTTPS. Verification and key refresh preserve the configured host and port. A `vmShape` without `pinnedMeasurement` is rejected.
 
+The Go verifier requires `codeFingerprint` and `enclaveFingerprint` to match
+before returning verified keys. Both use the same canonical target-platform
+measurement; for TDX this covers all five registers, including MRTD and RTMR0.
+Fingerprint equality does not replace quote authentication, platform policy,
+freshness, or channel binding.
+
 ### Proxy Server Support
 
 See the [Proxy Server Guide](https://docs.tinfoil.sh/guides/proxy-server) for routing requests through a proxy while maintaining end-to-end encryption.
