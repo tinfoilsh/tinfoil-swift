@@ -1,77 +1,112 @@
 import XCTest
 @testable import TinfoilAI
-import OpenAI
+import Tinfoil
 
 final class TinfoilIntegrationTests: XCTestCase {
+    private static let liveEnclave = "inference.tinfoil.sh"
+    private static let customRepo = "owner/repo"
+    private static let testCacheSecret = "swift-v3-integration-cache-secret"
 
-    func testCreateWithCustomAttestationBundleURL() async throws {
-        // Test that when an explicit attestation bundle URL is provided, it's used
-        // This test validates the behavior without making actual network calls
+    func testExplicitEnclavePreservesHostPortAndRepository() throws {
+        let client = SecureClient(githubRepo: Self.customRepo, enclaveURL: "https://enclave.example:8443")
+        XCTAssertNil(client.verifiedEnclaveURL)
+        let verifier = try client.makeGoClient(host: "enclave.example:8443")
+        XCTAssertEqual(verifier.enclave(), "enclave.example:8443")
+        XCTAssertEqual(verifier.repo(), Self.customRepo)
+        XCTAssertNil(verifier.groundTruth())
+    }
 
-        let customURL = "https://custom.example.com/attestation"
-
+    func testCustomRepositoryCannotUseDefaultDiscovery() async {
+        let client = SecureClient(githubRepo: Self.customRepo)
         do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                attestationBundleURL: customURL
-            )
-            XCTFail("Expected verification to fail for custom URL")
+            _ = try await client.verify()
+            XCTFail("A custom repository needs an explicit enclave")
         } catch {
-            // Expected to fail during verification, but that's OK for this test
-            // We're just testing that the URL parameter is properly handled
-            if let tinfoilError = error as? TinfoilError {
-                XCTAssertNotEqual(tinfoilError, TinfoilError.missingAPIKey)
-            }
+            XCTAssertEqual(error.localizedDescription, "A custom githubRepo requires enclaveURL")
+            XCTAssertNil(client.verifiedGroundTruth)
+            XCTAssertNil(client.verifiedEnclaveURL)
+            XCTAssertEqual(client.verificationDocument?.securityVerified, false)
+            XCTAssertEqual(client.verificationDocument?.steps.fetchDigest.status, .skipped)
+            XCTAssertEqual(client.verificationDocument?.steps.verifyCode.status, .pending)
+            XCTAssertEqual(client.verificationDocument?.steps.otherError?.status, .failed)
         }
     }
 
-    func testCreateWithDefaultAttestationEndpoint() async throws {
-        // Test that when no attestation bundle URL is provided, default Tinfoil endpoint is used
-        // This test validates the behavior without making actual network calls
-
-        do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key"
-                // No attestationBundleURL provided - should use default endpoint
+    func testPinnedFactoryCannotFallBackToDiscovery() {
+        let client = SecureClient(
+            enclaveURL: "https://enclave.example",
+            pinnedMeasurement: AttestationMeasurement(
+                type: "https://tinfoil.sh/predicate/sev-snp-guest/v2",
+                registers: [String(repeating: "ab", count: 48)]
             )
-            // If API key is valid, this may succeed - that's acceptable
-        } catch {
-            // Expected to fail (either during fetch or verification)
-            // We're validating that the default attestation path is triggered
-            if let tinfoilError = error as? TinfoilError {
-                XCTAssertNotEqual(tinfoilError, TinfoilError.missingAPIKey)
-            }
+        )
+        XCTAssertThrowsError(try client.makeGoClient(host: nil)) { error in
+            XCTAssertEqual(error.localizedDescription, "pinnedMeasurement requires enclaveURL")
         }
+    }
+
+    func testUnverifiedFallbackIsVerifiedBeforeUse() throws {
+        let fallback = try XCTUnwrap(ClientNewSecureClient(Self.liveEnclave, TinfoilConstants.defaultGithubRepo))
+        XCTAssertNil(fallback.groundTruth())
+        try SecureClient.verifyIfNeeded(fallback)
+        let verified = try XCTUnwrap(fallback.groundTruth())
+        XCTAssertFalse(verified.codeFingerprint.isEmpty)
+        XCTAssertEqual(verified.codeFingerprint, verified.enclaveFingerprint)
+
+        // A factory-selected router that was already verified is not fetched twice.
+        let verifiedAt = verified.verifiedAt
+        try SecureClient.verifyIfNeeded(fallback)
+        XCTAssertEqual(fallback.groundTruth()?.verifiedAt, verifiedAt)
+    }
+
+    func testInvalidFallbackNeverBecomesVerified() throws {
+        // A malformed authority fails request construction without network access.
+        let fallback = try XCTUnwrap(ClientNewSecureClient("invalid host", TinfoilConstants.defaultGithubRepo))
+        XCTAssertThrowsError(try SecureClient.verifyIfNeeded(fallback))
+        XCTAssertNil(fallback.groundTruth())
+    }
+
+    func testCreateWithDefaultV3Discovery() async throws {
+        let captured = Box<VerificationDocument?>(value: nil)
+        _ = try await TinfoilAI.create(
+            apiKey: "test-key",
+            userCacheSecret: Self.testCacheSecret,
+            onVerification: { captured.value = $0 }
+        )
+        let document = try XCTUnwrap(captured.value)
+        XCTAssertTrue(document.securityVerified)
+        XCTAssertEqual(document.configRepo, TinfoilConstants.defaultGithubRepo)
+        XCTAssertFalse(document.enclaveHost.isEmpty)
+        XCTAssertEqual(document.codeFingerprint, document.enclaveFingerprint)
+        XCTAssertEqual(document.steps.fetchDigest.status, .skipped)
+        XCTAssertEqual(document.steps.verifyCode.status, .success)
+    }
+
+    func testRequestProxyIsNotUsedAsAttestationEndpoint() async throws {
+        let captured = Box<VerificationDocument?>(value: nil)
+        // No application request is sent. Creation must succeed even though the
+        // local request proxy is unavailable; attestation goes to the enclave.
+        _ = try await TinfoilAI.create(
+            apiKey: "test-key",
+            baseURL: "http://127.0.0.1:1",
+            userCacheSecret: Self.testCacheSecret,
+            onVerification: { captured.value = $0 }
+        )
+        let document = try XCTUnwrap(captured.value)
+        XCTAssertTrue(document.securityVerified)
+        XCTAssertFalse(document.enclaveHost.isEmpty)
+        XCTAssertNotEqual(document.enclaveHost, "127.0.0.1:1")
+        XCTAssertEqual(document.codeFingerprint, document.enclaveFingerprint)
     }
 
     func testMissingAPIKeyError() async throws {
-        let originalValue = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
-        guard originalValue == nil else {
-            throw XCTSkip("Skipping test: TINFOIL_API_KEY is set in environment")
+        guard ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] == nil else {
+            throw XCTSkip("TINFOIL_API_KEY is set in the environment")
         }
-
         do {
             _ = try await TinfoilAI.create(apiKey: nil)
-            XCTFail("Should have thrown missingAPIKey error")
+            XCTFail("Should have thrown missingAPIKey")
         } catch TinfoilError.missingAPIKey {
-            XCTAssertTrue(true)
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-    }
-
-    func testCreateWithProxyConfiguration() async throws {
-        // Test TinfoilAI with proxy configuration (both baseURL and attestationBundleURL)
-        do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                baseURL: "http://localhost:8080",
-                attestationBundleURL: "http://localhost:8080"
-            )
-            XCTFail("Expected verification to fail for proxy URL")
-        } catch {
-            // Expected to fail during verification
-            XCTAssertNotNil(error)
         }
     }
 }

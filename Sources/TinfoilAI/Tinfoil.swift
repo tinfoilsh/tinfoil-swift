@@ -14,7 +14,6 @@ public class TinfoilAI {
     private static func makeVerifier(
         githubRepo: String,
         enclaveURL: String?,
-        attestationBundleURL: String?,
         pinnedMeasurement: AttestationMeasurement? = nil,
         vmShape: VMShape? = nil
     ) throws -> SecureClient {
@@ -31,17 +30,9 @@ public class TinfoilAI {
                 vmShape: vmShape
             )
         }
-        if let enclaveURL {
-            return SecureClient(
-                githubRepo: githubRepo,
-                enclaveURL: enclaveURL,
-                attestationBundleURL: attestationBundleURL
-                    ?? TinfoilConstants.attestationBaseURL
-            )
-        }
         return SecureClient(
             githubRepo: githubRepo,
-            attestationBundleURL: attestationBundleURL
+            enclaveURL: enclaveURL
         )
     }
 
@@ -68,16 +59,13 @@ public class TinfoilAI {
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
     ///   - enclaveURL: Optional enclave to verify and connect to. If not provided, the enclave
-    ///     is discovered from the attestation bundle. Explicit URLs must use HTTPS;
+    ///     is selected by the Go verifier's router discovery. Explicit URLs must use HTTPS;
     ///     schemeless hosts default to HTTPS. Required with `pinnedMeasurement`.
-    ///   - githubRepo: GitHub repository containing the enclave config
-    ///   - attestationBundleURL: Optional URL to fetch a precomputed attestation bundle from.
-    ///     If not provided, uses the default Tinfoil endpoint. The enclave URL is discovered from
-    ///     the attestation bundle during verification.
+    ///   - githubRepo: Expected code-provenance repository. Custom repositories require `enclaveURL`.
     ///   - pinnedMeasurement: Verify the enclave against this measurement instead of the
-    ///     latest signed release of `githubRepo`. Skips the GitHub release lookup and Sigstore
-    ///     code verification, so the measurement's provenance must be established out of band.
-    ///     Requires `enclaveURL`; cannot be combined with `githubRepo` or `attestationBundleURL`.
+    ///     signed code provenance in the v3 document. The pin's provenance must be established
+    ///     out of band; platform endorsements, freshness, and quote verification still run.
+    ///     Requires `enclaveURL`; cannot be combined with a custom `githubRepo`.
     ///   - vmShape: With `pinnedMeasurement`, the VM shape the pinned code was built for.
     ///     Required for TDX enclaves (the endorsed platform measurement is resolved under
     ///     it); ignored for SEV-SNP. Rejected without `pinnedMeasurement`.
@@ -107,9 +95,9 @@ public class TinfoilAI {
     ///     before replaying the request.
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     ///
-    /// When using a proxy, set both `baseURL` and `attestationBundleURL` to your proxy server
-    /// (e.g., "http://localhost:8080"). The SDK will fetch the attestation bundle through the proxy,
-    /// verify the enclave, and encrypt requests with EHBP. The proxy receives the `X-Tinfoil-Enclave-Url`
+    /// When using a proxy, set `baseURL` to your proxy server. Attestation is fetched directly
+    /// from the configured or discovered enclave using a fresh nonce. The SDK encrypts requests
+    /// with EHBP. The proxy receives the `X-Tinfoil-Enclave-Url`
     /// header to know where to forward requests.
     public static func create(
         apiKey: String? = nil,
@@ -117,7 +105,6 @@ public class TinfoilAI {
         baseURL: String? = nil,
         enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
-        attestationBundleURL: String? = nil,
         pinnedMeasurement: AttestationMeasurement? = nil,
         vmShape: VMShape? = nil,
         parsingOptions: ParsingOptions = .relaxed,
@@ -141,9 +128,6 @@ public class TinfoilAI {
                     "pinnedMeasurement requires enclaveURL: a pinned measurement cannot be verified against an auto-selected router"
                 )
             }
-            guard attestationBundleURL == nil else {
-                throw TinfoilError.invalidConfiguration("pinnedMeasurement cannot be combined with attestationBundleURL")
-            }
             guard githubRepo == TinfoilConstants.defaultGithubRepo else {
                 throw TinfoilError.invalidConfiguration("pinnedMeasurement cannot be combined with githubRepo")
             }
@@ -155,7 +139,6 @@ public class TinfoilAI {
         let verifier = try makeVerifier(
             githubRepo: githubRepo,
             enclaveURL: configuredEnclaveURL,
-            attestationBundleURL: attestationBundleURL,
             pinnedMeasurement: pinnedMeasurement,
             vmShape: vmShape
         )
@@ -180,7 +163,6 @@ public class TinfoilAI {
                 let refreshVerifier = try Self.makeVerifier(
                     githubRepo: githubRepo,
                     enclaveURL: pinnedRefreshEnclaveURL,
-                    attestationBundleURL: attestationBundleURL,
                     pinnedMeasurement: pinnedMeasurement,
                     vmShape: vmShape
                 )

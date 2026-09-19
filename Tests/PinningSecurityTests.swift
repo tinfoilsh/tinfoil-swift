@@ -115,11 +115,11 @@ final class PinningSecurityTests: XCTestCase {
         }
         failures += [
             "invalid pinned measurement: wrong register count",
-            "invalid hardware measurements: missing ID",
-            "verifyEnclave: invalid report",
-            "verifyHardware: no matching platform",
+            "reference values: verifying platform endorsements: invalid signature",
+            "cpu evidence: invalid report",
+            "cpu evidence: no matching platform",
             "measurements: mismatch",
-            "verifyCertificate: binding failed",
+            "binding: missing key",
         ].map { SecureClient.stepsFromError($0, pinnedMeasurement: true) }
         failures.append(.init(
             verifyEnclave: .success(),
@@ -166,22 +166,20 @@ final class PinningSecurityTests: XCTestCase {
     }
 
     func testNonPinnedFailureDocumentsPreserveFailedCodeVerification() {
-        let error = "verifyCode: invalid signature"
-        for usesBundle in [false, true] {
-            let steps = SecureClient.stepsFromError(error, usesBundle: usesBundle)
-            let document = SecureClient.makeFailureDocument(
-                configRepo: "owner/repo",
-                enclaveHost: "enclave.example",
-                pinnedMeasurement: nil,
-                steps: steps
-            )
-            XCTAssertFalse(document.securityVerified)
-            XCTAssertEqual(document.steps.fetchDigest.status, usesBundle ? .skipped : .success)
-            XCTAssertEqual(document.steps.verifyCode.status, .failed)
-            XCTAssertEqual(document.steps.verifyCode.error, error)
-            XCTAssertTrue(document.releaseDigest.isEmpty)
-            XCTAssertTrue(document.codeMeasurement.registers.isEmpty)
-        }
+        let error = "reference values: verifying code measurement: invalid signature"
+        let steps = SecureClient.stepsFromError(error)
+        let document = SecureClient.makeFailureDocument(
+            configRepo: "owner/repo",
+            enclaveHost: "enclave.example",
+            pinnedMeasurement: nil,
+            steps: steps
+        )
+        XCTAssertFalse(document.securityVerified)
+        XCTAssertEqual(document.steps.fetchDigest.status, .skipped)
+        XCTAssertEqual(document.steps.verifyCode.status, .failed)
+        XCTAssertEqual(document.steps.verifyCode.error, error)
+        XCTAssertTrue(document.releaseDigest.isEmpty)
+        XCTAssertTrue(document.codeMeasurement.registers.isEmpty)
     }
 
     func testVMShapeEncodesGoJSONFieldNames() throws {

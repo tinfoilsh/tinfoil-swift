@@ -57,7 +57,7 @@ print(response.choices.first?.message.content ?? "No response")
 ## Key Features
 
 - **Automatic Router Selection**: Dynamically selects from available Tinfoil routers
-- **Enclave Verification**: Verifies code integrity via GitHub and Sigstore
+- **Enclave Verification**: Verifies code and platform provenance carried in the v3 attestation document
 - **Remote Attestation**: Validates the enclave runtime environment (AMD SEV-SNP / Intel TDX)
 - **Attested Body Encryption**: Protects request/response bodies with EHBP, including through proxies
 - **OpenAI Compatible**: Drop-in replacement for OpenAI SDK
@@ -89,6 +89,11 @@ for try await chunk in client.chatsStream(query: chatQuery) {
 `TinfoilAI` combines **remote attestation** with **EHBP body encryption** using the enclave's attested HPKE public key. It does not pin each API request's TLS connection to the attested TLS key. EHBP protects non-empty request bodies and their encrypted responses, not HTTP headers or other transport metadata; bodyless requests do not use EHBP encryption. Use HTTPS for production proxy connections.
 
 The lower-level `SecureClient.get` and `SecureClient.post` methods instead use HTTPS with the attested TLS public-key fingerprint enforced on each connection before application data is sent. Verification alone does not establish that live TLS channel binding.
+
+The Go verifier selects a router, or uses the configured `enclaveURL`, and
+fetches its v3 attestation document with a fresh nonce. An unverified discovery
+fallback is verified before its keys can be used. Custom `githubRepo` values
+require an explicit `enclaveURL`.
 
 #### Verification Callback
 
@@ -155,7 +160,6 @@ let client = try await TinfoilAI.create(
     baseURL: String? = nil,             // Proxy server URL (requests go directly to enclave if nil)
     enclaveURL: String? = nil,          // Custom enclave URL (auto-selects router if nil)
     githubRepo: String = "tinfoilsh/confidential-model-router", // GitHub repo for verification
-    attestationBundleURL: String? = nil,        // Fetch the attestation bundle from a proxy instead
     pinnedMeasurement: AttestationMeasurement? = nil, // Verify against a known measurement (see below)
     vmShape: VMShape? = nil,                    // With pinnedMeasurement: VM shape for TDX enclaves
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
@@ -180,7 +184,7 @@ let client = try await TinfoilAI.create(
 )
 ```
 
-`pinnedMeasurement` requires `enclaveURL` and cannot be combined with `githubRepo` or `attestationBundleURL`. The measurement must carry the register layout of its type (1 register for SEV-SNP, 5 for TDX, 3 for multi-platform) as 48-byte hex; a malformed pin fails verification before any network access. A five-register TDX pin fixes every register including RTMR3. A TDX enclave additionally needs `vmShape` declaring the VM shape the code was built for, since the attestation document's endorsed platform measurement is resolved under that shape. `SecureClient(enclaveURL:pinnedMeasurement:vmShape:)` offers the same mode for verification without the OpenAI wrapper.
+`pinnedMeasurement` requires `enclaveURL` and cannot be combined with a custom `githubRepo`. The measurement must carry the register layout of its type (1 register for SEV-SNP, 5 for TDX, 3 for multi-platform) as 48-byte hex; a malformed pin fails verification before any network access. A five-register TDX pin fixes every register including RTMR3. A TDX enclave additionally needs `vmShape` declaring the VM shape the code was built for, since the attestation document's endorsed platform measurement is resolved under that shape. `SecureClient(enclaveURL:pinnedMeasurement:vmShape:)` offers the same mode for verification without the OpenAI wrapper.
 
 Explicit enclave URLs must use HTTPS; schemeless hosts default to HTTPS. Verification and key refresh preserve the configured host and port. A `vmShape` without `pinnedMeasurement` is rejected.
 
@@ -192,7 +196,19 @@ freshness, or channel binding.
 
 ### Proxy Server Support
 
+Set `baseURL` to forward application requests through a proxy. Verification
+still contacts the configured or discovered enclave directly with a fresh
+nonce. The proxy receives the verified enclave URL in `X-Tinfoil-Enclave-Url`.
+
 See the [Proxy Server Guide](https://docs.tinfoil.sh/guides/proxy-server) for routing requests through a proxy while maintaining end-to-end encryption.
+
+### Migrating from attestation bundles
+
+The v3 client removes `attestationBundleURL`, its `SecureClient` initializer
+overloads, and the bundle endpoint constants. A precomputed bundle cannot
+answer the fresh nonce generated for v3 verification. Omit `enclaveURL` for
+default router discovery, or set it for a specific deployment. Use `baseURL`
+only for the application-request proxy; it does not redirect attestation.
 
 ## API Documentation
 
@@ -204,7 +220,7 @@ For complete documentation, see:
 
 ## Requirements
 
-- iOS 17.0+ / macOS 12.0+
+- iOS 17.0+ / macOS 14.0+
 - Swift 5.9+
 - Xcode 15.0+
 

@@ -7,7 +7,7 @@ final class VerificationTests: XCTestCase {
     // MARK: - New Verification Format Tests
 
     func testNewVerificationFormatFields() async throws {
-        // Use SecureClient with default attestation bundle flow
+        // Use SecureClient with default v3 router discovery.
         let secureClient = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
 
         do {
@@ -22,7 +22,7 @@ final class VerificationTests: XCTestCase {
             // Verify HPKE public key exists (may be empty for some configurations)
             XCTAssertNotNil(groundTruth.hpkePublicKey, "HPKE public key field should exist")
 
-            // Verify enclave host is populated from attestation bundle
+            // Verify the selected enclave host is retained.
             XCTAssertNotNil(groundTruth.enclaveHost, "Enclave host should exist")
             XCTAssertFalse(groundTruth.enclaveHost?.isEmpty ?? true, "Enclave host should not be empty")
 
@@ -63,7 +63,7 @@ final class VerificationTests: XCTestCase {
         // Test 1: Invalid attestation URL that should fail early
         let invalidClient = SecureClient(
             githubRepo: TinfoilConstants.defaultGithubRepo,
-            attestationBundleURL: "https://invalid-attestation-12345.example.com"
+            enclaveURL: "http://invalid-attestation-12345.example.com"
         )
 
         do {
@@ -75,7 +75,7 @@ final class VerificationTests: XCTestCase {
             XCTAssertFalse(verificationDoc?.securityVerified ?? true, "Security should not be verified")
         }
 
-        // Test 2: Invalid GitHub repo that should fail during code verification
+        // Test 2: A custom repository must not fall back to default-repo discovery.
         let invalidRepoClient = SecureClient(
             githubRepo: "invalid-org/non-existent-repo"
         )
@@ -160,14 +160,16 @@ final class VerificationTests: XCTestCase {
     func testErrorMessageParsing() {
         // Test error prefix detection logic
         let testCases: [(error: String, expectedStep: String)] = [
-            ("fetchDigest: failed to connect", "fetchDigest"),
-            ("fetchBundle: connection refused", "fetchDigest"),
-            ("failed to fetch bundle: connection refused", "fetchDigest"),
-            ("verifyCode: invalid repository", "verifyCode"),
-            ("verifyEnclave: measurement mismatch", "verifyEnclave"),
-            ("verifyHardware: TDX attestation failed", "compareMeasurements"),
-            ("validateTLS: certificate invalid", "verifyCertificate"),
-            ("verifyCertificate: binding failed", "verifyCertificate"),
+            ("fetching attestation document: connection refused", "other"),
+            ("generating nonce: entropy unavailable", "other"),
+            ("envelope: nonce mismatch", "other"),
+            ("reference values: verifying code measurement: invalid signature", "verifyCode"),
+            ("reference values: verifying code freshness: stale witness", "verifyCode"),
+            ("reference values: verifying platform endorsements: invalid signature", "other"),
+            ("cpu evidence: invalid signature", "verifyEnclave"),
+            ("cpu evidence: unknown platform", "verifyEnclave"),
+            ("cpu evidence: report field MEASUREMENT differs", "verifyEnclave"),
+            ("binding: missing tls key", "verifyCertificate"),
             ("measurements: comparison failed", "compareMeasurements"),
             ("unknown error without prefix", "other")
         ]
@@ -185,31 +187,37 @@ final class VerificationTests: XCTestCase {
             XCTAssertEqual(failedStep, testCase.expectedStep)
         }
 
-        let bundleCodeFailure = SecureClient.stepsFromError(
-            "verifyCode: invalid signature",
-            usesBundle: true
+        let codeFailure = SecureClient.stepsFromError(
+            "reference values: verifying code measurement: invalid signature"
         )
-        XCTAssertEqual(bundleCodeFailure.fetchDigest.status, .skipped)
-        XCTAssertEqual(bundleCodeFailure.verifyCode.status, .failed)
+        XCTAssertEqual(codeFailure.fetchDigest.status, .skipped)
+        XCTAssertEqual(codeFailure.verifyCode.status, .failed)
 
-        let bundleFetchFailure = SecureClient.stepsFromError(
-            "fetchBundle: connection refused",
-            usesBundle: true
+        let fetchFailure = SecureClient.stepsFromError(
+            "fetching attestation document: connection refused"
         )
-        XCTAssertEqual(bundleFetchFailure.fetchDigest.status, .skipped)
-        XCTAssertEqual(bundleFetchFailure.otherError?.status, .failed)
+        XCTAssertEqual(fetchFailure.fetchDigest.status, .skipped)
+        XCTAssertEqual(fetchFailure.verifyCode.status, .pending)
+        XCTAssertEqual(fetchFailure.otherError?.status, .failed)
+
+        let platformFailure = SecureClient.stepsFromError(
+            "reference values: verifying platform freshness: expired witness"
+        )
+        XCTAssertEqual(platformFailure.verifyCode.status, .success)
+        XCTAssertEqual(platformFailure.verifyEnclave.status, .pending)
+        XCTAssertEqual(platformFailure.otherError?.status, .failed)
 
         let pinnedMismatch = SecureClient.stepsFromError(
-            "measurements: measurement mismatch",
+            "cpu evidence: report field MEASUREMENT differs",
             pinnedMeasurement: true
         )
         XCTAssertEqual(pinnedMismatch.fetchDigest.status, .skipped)
         XCTAssertEqual(pinnedMismatch.verifyCode.status, .skipped)
-        XCTAssertEqual(pinnedMismatch.verifyEnclave.status, .success)
-        XCTAssertEqual(pinnedMismatch.compareMeasurements.status, .failed)
+        XCTAssertEqual(pinnedMismatch.verifyEnclave.status, .failed)
+        XCTAssertEqual(pinnedMismatch.compareMeasurements.status, .pending)
 
         let pinnedEnclaveFailure = SecureClient.stepsFromError(
-            "verifyEnclave: bad report",
+            "cpu evidence: bad report",
             pinnedMeasurement: true
         )
         XCTAssertEqual(pinnedEnclaveFailure.fetchDigest.status, .skipped)
@@ -222,15 +230,14 @@ final class VerificationTests: XCTestCase {
     func testPinnedMeasurementVerification() async throws {
         // Learn a live enclave's measurement through the normal Sigstore-backed flow.
         let discovery = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
-        let discovered: GroundTruth
-        do {
-            discovered = try await discovery.verify()
-        } catch {
-            throw XCTSkip("Network verification unavailable: \(error)")
-        }
+        let discovered = try await discovery.verify()
         guard let enclaveURL = discovery.verifiedEnclaveURL,
               let measurement = discovered.enclaveMeasurement else {
-            throw XCTSkip("Discovery did not yield an enclave measurement")
+            XCTFail("Discovery did not yield an enclave measurement")
+            return
+        }
+        guard measurement.type == "https://tinfoil.sh/predicate/sev-snp-guest/v2" else {
+            throw XCTSkip("This live pinning test requires SEV-SNP; TDX needs a known VM shape")
         }
 
         let pinned = SecureClient(
@@ -256,8 +263,8 @@ final class VerificationTests: XCTestCase {
         XCTAssertEqual(document?.allStepsSucceeded, true)
 
         // Attested requests work against the pinned enclave.
-        let response = try await pinned.get(url: "/.well-known/tinfoil-attestation")
-        XCTAssertEqual(response.statusCode, 200)
+        let response = try await pinned.get(url: "/v1/models")
+        XCTAssertTrue([200, 401].contains(response.statusCode))
 
         // A tampered pin is rejected at measurement comparison. Flip the first
         // nibble so the value is guaranteed to differ while staying valid hex.
@@ -272,20 +279,20 @@ final class VerificationTests: XCTestCase {
             _ = try await tampered.verify()
             XCTFail("Tampered pinned measurement should be rejected")
         } catch {
-            XCTAssertTrue(error.localizedDescription.contains("measurements:"), error.localizedDescription)
+            XCTAssertTrue(error.localizedDescription.hasPrefix("cpu evidence:"), error.localizedDescription)
             let failure = tampered.verificationDocument
             XCTAssertEqual(failure?.securityVerified, false)
             XCTAssertEqual(failure?.configRepo, TinfoilConstants.pinnedNoRepo)
             XCTAssertEqual(failure?.steps.fetchDigest.status, .skipped)
             XCTAssertEqual(failure?.steps.verifyCode.status, .skipped)
-            XCTAssertEqual(failure?.steps.compareMeasurements.status, .failed)
+            XCTAssertEqual(failure?.steps.verifyEnclave.status, .failed)
+            XCTAssertNil(tampered.verifiedGroundTruth)
+            XCTAssertNil(tampered.verifiedEnclaveURL)
         }
     }
 
     func testPinnedMeasurementRejectsMalformedMeasurement() async throws {
         let validRegister = String(repeating: "a", count: 96)
-        // The gomobile Tinfoil module also exports an AttestationMeasurement
-        // class, so let the element type be inferred from the Swift struct init.
         let malformed = [
             ("empty", AttestationMeasurement(type: "", registers: [])),
             ("short register", AttestationMeasurement(type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: ["abc"])),

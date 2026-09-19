@@ -99,7 +99,7 @@ final class TinfoilAITests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                attestationBundleURL: "https://invalid-attestation-12345.example.com"
+                enclaveURL: "http://invalid-attestation-12345.example.com"
             )
             XCTFail("Should have failed with invalid attestation URL")
         } catch {
@@ -123,18 +123,6 @@ final class TinfoilAITests: XCTestCase {
                     "pinnedMeasurement requires enclaveURL: a pinned measurement cannot be verified against an auto-selected router"
                 )
             )
-        }
-
-        do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                enclaveURL: "https://enclave.example.com",
-                attestationBundleURL: "https://atc.example.com",
-                pinnedMeasurement: measurement
-            )
-            XCTFail("pinnedMeasurement with attestationBundleURL should be rejected")
-        } catch let error as TinfoilError {
-            XCTAssertEqual(error, .invalidConfiguration("pinnedMeasurement cannot be combined with attestationBundleURL"))
         }
 
         do {
@@ -367,7 +355,7 @@ final class TinfoilAITests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                attestationBundleURL: "https://invalid-attestation-12345.example.com",
+                enclaveURL: "http://invalid-attestation-12345.example.com",
                 onVerification: { document in
                     capturedDocument.value = document
                 }
@@ -409,7 +397,7 @@ final class TinfoilAITests: XCTestCase {
     }
 
     func testNewGroundTruthFieldsIntegration() async throws {
-        // Use SecureClient with default attestation bundle flow
+        // Use SecureClient with default v3 router discovery.
         let secureClient = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
 
         do {
@@ -422,7 +410,7 @@ final class TinfoilAITests: XCTestCase {
             XCTAssertFalse(groundTruth.codeFingerprint.isEmpty, "Code fingerprint should exist")
             XCTAssertFalse(groundTruth.enclaveFingerprint.isEmpty, "Enclave fingerprint should exist")
 
-            // Verify enclave host is populated from attestation bundle
+            // Verify the selected enclave host is retained.
             XCTAssertNotNil(groundTruth.enclaveHost, "Enclave host should exist")
             XCTAssertFalse(groundTruth.enclaveHost?.isEmpty ?? true, "Enclave host should not be empty")
 
@@ -439,7 +427,6 @@ final class TinfoilAITests: XCTestCase {
 
             // Hardware measurement may or may not exist depending on platform
             if let hwMeasurement = groundTruth.hardwareMeasurement {
-                XCTAssertFalse(hwMeasurement.id.isEmpty, "Hardware ID should exist if present")
                 XCTAssertFalse(hwMeasurement.mrtd.isEmpty, "MRTD should exist if present")
                 XCTAssertFalse(hwMeasurement.rtmr0.isEmpty, "RTMR0 should exist if present")
             }
