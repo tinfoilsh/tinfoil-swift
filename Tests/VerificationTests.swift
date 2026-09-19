@@ -228,6 +228,7 @@ final class VerificationTests: XCTestCase {
     // MARK: - Pinned Measurement Tests
 
     func testPinnedMeasurementVerification() async throws {
+        try VerificationTestSupport.requireLiveAttestation()
         // Learn a live enclave's measurement through the normal Sigstore-backed flow.
         let discovery = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
         let discovered = try await discovery.verify()
@@ -236,7 +237,7 @@ final class VerificationTests: XCTestCase {
             XCTFail("Discovery did not yield an enclave measurement")
             return
         }
-        guard measurement.type == "https://tinfoil.sh/predicate/sev-snp-guest/v2" else {
+        guard measurement.type == VerificationTestSupport.sevGuestType else {
             throw XCTSkip("This live pinning test requires SEV-SNP; TDX needs a known VM shape")
         }
 
@@ -292,11 +293,11 @@ final class VerificationTests: XCTestCase {
     }
 
     func testPinnedMeasurementRejectsMalformedMeasurement() async throws {
-        let validRegister = String(repeating: "a", count: 96)
+        let validRegister = String(repeating: "a", count: VerificationTestSupport.registerHexLength)
         let malformed = [
             ("empty", AttestationMeasurement(type: "", registers: [])),
-            ("short register", AttestationMeasurement(type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: ["abc"])),
-            ("wrong count", AttestationMeasurement(type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: [validRegister, validRegister])),
+            ("short register", AttestationMeasurement(type: VerificationTestSupport.sevGuestType, registers: ["abc"])),
+            ("wrong count", AttestationMeasurement(type: VerificationTestSupport.sevGuestType, registers: [validRegister, validRegister])),
             ("unsupported type", AttestationMeasurement(type: "https://tinfoil.sh/predicate/unknown/v1", registers: [validRegister])),
         ]
         for (name, pin) in malformed {

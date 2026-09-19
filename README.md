@@ -224,6 +224,14 @@ For complete documentation, see:
 - Swift 5.9+
 - Xcode 15.0+
 
+## Live attestation tests
+
+The new v3 discovery and pinning integration tests are opt-in. Set
+`TINFOIL_RUN_ATTESTATION_INTEGRATION=1` when running `swift test`, or enable
+`attestation_integration` in a manual Test workflow run. When enabled, verification
+failures fail the tests rather than being converted into skips. Other existing
+live tests retain their own API-key or network requirements.
+
 ## Reporting Vulnerabilities
 
 Please report security vulnerabilities by emailing [security@tinfoil.sh](mailto:security@tinfoil.sh).

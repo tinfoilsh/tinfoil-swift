@@ -95,17 +95,15 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertFalse(response.choices.isEmpty, "Request should succeed with EHBP encryption")
     }
 
-    func testVerificationFailureWithInvalidAttestationURL() async throws {
+    func testRejectsNonHTTPSEnclaveConfiguration() async throws {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
                 enclaveURL: "http://invalid-attestation-12345.example.com"
             )
-            XCTFail("Should have failed with invalid attestation URL")
+            XCTFail("Should reject a non-HTTPS enclave configuration")
         } catch {
-            // Expected - verification should reject invalid attestation URL
-            // Error may be VerificationError or NSError from Go bindings
-            XCTAssertNotNil(error)
+            XCTAssertTrue(error.localizedDescription.contains("Invalid enclaveURL"), error.localizedDescription)
         }
     }
 
@@ -348,9 +346,8 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertFalse(response.choices.isEmpty, "Should receive response after verification")
     }
 
-    func testVerificationFailureCallbackWithNewFormat() async throws {
+    func testInvalidEnclaveConfigurationProducesFailureCallback() async throws {
         let capturedDocument = Box<VerificationDocument?>(value: nil)
-        var verificationFailed = false
 
         do {
             _ = try await TinfoilAI.create(
@@ -360,40 +357,18 @@ final class TinfoilAITests: XCTestCase {
                     capturedDocument.value = document
                 }
             )
-            XCTFail("Should have failed with invalid attestation URL")
+            XCTFail("Should reject a non-HTTPS enclave configuration")
         } catch {
-            verificationFailed = true
-
-            // Verify that document was still captured on failure
-            XCTAssertNotNil(capturedDocument.value, "Verification document should be captured even on failure")
-
-            if let doc = capturedDocument.value {
-                XCTAssertFalse(doc.securityVerified, "Security should not be verified on failure")
-
-                // At least one step should be failed or pending
-                var hasNonSuccessStep = false
-
-                if doc.steps.fetchDigest.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                if doc.steps.verifyCode.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                if doc.steps.verifyEnclave.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                if doc.steps.compareMeasurements.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                XCTAssertTrue(hasNonSuccessStep, "At least one step should not be successful on failure")
-            }
+            XCTAssertTrue(error.localizedDescription.contains("Invalid enclaveURL"), error.localizedDescription)
         }
-
-        XCTAssertTrue(verificationFailed, "Verification should have failed")
+        let document = try XCTUnwrap(capturedDocument.value)
+        XCTAssertFalse(document.securityVerified)
+        XCTAssertEqual(document.steps.fetchDigest.status, .skipped)
+        XCTAssertEqual(document.steps.verifyCode.status, .pending)
+        XCTAssertEqual(document.steps.verifyEnclave.status, .pending)
+        XCTAssertEqual(document.steps.compareMeasurements.status, .pending)
+        XCTAssertEqual(document.steps.otherError?.status, .failed)
+        XCTAssertTrue(document.steps.otherError?.error?.contains("Invalid enclaveURL") == true)
     }
 
     func testNewGroundTruthFieldsIntegration() async throws {

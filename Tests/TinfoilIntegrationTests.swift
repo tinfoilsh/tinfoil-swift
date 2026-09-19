@@ -36,8 +36,8 @@ final class TinfoilIntegrationTests: XCTestCase {
         let client = SecureClient(
             enclaveURL: "https://enclave.example",
             pinnedMeasurement: AttestationMeasurement(
-                type: "https://tinfoil.sh/predicate/sev-snp-guest/v2",
-                registers: [String(repeating: "ab", count: 48)]
+                type: VerificationTestSupport.sevGuestType,
+                registers: [String(repeating: "a", count: VerificationTestSupport.registerHexLength)]
             )
         )
         XCTAssertThrowsError(try client.makeGoClient(host: nil)) { error in
@@ -46,6 +46,7 @@ final class TinfoilIntegrationTests: XCTestCase {
     }
 
     func testUnverifiedFallbackIsVerifiedBeforeUse() throws {
+        try VerificationTestSupport.requireLiveAttestation()
         let fallback = try XCTUnwrap(ClientNewSecureClient(Self.liveEnclave, TinfoilConstants.defaultGithubRepo))
         XCTAssertNil(fallback.groundTruth())
         try SecureClient.verifyIfNeeded(fallback)
@@ -67,6 +68,7 @@ final class TinfoilIntegrationTests: XCTestCase {
     }
 
     func testCreateWithDefaultV3Discovery() async throws {
+        try VerificationTestSupport.requireLiveAttestation()
         let captured = Box<VerificationDocument?>(value: nil)
         _ = try await TinfoilAI.create(
             apiKey: "test-key",
@@ -83,6 +85,7 @@ final class TinfoilIntegrationTests: XCTestCase {
     }
 
     func testRequestProxyIsNotUsedAsAttestationEndpoint() async throws {
+        try VerificationTestSupport.requireLiveAttestation()
         let captured = Box<VerificationDocument?>(value: nil)
         // No application request is sent. Creation must succeed even though the
         // local request proxy is unavailable; attestation goes to the enclave.

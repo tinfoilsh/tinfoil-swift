@@ -3,9 +3,9 @@ import XCTest
 @testable import TinfoilAI
 
 final class PinningSecurityTests: XCTestCase {
-    private static let register = String(repeating: "ab", count: 48)
+    private static let register = String(repeating: "a", count: VerificationTestSupport.registerHexLength)
     private static let pin = AttestationMeasurement(
-        type: "https://tinfoil.sh/predicate/sev-snp-guest/v2",
+        type: VerificationTestSupport.sevGuestType,
         registers: [register]
     )
 
