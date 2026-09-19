@@ -6,14 +6,13 @@ public enum TinfoilConstants {
     /// Default GitHub repository for the inference proxy
     public static let defaultGithubRepo = "tinfoilsh/confidential-model-router"
 
-    /// Base URL for Tinfoil's attestation bundle
-    public static let attestationBaseURL = "https://atc.tinfoil.sh"
-
-    /// Default URL for fetching attestation bundles
-    public static let defaultAttestationBundleURL = "\(attestationBaseURL)/attestation"
-
     /// Placeholder for unknown host values
     internal static let unknownHost = "unknown"
+
+    /// Sentinels reported by the verifier when the expected measurement was
+    /// pinned by the caller instead of derived from a release.
+    public static let pinnedNoRepo = "pinned_no_repo"
+    public static let pinnedNoDigest = "pinned_no_digest"
 
     /// Verifier implementation embedded by this SDK release
     public static let verifierName = "tinfoil-go"

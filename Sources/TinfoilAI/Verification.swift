@@ -16,14 +16,25 @@ public struct SecureResponse: Sendable {
 }
 
 /// Errors that can occur during verification
-public enum VerificationError: Error {
+public enum VerificationError: LocalizedError {
     case verificationFailed(String)
     case jsonDecodingFailed(String)
     case notVerified
     case unknown(Error)
+
+    public var errorDescription: String? {
+        switch self {
+        case .verificationFailed(let message), .jsonDecodingFailed(let message):
+            return message
+        case .notVerified:
+            return "The enclave has not been verified"
+        case .unknown(let error):
+            return error.localizedDescription
+        }
+    }
 }
 
-/// Measurement structure matching Go's attestation.Measurement
+/// Measurement structure matching Go's measurement.Measurement
 public struct Measurement: Codable {
     public let type: String
     public let registers: [String]
@@ -79,69 +90,113 @@ public struct GroundTruth: Codable {
 public class SecureClient {
     private let githubRepo: String
     private let configuredEnclaveURL: String?
-    private let attestationBundleURL: String?
+    private let pinnedMeasurement: AttestationMeasurement?
+    private let vmShape: VMShape?
     private var discoveredEnclaveURL: String?
     private var groundTruth: GroundTruth?
     private var lastVerificationDocument: VerificationDocument?
     private var goClient: ClientSecureClient?
 
-    /// Initialize a secure client for direct enclave verification
+    /// Initialize a secure client for v3 verification.
     /// - Parameters:
     ///   - githubRepo: GitHub repository in the format "org/repo"
+    ///   - enclaveURL: Explicit enclave origin, or nil for default router discovery.
+    ///     Custom repositories require an explicit enclave.
+    public convenience init(
+        githubRepo: String = TinfoilConstants.defaultGithubRepo,
+        enclaveURL: String? = nil
+    ) {
+        self.init(
+            githubRepo: githubRepo,
+            configuredEnclaveURL: enclaveURL
+        )
+    }
+
+    /// Initialize a secure client that verifies the enclave against a
+    /// caller-supplied measurement instead of the code provenance carried in
+    /// its attestation document. Only the code-provenance check is skipped: the
+    /// platform endorsements, their freshness proof, the CPU quote chain, and
+    /// channel binding are still verified. The measurement's provenance must be
+    /// established out of band; the verification document reports the skipped
+    /// steps as skipped.
+    /// - Parameters:
     ///   - enclaveURL: URL for the enclave attestation endpoint
+    ///   - pinnedMeasurement: Expected enclave code measurement
+    ///   - vmShape: The VM shape the pinned code was built for. Required for
+    ///     TDX enclaves, ignored for SEV-SNP.
     public convenience init(
-        githubRepo: String = TinfoilConstants.defaultGithubRepo,
-        enclaveURL: String
-    ) {
-        self.init(
-            githubRepo: githubRepo,
-            configuredEnclaveURL: enclaveURL,
-            attestationBundleURL: nil
-        )
-    }
-
-    /// Initialize a secure client that requests a bundle for one specific
-    /// enclave. This binds the destination, certificate, and HPKE key to the
-    /// same verified domain while retaining the single-request bundle flow.
-    public convenience init(
-        githubRepo: String = TinfoilConstants.defaultGithubRepo,
         enclaveURL: String,
-        attestationBundleURL: String
+        pinnedMeasurement: AttestationMeasurement,
+        vmShape: VMShape? = nil
     ) {
         self.init(
-            githubRepo: githubRepo,
+            githubRepo: TinfoilConstants.pinnedNoRepo,
             configuredEnclaveURL: enclaveURL,
-            attestationBundleURL: attestationBundleURL
-        )
-    }
-
-    /// Initialize a secure client that fetches an attestation bundle for verification
-    /// - Parameters:
-    ///   - githubRepo: GitHub repository in the format "org/repo"
-    ///   - attestationBundleURL: URL for fetching the attestation bundle. If nil, uses default Tinfoil endpoint.
-    public convenience init(
-        githubRepo: String = TinfoilConstants.defaultGithubRepo,
-        attestationBundleURL: String? = nil
-    ) {
-        self.init(
-            githubRepo: githubRepo,
-            configuredEnclaveURL: nil,
-            attestationBundleURL: attestationBundleURL
+            pinnedMeasurement: pinnedMeasurement,
+            vmShape: vmShape
         )
     }
 
     private init(
         githubRepo: String,
         configuredEnclaveURL: String?,
-        attestationBundleURL: String?
+        pinnedMeasurement: AttestationMeasurement? = nil,
+        vmShape: VMShape? = nil
     ) {
         self.githubRepo = githubRepo
         self.configuredEnclaveURL = configuredEnclaveURL
-        self.attestationBundleURL = attestationBundleURL
+        self.pinnedMeasurement = pinnedMeasurement
+        self.vmShape = vmShape
+    }
+
+    /// Creates the Go verifier for `host`, in pinned-measurement mode when a
+    /// measurement was supplied. The pinned Go constructor takes the
+    /// measurements as JSON because gomobile cannot bind the struct types.
+    internal func makeGoClient(host: String?) throws -> ClientSecureClient {
+        if pinnedMeasurement == nil, let host {
+            guard let client = ClientNewSecureClient(host, githubRepo) else {
+                throw VerificationError.verificationFailed("Failed to create secure verifier for \(host)")
+            }
+            return client
+        }
+
+        guard let pinnedMeasurement else {
+            guard githubRepo == TinfoilConstants.defaultGithubRepo else {
+                throw VerificationError.verificationFailed("A custom githubRepo requires enclaveURL")
+            }
+            var error: NSError?
+            guard let client = ClientNewDefaultClient(&error) else {
+                if let error { throw error }
+                throw VerificationError.verificationFailed("Failed to discover a secure enclave")
+            }
+            return client
+        }
+
+        guard let host else {
+            throw VerificationError.verificationFailed("pinnedMeasurement requires enclaveURL")
+        }
+
+        let encoder = JSONEncoder()
+        let measurementJSON = String(decoding: try encoder.encode(pinnedMeasurement), as: UTF8.self)
+        let shapeJSON = try vmShape.map { String(decoding: try encoder.encode($0), as: UTF8.self) } ?? ""
+
+        var error: NSError?
+        guard let client = ClientNewPinnedSecureClientJSON(host, measurementJSON, shapeJSON, &error) else {
+            if let error { throw error }
+            throw VerificationError.verificationFailed("Failed to create pinned secure verifier for \(host)")
+        }
+        return client
+    }
+
+    internal static func verifyIfNeeded(_ client: ClientSecureClient) throws {
+        // Discovery may already verify a router, but its fallback is unverified.
+        if client.groundTruth() == nil {
+            _ = try client.verify()
+        }
     }
 
     /// The verified enclave URL (available after successful verification)
-    public var verifiedEnclaveURL: String? { discoveredEnclaveURL ?? configuredEnclaveURL }
+    public var verifiedEnclaveURL: String? { discoveredEnclaveURL }
 
     /// The last verified ground truth
     public var verifiedGroundTruth: GroundTruth? { groundTruth }
@@ -153,23 +208,9 @@ public class SecureClient {
     /// - Returns: The ground truth containing all verification results
     public func verify() async throws -> GroundTruth {
         do {
-            let host: String
-            if let configuredEnclaveURL = configuredEnclaveURL {
-                host = try URLHelpers.parseURL(configuredEnclaveURL).host
-            } else {
-                host = ""
-            }
-
-            guard let client = ClientNewSecureClient(host, githubRepo) else {
-                throw VerificationError.verificationFailed("Failed to create secure verifier")
-            }
-            if let attestationBundleURL {
-                client.setAttestationBundleURL(attestationBundleURL)
-            } else if configuredEnclaveURL == nil {
-                client.setAttestationBundleURL(TinfoilConstants.attestationBaseURL)
-            }
-
-            _ = try client.verify()
+            let configuredOrigin = try configuredEnclaveURL.map { try URLHelpers.parseEnclaveURL($0) }
+            let client = try makeGoClient(host: configuredOrigin?.authority)
+            try Self.verifyIfNeeded(client)
 
             var jsonError: NSError?
             let groundTruthJSON = client.groundTruthJSON(&jsonError)
@@ -187,10 +228,12 @@ public class SecureClient {
             let decoder = JSONDecoder()
             let decodedGroundTruth = try decoder.decode(GroundTruth.self, from: groundTruthData)
             var document = try decoder.decode(VerificationDocument.self, from: verificationDocumentData)
-            if configuredEnclaveURL != nil {
-                guard decodedGroundTruth.enclaveHost?.caseInsensitiveCompare(host) == .orderedSame else {
+            let discoveredURL = decodedGroundTruth.enclaveHost.flatMap { $0.isEmpty ? nil : "https://\($0)" }
+            if let configuredOrigin {
+                guard let discoveredURL,
+                      URLHelpers.origin(from: discoveredURL) == URLHelpers.origin(from: configuredOrigin.url) else {
                     throw VerificationError.verificationFailed(
-                        "Attestation bundle domain does not match configured enclave \(host)"
+                        "Verified enclave does not match configured origin \(configuredOrigin.url)"
                     )
                 }
             }
@@ -209,11 +252,14 @@ public class SecureClient {
                 document.allStepsSucceeded,
                 !(document.verifiedAt?.isEmpty ?? true),
                 !document.verifier.name.isEmpty,
-                !document.verifier.version.isEmpty
+                !document.verifier.version.isEmpty,
+                !document.codeFingerprint.isEmpty,
+                document.codeFingerprint == document.enclaveFingerprint
             else {
                 throw VerificationError.jsonDecodingFailed("Verification document is missing required provenance")
             }
             guard
+                document.configRepo == githubRepo,
                 document.configRepo == decodedGroundTruth.configRepo,
                 document.enclaveHost == decodedGroundTruth.enclaveHost,
                 document.releaseTag == decodedGroundTruth.releaseTag,
@@ -246,9 +292,7 @@ public class SecureClient {
             self.lastVerificationDocument = document
             self.goClient = client
 
-            if let host = groundTruth.enclaveHost, !host.isEmpty {
-                self.discoveredEnclaveURL = "https://\(host)"
-            }
+            self.discoveredEnclaveURL = configuredOrigin?.url ?? discoveredURL
 
             return groundTruth
         } catch let error as VerificationError {
@@ -264,7 +308,7 @@ public class SecureClient {
             clearVerifiedState()
             let steps = Self.stepsFromError(
                 error.localizedDescription,
-                usesBundle: attestationBundleURL != nil || configuredEnclaveURL == nil
+                pinnedMeasurement: pinnedMeasurement != nil
             )
             buildFailureDocument(error: error, steps: steps)
             throw error
@@ -287,13 +331,12 @@ public class SecureClient {
             throw VerificationError.notVerified
         }
 
-        guard let host = groundTruth.enclaveHost ?? (configuredEnclaveURL.flatMap { try? URLHelpers.parseURL($0).host }) else {
+        let configuredHost = try configuredEnclaveURL.map { try URLHelpers.parseEnclaveURL($0).authority }
+        guard let host = configuredHost ?? groundTruth.enclaveHost else {
             throw VerificationError.verificationFailed("No enclave host available")
         }
 
-        guard let client = ClientNewSecureClient(host, githubRepo) else {
-            throw VerificationError.verificationFailed("Failed to create secure client for \(host)")
-        }
+        let client = try makeGoClient(host: host)
         goClient = client
         return client
     }
@@ -344,61 +387,63 @@ public class SecureClient {
     /// Maps error message prefixes to verification step states
     internal static func stepsFromError(
         _ errorMessage: String,
-        usesBundle: Bool = false
+        pinnedMeasurement: Bool = false
     ) -> VerificationDocument.Steps {
-        let completedFetch: VerificationStepState = usesBundle ? .skipped() : .success()
-        if usesBundle && (errorMessage.starts(with: "fetchBundle:") || errorMessage.starts(with: "failed to fetch bundle:")) {
+        // v3 carries reference values in the document; there is no release
+        // lookup. Pinned mode also skips the code-provenance step.
+        let completedCode: VerificationStepState = pinnedMeasurement ? .skipped() : .success()
+        if errorMessage.starts(with: "fetching attestation document:") ||
+           errorMessage.starts(with: "envelope:") ||
+           errorMessage.starts(with: "generating nonce:") {
             return VerificationDocument.Steps(
                 fetchDigest: .skipped(),
-                verifyCode: .pending(),
+                verifyCode: pinnedMeasurement ? .skipped() : .pending(),
                 verifyEnclave: .pending(),
                 compareMeasurements: .pending(),
                 otherError: .failed(errorMessage)
             )
-        } else if errorMessage.starts(with: "fetchDigest:") ||
-           errorMessage.starts(with: "fetchBundle:") ||
-           errorMessage.starts(with: "failed to fetch bundle:") {
+        } else if errorMessage.starts(with: "reference values:") {
+            let codeFailed = errorMessage.starts(with: "reference values: verifying code")
+            let platformFailed = errorMessage.starts(with: "reference values: verifying platform")
+            let codeStep: VerificationStepState = pinnedMeasurement ? .skipped()
+                : codeFailed ? .failed(errorMessage)
+                : platformFailed ? .success() : .pending()
             return VerificationDocument.Steps(
-                fetchDigest: .failed(errorMessage),
-                verifyCode: .pending(),
+                fetchDigest: .skipped(),
+                verifyCode: codeStep,
                 verifyEnclave: .pending(),
-                compareMeasurements: .pending()
+                compareMeasurements: .pending(),
+                otherError: codeFailed && !pinnedMeasurement ? nil : .failed(errorMessage)
             )
-        } else if errorMessage.starts(with: "verifyCode:") {
+        } else if errorMessage.starts(with: "measurements:") {
             return VerificationDocument.Steps(
-                fetchDigest: completedFetch,
-                verifyCode: .failed(errorMessage),
-                verifyEnclave: .pending(),
-                compareMeasurements: .pending()
-            )
-        } else if errorMessage.starts(with: "verifyEnclave:") {
-            return VerificationDocument.Steps(
-                fetchDigest: completedFetch,
-                verifyCode: .success(),
-                verifyEnclave: .failed(errorMessage),
-                compareMeasurements: .pending()
-            )
-        } else if errorMessage.starts(with: "validateTLS:") ||
-                  errorMessage.starts(with: "verifyCertificate:") {
-            return VerificationDocument.Steps(
-                fetchDigest: completedFetch,
-                verifyCode: .success(),
-                verifyEnclave: .success(),
-                compareMeasurements: usesBundle ? .success() : .pending(),
-                verifyCertificate: .failed(errorMessage)
-            )
-        } else if errorMessage.starts(with: "verifyHardware:") ||
-                  errorMessage.starts(with: "measurements:") {
-            return VerificationDocument.Steps(
-                fetchDigest: completedFetch,
-                verifyCode: .success(),
+                fetchDigest: .skipped(),
+                verifyCode: completedCode,
                 verifyEnclave: .success(),
                 compareMeasurements: .failed(errorMessage)
             )
-        } else {
+        } else if errorMessage.starts(with: "cpu evidence:") {
             return VerificationDocument.Steps(
-                fetchDigest: .pending(),
-                verifyCode: .pending(),
+                fetchDigest: .skipped(),
+                verifyCode: completedCode,
+                verifyEnclave: .failed(errorMessage),
+                compareMeasurements: .pending()
+            )
+        } else if errorMessage.starts(with: "binding:") {
+            return VerificationDocument.Steps(
+                fetchDigest: .skipped(),
+                verifyCode: completedCode,
+                verifyEnclave: .success(),
+                compareMeasurements: .success(),
+                verifyCertificate: .failed(errorMessage)
+            )
+        } else {
+            // Without a recognized step prefix nothing is known to have run, but
+            // a pinned client never performs the provenance steps at all.
+            let provenance: VerificationStepState = pinnedMeasurement ? .skipped() : .pending()
+            return VerificationDocument.Steps(
+                fetchDigest: .skipped(),
+                verifyCode: provenance,
                 verifyEnclave: .pending(),
                 compareMeasurements: .pending(),
                 otherError: .failed(errorMessage)
@@ -416,16 +461,41 @@ public class SecureClient {
     private func buildFailureDocument(error: Error, steps: VerificationDocument.Steps) {
         let host: String
         if let url = discoveredEnclaveURL ?? configuredEnclaveURL {
-            host = (try? URLHelpers.parseURL(url))?.host ?? url
+            host = (try? URLHelpers.parseEnclaveURL(url))?.authority ?? url
         } else {
             host = TinfoilConstants.unknownHost
         }
 
-        lastVerificationDocument = VerificationDocument(
+        lastVerificationDocument = Self.makeFailureDocument(
             configRepo: githubRepo,
             enclaveHost: host,
-            releaseDigest: "",
-            codeMeasurement: AttestationMeasurement(type: "", registers: []),
+            pinnedMeasurement: pinnedMeasurement,
+            steps: steps
+        )
+    }
+
+    internal static func makeFailureDocument(
+        configRepo: String,
+        enclaveHost: String,
+        pinnedMeasurement: AttestationMeasurement?,
+        steps: VerificationDocument.Steps
+    ) -> VerificationDocument {
+        let failureSteps = VerificationDocument.Steps(
+            fetchDigest: .skipped(),
+            verifyCode: pinnedMeasurement == nil ? steps.verifyCode : .skipped(),
+            verifyEnclave: steps.verifyEnclave,
+            compareMeasurements: steps.compareMeasurements,
+            verifyCertificate: steps.verifyCertificate,
+            createTransport: steps.createTransport,
+            verifyHPKEKey: steps.verifyHPKEKey,
+            otherError: steps.otherError
+        )
+
+        return VerificationDocument(
+            configRepo: configRepo,
+            enclaveHost: enclaveHost,
+            releaseDigest: pinnedMeasurement == nil ? "" : TinfoilConstants.pinnedNoDigest,
+            codeMeasurement: pinnedMeasurement ?? AttestationMeasurement(type: "", registers: []),
             enclaveMeasurement: AttestationResponse(
                 measurement: AttestationMeasurement(type: "", registers: [])
             ),
@@ -434,9 +504,9 @@ public class SecureClient {
             hardwareMeasurement: nil,
             codeFingerprint: "",
             enclaveFingerprint: "",
-            selectedRouterEndpoint: host,
+            selectedRouterEndpoint: enclaveHost,
             securityVerified: false,
-            steps: steps
+            steps: failureSteps
         )
     }
 }

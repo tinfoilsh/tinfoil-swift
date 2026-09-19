@@ -5,7 +5,7 @@
 [![Tests](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/badge/Docs-Swift%20SDK-blue.svg)](https://docs.tinfoil.sh/sdk/swift-sdk)
 
-A secure Swift SDK for communicating with AI models running in Tinfoil's confidential computing enclaves. This SDK configures the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with additional security features including automatic enclave attestation verification and certificate pinning for direct-to-enclave encrypted communication.
+A secure Swift SDK for communicating with AI models running in Tinfoil's confidential computing enclaves. This SDK configures the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with automatic enclave attestation verification and EHBP request/response body encryption.
 
 ## Installation
 
@@ -36,7 +36,7 @@ import OpenAI
 // This automatically:
 // - Fetches an available router from Tinfoil's network
 // - Verifies the enclave is running genuine Tinfoil code
-// - Sets up certificate pinning for all requests
+// - Sets up EHBP body encryption using the attested enclave key
 let client = try await TinfoilAI.create(
     apiKey: "YOUR_API_KEY" // Optional, uses TINFOIL_API_KEY env var if not provided
 )
@@ -57,9 +57,9 @@ print(response.choices.first?.message.content ?? "No response")
 ## Key Features
 
 - **Automatic Router Selection**: Dynamically selects from available Tinfoil routers
-- **Enclave Verification**: Verifies code integrity via GitHub and Sigstore
+- **Enclave Verification**: Verifies code and platform provenance carried in the v3 attestation document
 - **Remote Attestation**: Validates the enclave runtime environment (AMD SEV-SNP / Intel TDX)
-- **Certificate Pinning**: Ensures direct-to-enclave encrypted communication
+- **Attested Body Encryption**: Protects request/response bodies with EHBP, including through proxies
 - **OpenAI Compatible**: Drop-in replacement for OpenAI SDK
 
 ## Advanced Features
@@ -86,7 +86,14 @@ for try await chunk in client.chatsStream(query: chatQuery) {
 
 ### Security Architecture
 
-Tinfoil Swift combines **remote attestation** and **certificate pinning** to ensure your data only reaches verified enclave code. During setup, the SDK requests an attestation report that cryptographically proves the exact code running in the enclave and includes the enclave's TLS public key fingerprint. On every API request, the SDK validates the server's TLS certificate matches this attested fingerprint. This creates a cryptographic chain from GitHub source code → attestation → TLS connection, preventing man-in-the-middle attacks even if DNS or router selection is compromised.
+`TinfoilAI` combines **remote attestation** with **EHBP body encryption** using the enclave's attested HPKE public key. It does not pin each API request's TLS connection to the attested TLS key. EHBP protects non-empty request bodies and their encrypted responses, not HTTP headers or other transport metadata; bodyless requests do not use EHBP encryption. Use HTTPS for production proxy connections.
+
+The lower-level `SecureClient.get` and `SecureClient.post` methods instead use HTTPS with the attested TLS public-key fingerprint enforced on each connection before application data is sent. Verification alone does not establish that live TLS channel binding.
+
+The Go verifier selects a router, or uses the configured `enclaveURL`, and
+fetches its v3 attestation document with a fresh nonce. An unverified discovery
+fallback is verified before its keys can be used. Custom `githubRepo` values
+require an explicit `enclaveURL`.
 
 #### Verification Callback
 
@@ -153,6 +160,8 @@ let client = try await TinfoilAI.create(
     baseURL: String? = nil,             // Proxy server URL (requests go directly to enclave if nil)
     enclaveURL: String? = nil,          // Custom enclave URL (auto-selects router if nil)
     githubRepo: String = "tinfoilsh/confidential-model-router", // GitHub repo for verification
+    pinnedMeasurement: AttestationMeasurement? = nil, // Verify against a known measurement (see below)
+    vmShape: VMShape? = nil,                    // With pinnedMeasurement: VM shape for TDX enclaves
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
     userCacheSecret: String? = nil,             // Prompt cache scoping secret (see "Prompt Cache Scoping")
     onVerification: VerificationCallback? = nil // Verification callback
@@ -161,9 +170,45 @@ let client = try await TinfoilAI.create(
 // Returns: TinfoilAI - A client with the same API as OpenAI
 ```
 
+### Pinning a Measurement
+
+By default the client trusts the code measurement proven by the Sigstore code provenance carried in the enclave's attestation document. To verify against a measurement you obtained out of band instead, pin it explicitly. Only the code-provenance check is skipped: the platform endorsements and their freshness proof, the CPU quote chain, and channel binding are all still verified. The measurement's provenance is your responsibility; the verification document reports the skipped steps as `skipped`.
+
+```swift
+let client = try await TinfoilAI.create(
+    enclaveURL: "https://enclave.example.com",
+    pinnedMeasurement: AttestationMeasurement(
+        type: "https://tinfoil.sh/predicate/sev-snp-guest/v2",
+        registers: ["<hex measurement>"]
+    )
+)
+```
+
+`pinnedMeasurement` requires `enclaveURL` and cannot be combined with a custom `githubRepo`. The measurement must carry the register layout of its type (1 register for SEV-SNP, 5 for TDX, 3 for multi-platform) as 48-byte hex; a malformed pin fails verification before any network access. A five-register TDX pin fixes every register including RTMR3. A TDX enclave additionally needs `vmShape` declaring the VM shape the code was built for, since the attestation document's endorsed platform measurement is resolved under that shape. `SecureClient(enclaveURL:pinnedMeasurement:vmShape:)` offers the same mode for verification without the OpenAI wrapper.
+
+Explicit enclave URLs must use HTTPS; schemeless hosts default to HTTPS. Verification and key refresh preserve the configured host and port. A `vmShape` without `pinnedMeasurement` is rejected.
+
+The Go verifier requires `codeFingerprint` and `enclaveFingerprint` to match
+before returning verified keys. Both use the same canonical target-platform
+measurement; for TDX this covers all five registers, including MRTD and RTMR0.
+Fingerprint equality does not replace quote authentication, platform policy,
+freshness, or channel binding.
+
 ### Proxy Server Support
 
+Set `baseURL` to forward application requests through a proxy. Verification
+still contacts the configured or discovered enclave directly with a fresh
+nonce. The proxy receives the verified enclave URL in `X-Tinfoil-Enclave-Url`.
+
 See the [Proxy Server Guide](https://docs.tinfoil.sh/guides/proxy-server) for routing requests through a proxy while maintaining end-to-end encryption.
+
+### Migrating from attestation bundles
+
+The v3 client removes `attestationBundleURL`, its `SecureClient` initializer
+overloads, and the bundle endpoint constants. A precomputed bundle cannot
+answer the fresh nonce generated for v3 verification. Omit `enclaveURL` for
+default router discovery, or set it for a specific deployment. Use `baseURL`
+only for the application-request proxy; it does not redirect attestation.
 
 ## API Documentation
 
@@ -175,9 +220,17 @@ For complete documentation, see:
 
 ## Requirements
 
-- iOS 17.0+ / macOS 12.0+
+- iOS 17.0+ / macOS 14.0+
 - Swift 5.9+
 - Xcode 15.0+
+
+## Live attestation tests
+
+The new v3 discovery and pinning integration tests are opt-in. Set
+`TINFOIL_RUN_ATTESTATION_INTEGRATION=1` when running `swift test`, or enable
+`attestation_integration` in a manual Test workflow run. When enabled, verification
+failures fail the tests rather than being converted into skips. Other existing
+live tests retain their own API-key or network requirements.
 
 ## Reporting Vulnerabilities
 

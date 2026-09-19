@@ -95,18 +95,115 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertFalse(response.choices.isEmpty, "Request should succeed with EHBP encryption")
     }
 
-    func testVerificationFailureWithInvalidAttestationURL() async throws {
+    func testRejectsNonHTTPSEnclaveConfiguration() async throws {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                attestationBundleURL: "https://invalid-attestation-12345.example.com"
+                enclaveURL: "http://invalid-attestation-12345.example.com"
             )
-            XCTFail("Should have failed with invalid attestation URL")
+            XCTFail("Should reject a non-HTTPS enclave configuration")
         } catch {
-            // Expected - verification should reject invalid attestation URL
-            // Error may be VerificationError or NSError from Go bindings
-            XCTAssertNotNil(error)
+            XCTAssertTrue(error.localizedDescription.contains("Invalid enclaveURL"), error.localizedDescription)
         }
+    }
+
+    // MARK: - Pinned Measurement Tests
+
+    func testPinnedMeasurementRequiresEnclaveURL() async throws {
+        let measurement = AttestationMeasurement(type: "type", registers: ["abc"])
+        do {
+            _ = try await TinfoilAI.create(apiKey: "test-key", pinnedMeasurement: measurement)
+            XCTFail("pinnedMeasurement without enclaveURL should be rejected")
+        } catch let error as TinfoilError {
+            XCTAssertEqual(
+                error,
+                .invalidConfiguration(
+                    "pinnedMeasurement requires enclaveURL: a pinned measurement cannot be verified against an auto-selected router"
+                )
+            )
+        }
+
+        do {
+            _ = try await TinfoilAI.create(
+                apiKey: "test-key",
+                enclaveURL: "https://enclave.example.com",
+                githubRepo: "org/repo",
+                pinnedMeasurement: measurement
+            )
+            XCTFail("pinnedMeasurement with githubRepo should be rejected")
+        } catch let error as TinfoilError {
+            XCTAssertEqual(error, .invalidConfiguration("pinnedMeasurement cannot be combined with githubRepo"))
+        }
+
+        do {
+            _ = try await TinfoilAI.create(
+                apiKey: "test-key",
+                enclaveURL: "https://enclave.example.com",
+                vmShape: VMShape(cpus: 1, memoryMB: 1, disks: 1)
+            )
+            XCTFail("vmShape without pinnedMeasurement should be rejected")
+        } catch let error as TinfoilError {
+            XCTAssertEqual(error, .invalidConfiguration("vmShape requires pinnedMeasurement"))
+        }
+    }
+
+    func testRefreshKeepsCallerSelectedEnclave() {
+        let verified = "https://verified.example.com"
+
+        // Direct clients always re-verify the enclave they selected.
+        XCTAssertEqual(
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: nil, pinned: false),
+            verified
+        )
+        // A discovered enclave behind a forwarding proxy may be rotated by ATC.
+        XCTAssertNil(
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: "https://proxy.example.com", pinned: false)
+        )
+        // An explicitly configured enclave is a destination constraint even behind a proxy.
+        XCTAssertEqual(
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: verified, baseURL: "https://proxy.example.com", pinned: false),
+            verified
+        )
+        // So is a pinned measurement.
+        XCTAssertEqual(
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: verified, baseURL: "https://proxy.example.com", pinned: true),
+            verified
+        )
+    }
+
+    func testPinnedMeasurementClientCompletesChat() async throws {
+        try skipIfNoAPIKey()
+
+        // Learn the current enclave and its measurement through the default flow.
+        let discovery = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+        let discovered = try await discovery.verify()
+        guard let enclaveURL = discovery.verifiedEnclaveURL,
+              let measurement = discovered.enclaveMeasurement else {
+            throw XCTSkip("Discovery did not yield an enclave measurement")
+        }
+        guard measurement.type == VerificationTestSupport.sevGuestType else {
+            throw XCTSkip("This live pinning test requires SEV-SNP; TDX needs a known VM shape")
+        }
+
+        let documents = Box<[VerificationDocument?]>(value: [])
+        let client = try await TinfoilAI.create(
+            apiKey: try getAPIKey(),
+            enclaveURL: enclaveURL,
+            pinnedMeasurement: AttestationMeasurement(type: measurement.type, registers: measurement.registers),
+            onVerification: { documents.value.append($0) }
+        )
+
+        XCTAssertEqual(documents.value.count, 1)
+        XCTAssertEqual(documents.value.first??.configRepo, TinfoilConstants.pinnedNoRepo)
+        XCTAssertEqual(documents.value.first??.steps.fetchDigest.status, .skipped)
+        XCTAssertEqual(documents.value.first??.steps.verifyCode.status, .skipped)
+        XCTAssertEqual(documents.value.first??.enclaveFingerprint, discovered.enclaveFingerprint)
+
+        let response = try await client.chats(query: ChatQuery(
+            messages: [.user(.init(content: .string("Say 'Done' and nothing else.")))],
+            model: "gpt-oss-120b"
+        ))
+        XCTAssertFalse(response.choices.isEmpty)
     }
 
     // MARK: - Streaming Tests
@@ -252,56 +349,33 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertFalse(response.choices.isEmpty, "Should receive response after verification")
     }
 
-    func testVerificationFailureCallbackWithNewFormat() async throws {
+    func testInvalidEnclaveConfigurationProducesFailureCallback() async throws {
         let capturedDocument = Box<VerificationDocument?>(value: nil)
-        var verificationFailed = false
 
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                attestationBundleURL: "https://invalid-attestation-12345.example.com",
+                enclaveURL: "http://invalid-attestation-12345.example.com",
                 onVerification: { document in
                     capturedDocument.value = document
                 }
             )
-            XCTFail("Should have failed with invalid attestation URL")
+            XCTFail("Should reject a non-HTTPS enclave configuration")
         } catch {
-            verificationFailed = true
-
-            // Verify that document was still captured on failure
-            XCTAssertNotNil(capturedDocument.value, "Verification document should be captured even on failure")
-
-            if let doc = capturedDocument.value {
-                XCTAssertFalse(doc.securityVerified, "Security should not be verified on failure")
-
-                // At least one step should be failed or pending
-                var hasNonSuccessStep = false
-
-                if doc.steps.fetchDigest.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                if doc.steps.verifyCode.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                if doc.steps.verifyEnclave.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                if doc.steps.compareMeasurements.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                XCTAssertTrue(hasNonSuccessStep, "At least one step should not be successful on failure")
-            }
+            XCTAssertTrue(error.localizedDescription.contains("Invalid enclaveURL"), error.localizedDescription)
         }
-
-        XCTAssertTrue(verificationFailed, "Verification should have failed")
+        let document = try XCTUnwrap(capturedDocument.value)
+        XCTAssertFalse(document.securityVerified)
+        XCTAssertEqual(document.steps.fetchDigest.status, .skipped)
+        XCTAssertEqual(document.steps.verifyCode.status, .pending)
+        XCTAssertEqual(document.steps.verifyEnclave.status, .pending)
+        XCTAssertEqual(document.steps.compareMeasurements.status, .pending)
+        XCTAssertEqual(document.steps.otherError?.status, .failed)
+        XCTAssertTrue(document.steps.otherError?.error?.contains("Invalid enclaveURL") == true)
     }
 
     func testNewGroundTruthFieldsIntegration() async throws {
-        // Use SecureClient with default attestation bundle flow
+        // Use SecureClient with default v3 router discovery.
         let secureClient = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
 
         do {
@@ -314,7 +388,7 @@ final class TinfoilAITests: XCTestCase {
             XCTAssertFalse(groundTruth.codeFingerprint.isEmpty, "Code fingerprint should exist")
             XCTAssertFalse(groundTruth.enclaveFingerprint.isEmpty, "Enclave fingerprint should exist")
 
-            // Verify enclave host is populated from attestation bundle
+            // Verify the selected enclave host is retained.
             XCTAssertNotNil(groundTruth.enclaveHost, "Enclave host should exist")
             XCTAssertFalse(groundTruth.enclaveHost?.isEmpty ?? true, "Enclave host should not be empty")
 
@@ -331,7 +405,6 @@ final class TinfoilAITests: XCTestCase {
 
             // Hardware measurement may or may not exist depending on platform
             if let hwMeasurement = groundTruth.hardwareMeasurement {
-                XCTAssertFalse(hwMeasurement.id.isEmpty, "Hardware ID should exist if present")
                 XCTAssertFalse(hwMeasurement.mrtd.isEmpty, "MRTD should exist if present")
                 XCTAssertFalse(hwMeasurement.rtmr0.isEmpty, "RTMR0 should exist if present")
             }

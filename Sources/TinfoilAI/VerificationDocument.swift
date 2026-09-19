@@ -66,6 +66,31 @@ public struct AttestationResponse: Codable {
     }
 }
 
+/// The VM shape a pinned TDX code measurement was built for. v3 resolves the
+/// enclave's endorsed platform measurement under this shape, which the code
+/// provenance artifact would normally declare. Field names match the Go
+/// verifier's `policy.Shape` JSON.
+public struct VMShape: Codable, Equatable {
+    public let cpus: Int
+    public let memoryMB: Int
+    public let disks: Int
+    public let gpus: Int?
+
+    public init(cpus: Int, memoryMB: Int, disks: Int, gpus: Int? = nil) {
+        self.cpus = cpus
+        self.memoryMB = memoryMB
+        self.disks = disks
+        self.gpus = gpus
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cpus
+        case memoryMB = "memory_mb"
+        case disks
+        case gpus
+    }
+}
+
 /// Hardware measurement for TDX platforms
 public struct HardwareMeasurement: Codable {
     public let id: String

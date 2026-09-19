@@ -14,30 +14,63 @@ public class TinfoilAI {
     private static func makeVerifier(
         githubRepo: String,
         enclaveURL: String?,
-        attestationBundleURL: String?
-    ) -> SecureClient {
-        if let enclaveURL {
+        pinnedMeasurement: AttestationMeasurement? = nil,
+        vmShape: VMShape? = nil
+    ) throws -> SecureClient {
+        // A pin without an enclave must never degrade to release-based
+        // verification, so the invariant is enforced here rather than relying
+        // on every caller's guard.
+        if let pinnedMeasurement {
+            guard let enclaveURL else {
+                throw TinfoilError.invalidConfiguration(
+                    "pinnedMeasurement requires enclaveURL: a pinned measurement cannot be verified against an auto-selected router"
+                )
+            }
             return SecureClient(
-                githubRepo: githubRepo,
                 enclaveURL: enclaveURL,
-                attestationBundleURL: attestationBundleURL
-                    ?? TinfoilConstants.attestationBaseURL
+                pinnedMeasurement: pinnedMeasurement,
+                vmShape: vmShape
             )
         }
         return SecureClient(
             githubRepo: githubRepo,
-            attestationBundleURL: attestationBundleURL
+            enclaveURL: enclaveURL
         )
+    }
+
+    /// Selects the enclave a key-rotation refresh re-verifies. Re-verification
+    /// must target the same enclave the caller chose (an explicit `enclaveURL`
+    /// or a pinned measurement is a destination constraint). The one exception
+    /// is a client that discovered its enclave through an EHBP forwarding proxy:
+    /// ATC may rotate the endpoint/key pair behind the proxy, so only then does
+    /// refresh rediscover by returning nil.
+    internal static func refreshEnclaveURL(
+        verifiedEnclaveURL: String,
+        configuredEnclaveURL: String?,
+        baseURL: String?,
+        pinned: Bool
+    ) -> String? {
+        if baseURL == nil || configuredEnclaveURL != nil || pinned {
+            return verifiedEnclaveURL
+        }
+        return nil
     }
 
     /// Creates a new TinfoilAI client configured for communication with a Tinfoil enclave
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
-    ///   - githubRepo: GitHub repository containing the enclave config
-    ///   - attestationBundleURL: Optional URL to fetch a precomputed attestation bundle from.
-    ///     If not provided, uses the default Tinfoil endpoint. The enclave URL is discovered from
-    ///     the attestation bundle during verification.
+    ///   - enclaveURL: Optional enclave to verify and connect to. If not provided, the enclave
+    ///     is selected by the Go verifier's router discovery. Explicit URLs must use HTTPS;
+    ///     schemeless hosts default to HTTPS. Required with `pinnedMeasurement`.
+    ///   - githubRepo: Expected code-provenance repository. Custom repositories require `enclaveURL`.
+    ///   - pinnedMeasurement: Verify the enclave against this measurement instead of the
+    ///     signed code provenance in the v3 document. The pin's provenance must be established
+    ///     out of band; platform endorsements, freshness, and quote verification still run.
+    ///     Requires `enclaveURL`; cannot be combined with a custom `githubRepo`.
+    ///   - vmShape: With `pinnedMeasurement`, the VM shape the pinned code was built for.
+    ///     Required for TDX enclaves (the endorsed platform measurement is resolved under
+    ///     it); ignored for SEV-SNP. Rejected without `pinnedMeasurement`.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - customHeaders: Additional request headers to forward verbatim on
     ///     every outbound request (merged over the headers synthesized by
@@ -64,16 +97,18 @@ public class TinfoilAI {
     ///     before replaying the request.
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     ///
-    /// When using a proxy, set both `baseURL` and `attestationBundleURL` to your proxy server
-    /// (e.g., "http://localhost:8080"). The SDK will fetch the attestation bundle through the proxy,
-    /// verify the enclave, and encrypt requests with EHBP. The proxy receives the `X-Tinfoil-Enclave-Url`
+    /// When using a proxy, set `baseURL` to your proxy server. Attestation is fetched directly
+    /// from the configured or discovered enclave using a fresh nonce. The SDK encrypts requests
+    /// with EHBP. The proxy receives the `X-Tinfoil-Enclave-Url`
     /// header to know where to forward requests.
     public static func create(
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         baseURL: String? = nil,
+        enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
-        attestationBundleURL: String? = nil,
+        pinnedMeasurement: AttestationMeasurement? = nil,
+        vmShape: VMShape? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
         tinfoilEvents: Set<TinfoilEvent> = [],
@@ -89,10 +124,20 @@ public class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
 
-        let verifier = makeVerifier(
+        if pinnedMeasurement != nil {
+            guard githubRepo == TinfoilConstants.defaultGithubRepo else {
+                throw TinfoilError.invalidConfiguration("pinnedMeasurement cannot be combined with githubRepo")
+            }
+        } else if vmShape != nil {
+            throw TinfoilError.invalidConfiguration("vmShape requires pinnedMeasurement")
+        }
+
+        let configuredEnclaveURL = enclaveURL
+        let verifier = try makeVerifier(
             githubRepo: githubRepo,
-            enclaveURL: nil,
-            attestationBundleURL: attestationBundleURL
+            enclaveURL: configuredEnclaveURL,
+            pinnedMeasurement: pinnedMeasurement,
+            vmShape: vmShape
         )
 
         do {
@@ -105,15 +150,18 @@ public class TinfoilAI {
             onVerification?(verifier.verificationDocument)
 
             let finalBaseURL = baseURL ?? enclaveURL
-            // A configured base URL is an EHBP forwarding proxy, so ATC may
-            // rotate the endpoint/key pair behind it. A direct client keeps its
-            // selected domain and refreshes that domain's bundle.
-            let pinnedRefreshEnclaveURL = baseURL == nil ? enclaveURL : nil
+            let pinnedRefreshEnclaveURL = refreshEnclaveURL(
+                verifiedEnclaveURL: enclaveURL,
+                configuredEnclaveURL: configuredEnclaveURL,
+                baseURL: baseURL,
+                pinned: pinnedMeasurement != nil
+            )
             let refreshEndpoint: EHBPVerifiedState.Refresh = {
-                let refreshVerifier = Self.makeVerifier(
+                let refreshVerifier = try Self.makeVerifier(
                     githubRepo: githubRepo,
                     enclaveURL: pinnedRefreshEnclaveURL,
-                    attestationBundleURL: attestationBundleURL
+                    pinnedMeasurement: pinnedMeasurement,
+                    vmShape: vmShape
                 )
 
                 defer { onVerification?(refreshVerifier.verificationDocument) }
