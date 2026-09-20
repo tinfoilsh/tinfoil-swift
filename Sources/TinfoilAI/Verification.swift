@@ -149,18 +149,19 @@ public class SecureClient {
         self.vmShape = vmShape
     }
 
-    /// Creates the Go verifier for `host`, in pinned-measurement mode when a
-    /// measurement was supplied. The pinned Go constructor takes the
-    /// measurements as JSON because gomobile cannot bind the struct types.
+    /// Creates the Go verifier. The mode follows from which inputs were
+    /// configured: a pinned measurement verifies `host` against the pin, a bare
+    /// host verifies it against `githubRepo`, and no host discovers a router.
     internal func makeGoClient(host: String?) throws -> ClientSecureClient {
-        if pinnedMeasurement == nil, let host {
+        switch (pinnedMeasurement, host) {
+        case (let pinnedMeasurement?, let host?):
+            return try Self.makePinnedGoClient(host: host, pinnedMeasurement: pinnedMeasurement, vmShape: vmShape)
+        case (nil, let host?):
             guard let client = ClientNewSecureClient(host, githubRepo) else {
                 throw VerificationError.verificationFailed("Failed to create secure verifier for \(host)")
             }
             return client
-        }
-
-        guard let pinnedMeasurement else {
+        case (nil, nil):
             guard githubRepo == TinfoilConstants.defaultGithubRepo else {
                 throw VerificationError.verificationFailed("A custom githubRepo requires enclaveURL")
             }
@@ -170,12 +171,18 @@ public class SecureClient {
                 throw VerificationError.verificationFailed("Failed to discover a secure enclave")
             }
             return client
-        }
-
-        guard let host else {
+        case (.some, nil):
             throw VerificationError.verificationFailed("pinnedMeasurement requires enclaveURL")
         }
+    }
 
+    /// The pinned Go constructor takes the measurement and shape as JSON
+    /// because gomobile cannot bind the struct types.
+    private static func makePinnedGoClient(
+        host: String,
+        pinnedMeasurement: AttestationMeasurement,
+        vmShape: VMShape?
+    ) throws -> ClientSecureClient {
         let encoder = JSONEncoder()
         let measurementJSON = String(decoding: try encoder.encode(pinnedMeasurement), as: UTF8.self)
         let shapeJSON = try vmShape.map { String(decoding: try encoder.encode($0), as: UTF8.self) } ?? ""
