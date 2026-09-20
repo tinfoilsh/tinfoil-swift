@@ -39,18 +39,17 @@ public class TinfoilAI {
     }
 
     /// Selects the enclave a key-rotation refresh re-verifies. Re-verification
-    /// must target the same enclave the caller chose (an explicit `enclaveURL`
-    /// or a pinned measurement is a destination constraint). The one exception
-    /// is a client that discovered its enclave through an EHBP forwarding proxy:
-    /// ATC may rotate the endpoint/key pair behind the proxy, so only then does
-    /// refresh rediscover by returning nil.
+    /// must target the same enclave the caller chose: an explicit `enclaveURL`
+    /// is a destination constraint, and a pinned measurement always has one.
+    /// The one exception is a client that discovered its enclave through an
+    /// EHBP forwarding proxy: ATC may rotate the endpoint/key pair behind the
+    /// proxy, so only then does refresh rediscover by returning nil.
     internal static func refreshEnclaveURL(
         verifiedEnclaveURL: String,
         configuredEnclaveURL: String?,
-        baseURL: String?,
-        pinned: Bool
+        baseURL: String?
     ) -> String? {
-        if baseURL == nil || configuredEnclaveURL != nil || pinned {
+        if baseURL == nil || configuredEnclaveURL != nil {
             return verifiedEnclaveURL
         }
         return nil
@@ -153,8 +152,7 @@ public class TinfoilAI {
             let pinnedRefreshEnclaveURL = refreshEnclaveURL(
                 verifiedEnclaveURL: enclaveURL,
                 configuredEnclaveURL: configuredEnclaveURL,
-                baseURL: baseURL,
-                pinned: pinnedMeasurement != nil
+                baseURL: baseURL
             )
             let refreshEndpoint: EHBPVerifiedState.Refresh = {
                 let refreshVerifier = try Self.makeVerifier(

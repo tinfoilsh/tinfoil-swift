@@ -88,8 +88,7 @@ final class PinningSecurityTests: XCTestCase {
                 let refreshedURL = try XCTUnwrap(TinfoilAI.refreshEnclaveURL(
                     verifiedEnclaveURL: origin.url,
                     configuredEnclaveURL: configured,
-                    baseURL: baseURL,
-                    pinned: true
+                    baseURL: baseURL
                 ))
                 XCTAssertEqual(refreshedURL, origin.url)
                 XCTAssertEqual(try URLHelpers.parseEnclaveURL(refreshedURL).authority, origin.authority)

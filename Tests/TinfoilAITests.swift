@@ -152,21 +152,17 @@ final class TinfoilAITests: XCTestCase {
 
         // Direct clients always re-verify the enclave they selected.
         XCTAssertEqual(
-            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: nil, pinned: false),
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: nil),
             verified
         )
         // A discovered enclave behind a forwarding proxy may be rotated by ATC.
         XCTAssertNil(
-            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: "https://proxy.example.com", pinned: false)
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: "https://proxy.example.com")
         )
-        // An explicitly configured enclave is a destination constraint even behind a proxy.
+        // An explicitly configured enclave is a destination constraint even behind
+        // a proxy. A pinned client always has one, so this also covers pinning.
         XCTAssertEqual(
-            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: verified, baseURL: "https://proxy.example.com", pinned: false),
-            verified
-        )
-        // So is a pinned measurement.
-        XCTAssertEqual(
-            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: nil, baseURL: "https://proxy.example.com", pinned: true),
+            TinfoilAI.refreshEnclaveURL(verifiedEnclaveURL: verified, configuredEnclaveURL: verified, baseURL: "https://proxy.example.com"),
             verified
         )
     }
