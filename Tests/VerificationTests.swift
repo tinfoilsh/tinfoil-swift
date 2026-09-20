@@ -243,7 +243,7 @@ final class VerificationTests: XCTestCase {
 
         let pinned = SecureClient(
             enclaveURL: enclaveURL,
-            pinnedMeasurement: AttestationMeasurement(type: measurement.type, registers: measurement.registers)
+            pinnedMeasurement: CodeMeasurement(snpMeasurement: measurement.registers[0])
         )
         let groundTruth = try await pinned.verify()
 
@@ -274,7 +274,7 @@ final class VerificationTests: XCTestCase {
         tamperedRegisters[0] = (first.hasPrefix("0") ? "1" : "0") + first.dropFirst()
         let tampered = SecureClient(
             enclaveURL: enclaveURL,
-            pinnedMeasurement: AttestationMeasurement(type: measurement.type, registers: tamperedRegisters)
+            pinnedMeasurement: CodeMeasurement(snpMeasurement: tamperedRegisters[0])
         )
         do {
             _ = try await tampered.verify()
@@ -295,10 +295,10 @@ final class VerificationTests: XCTestCase {
     func testPinnedMeasurementRejectsMalformedMeasurement() async throws {
         let validRegister = String(repeating: "a", count: VerificationTestSupport.registerHexLength)
         let malformed = [
-            ("empty", AttestationMeasurement(type: "", registers: [])),
-            ("short register", AttestationMeasurement(type: VerificationTestSupport.sevGuestType, registers: ["abc"])),
-            ("wrong count", AttestationMeasurement(type: VerificationTestSupport.sevGuestType, registers: [validRegister, validRegister])),
-            ("unsupported type", AttestationMeasurement(type: "https://tinfoil.sh/predicate/unknown/v1", registers: [validRegister])),
+            ("empty", CodeMeasurement()),
+            ("short SNP", CodeMeasurement(snpMeasurement: "abc")),
+            ("missing RTMR2", CodeMeasurement(tdxMeasurement: TDXMeasurement(rtmr1: validRegister, rtmr2: ""))),
+            ("invalid RTMR1", CodeMeasurement(tdxMeasurement: TDXMeasurement(rtmr1: "abc", rtmr2: validRegister))),
         ]
         for (name, pin) in malformed {
             let client = SecureClient(enclaveURL: "https://enclave.example.com", pinnedMeasurement: pin)
@@ -314,7 +314,8 @@ final class VerificationTests: XCTestCase {
                 XCTAssertEqual(document?.securityVerified, false)
                 XCTAssertEqual(document?.configRepo, TinfoilConstants.pinnedNoRepo)
                 XCTAssertEqual(document?.releaseDigest, TinfoilConstants.pinnedNoDigest)
-                XCTAssertEqual(document?.codeMeasurement.type, pin.type)
+                XCTAssertEqual(document?.codeMeasurement.type, "")
+                XCTAssertEqual(document?.codeMeasurement.registers, [])
                 XCTAssertEqual(document?.steps.fetchDigest.status, .skipped)
                 XCTAssertEqual(document?.steps.verifyCode.status, .skipped)
                 XCTAssertEqual(document?.steps.otherError?.status, .failed)

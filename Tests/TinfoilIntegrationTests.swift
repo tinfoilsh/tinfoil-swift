@@ -35,9 +35,8 @@ final class TinfoilIntegrationTests: XCTestCase {
     func testPinnedFactoryCannotFallBackToDiscovery() {
         let client = SecureClient(
             enclaveURL: "https://enclave.example",
-            pinnedMeasurement: AttestationMeasurement(
-                type: VerificationTestSupport.sevGuestType,
-                registers: [String(repeating: "a", count: VerificationTestSupport.registerHexLength)]
+            pinnedMeasurement: CodeMeasurement(
+                snpMeasurement: String(repeating: "a", count: VerificationTestSupport.registerHexLength)
             )
         )
         XCTAssertThrowsError(try client.makeGoClient(host: nil)) { error in

@@ -160,7 +160,7 @@ let client = try await TinfoilAI.create(
     baseURL: String? = nil,             // Proxy server URL (requests go directly to enclave if nil)
     enclaveURL: String? = nil,          // Custom enclave URL (auto-selects router if nil)
     githubRepo: String = "tinfoilsh/confidential-model-router", // GitHub repo for verification
-    pinnedMeasurement: AttestationMeasurement? = nil, // Verify against a known measurement (see below)
+    pinnedMeasurement: CodeMeasurement? = nil,  // Verify against known workload registers (see below)
     vmShape: VMShape? = nil,                    // With pinnedMeasurement: VM shape for TDX enclaves
     parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
     userCacheSecret: String? = nil,             // Prompt cache scoping secret (see "Prompt Cache Scoping")
@@ -177,14 +177,29 @@ By default the client trusts the code measurement proven by the Sigstore code pr
 ```swift
 let client = try await TinfoilAI.create(
     enclaveURL: "https://enclave.example.com",
-    pinnedMeasurement: AttestationMeasurement(
-        type: "https://tinfoil.sh/predicate/sev-snp-guest/v2",
-        registers: ["<hex measurement>"]
-    )
+    pinnedMeasurement: CodeMeasurement(snpMeasurement: "<release SNP measurement>")
 )
 ```
 
-`pinnedMeasurement` requires `enclaveURL` and cannot be combined with a custom `githubRepo`. The measurement must carry the register layout of its type (1 register for SEV-SNP, 5 for TDX, 3 for multi-platform) as 48-byte hex; a malformed pin fails verification before any network access. A five-register TDX pin fixes every register including RTMR3. A TDX enclave additionally needs `vmShape` declaring the VM shape the code was built for, since the attestation document's endorsed platform measurement is resolved under that shape. `SecureClient(enclaveURL:pinnedMeasurement:vmShape:)` offers the same mode for verification without the OpenAI wrapper.
+`pinnedMeasurement` requires `enclaveURL` and cannot be combined with a custom `githubRepo`. Copy the raw measurements from a trusted release, not a fingerprint or artifact digest. Each register must be 96 hex characters; malformed pins fail verification before network access. `SecureClient(enclaveURL:pinnedMeasurement:vmShape:)` offers the same mode without the OpenAI wrapper.
+
+For TDX, pin only RTMR1 and RTMR2 and supply the release's `vm_shape`:
+
+```swift
+let client = try await TinfoilAI.create(
+    enclaveURL: "https://enclave.example.com",
+    pinnedMeasurement: CodeMeasurement(tdxMeasurement: TDXMeasurement(
+        rtmr1: "<release rtmr1>",
+        rtmr2: "<release rtmr2>"
+    )),
+    vmShape: VMShape(cpus: 8, memoryMB: 32768, disks: 1)
+)
+```
+
+The Go verifier still validates MRTD and RTMR0 against platform endorsements
+under that shape, and requires RTMR3 to be zero. No new release fingerprint is
+needed. A `CodeMeasurement` can include both platform measurements; verification
+requires the one matching the authenticated enclave platform.
 
 Explicit enclave URLs must use HTTPS; schemeless hosts default to HTTPS. Verification and key refresh preserve the configured host and port. A `vmShape` without `pinnedMeasurement` is rejected.
 

@@ -4,10 +4,7 @@ import XCTest
 
 final class PinningSecurityTests: XCTestCase {
     private static let register = String(repeating: "a", count: VerificationTestSupport.registerHexLength)
-    private static let pin = AttestationMeasurement(
-        type: VerificationTestSupport.sevGuestType,
-        registers: [register]
-    )
+    private static let pin = CodeMeasurement(snpMeasurement: register)
 
     func testEnclaveOriginsPreserveHostAndPort() throws {
         let cases: [(input: String, url: String, authority: String)] = [
@@ -152,8 +149,8 @@ final class PinningSecurityTests: XCTestCase {
             XCTAssertFalse(document.allStepsSucceeded)
             XCTAssertEqual(document.configRepo, TinfoilConstants.pinnedNoRepo)
             XCTAssertEqual(document.releaseDigest, TinfoilConstants.pinnedNoDigest)
-            XCTAssertEqual(document.codeMeasurement.type, Self.pin.type)
-            XCTAssertEqual(document.codeMeasurement.registers, Self.pin.registers)
+            XCTAssertTrue(document.codeMeasurement.type.isEmpty)
+            XCTAssertTrue(document.codeMeasurement.registers.isEmpty)
             XCTAssertEqual(document.enclaveHost, "enclave.example:8443")
             XCTAssertEqual(document.selectedRouterEndpoint, document.enclaveHost)
             XCTAssertEqual(document.steps.fetchDigest.status, .skipped)
@@ -223,8 +220,27 @@ final class PinningSecurityTests: XCTestCase {
     func testPinnedMeasurementEncodesGoJSONFieldNames() throws {
         let data = try JSONEncoder().encode(Self.pin)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(Set(object.keys), Set(["type", "registers"]))
-        XCTAssertEqual(object["type"] as? String, Self.pin.type)
-        XCTAssertEqual(object["registers"] as? [String], Self.pin.registers)
+        XCTAssertEqual(Set(object.keys), Set(["snp_measurement"]))
+        XCTAssertEqual(object["snp_measurement"] as? String, Self.register)
+    }
+
+    func testTDXPinEncodesOnlyWorkloadRegisters() throws {
+        let rtmr2 = String(repeating: "b", count: VerificationTestSupport.registerHexLength)
+        let pin = CodeMeasurement(tdxMeasurement: TDXMeasurement(rtmr1: Self.register, rtmr2: rtmr2))
+        let data = try JSONEncoder().encode(pin)
+        let object = try JSONDecoder().decode([String: [String: String]].self, from: data)
+        XCTAssertEqual(object, ["tdx_measurement": ["rtmr1": Self.register, "rtmr2": rtmr2]])
+
+        let client = SecureClient(enclaveURL: "https://enclave.example", pinnedMeasurement: pin,
+                                  vmShape: VMShape(cpus: 4, memoryMB: 8192, disks: 1))
+        let verifier = try client.makeGoClient(host: "enclave.example")
+        XCTAssertEqual(verifier.repo(), TinfoilConstants.pinnedNoRepo)
+        XCTAssertEqual(verifier.enclave(), "enclave.example")
+        XCTAssertNil(verifier.groundTruth())
+
+        let missingShape = SecureClient(enclaveURL: "https://enclave.example", pinnedMeasurement: pin)
+        XCTAssertThrowsError(try missingShape.makeGoClient(host: "enclave.example")) { error in
+            XCTAssertTrue(error.localizedDescription.contains("requires a VM shape"))
+        }
     }
 }

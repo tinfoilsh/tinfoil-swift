@@ -14,7 +14,7 @@ public class TinfoilAI {
     private static func makeVerifier(
         githubRepo: String,
         enclaveURL: String?,
-        pinnedMeasurement: AttestationMeasurement? = nil,
+        pinnedMeasurement: CodeMeasurement? = nil,
         vmShape: VMShape? = nil
     ) throws -> SecureClient {
         // A pin without an enclave must never degrade to release-based
@@ -106,7 +106,7 @@ public class TinfoilAI {
         baseURL: String? = nil,
         enclaveURL: String? = nil,
         githubRepo: String = TinfoilConstants.defaultGithubRepo,
-        pinnedMeasurement: AttestationMeasurement? = nil,
+        pinnedMeasurement: CodeMeasurement? = nil,
         vmShape: VMShape? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],

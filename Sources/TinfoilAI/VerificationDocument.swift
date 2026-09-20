@@ -49,6 +49,33 @@ public struct AttestationMeasurement: Codable {
     }
 }
 
+/// Workload measurements published with a release; platform registers are not pin inputs.
+public struct CodeMeasurement: Codable {
+    public let snpMeasurement: String?
+    public let tdxMeasurement: TDXMeasurement?
+
+    public init(snpMeasurement: String? = nil, tdxMeasurement: TDXMeasurement? = nil) {
+        self.snpMeasurement = snpMeasurement
+        self.tdxMeasurement = tdxMeasurement
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case snpMeasurement = "snp_measurement"
+        case tdxMeasurement = "tdx_measurement"
+    }
+}
+
+/// Expected TDX workload registers. The Go verifier checks the platform separately.
+public struct TDXMeasurement: Codable {
+    public let rtmr1: String
+    public let rtmr2: String
+
+    public init(rtmr1: String, rtmr2: String) {
+        self.rtmr1 = rtmr1
+        self.rtmr2 = rtmr2
+    }
+}
+
 /// Represents an attestation response from the enclave
 public struct AttestationResponse: Codable {
     public let measurement: AttestationMeasurement

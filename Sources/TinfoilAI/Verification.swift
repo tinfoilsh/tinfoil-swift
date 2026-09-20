@@ -90,7 +90,7 @@ public struct GroundTruth: Codable {
 public class SecureClient {
     private let githubRepo: String
     private let configuredEnclaveURL: String?
-    private let pinnedMeasurement: AttestationMeasurement?
+    private let pinnedMeasurement: CodeMeasurement?
     private let vmShape: VMShape?
     private var discoveredEnclaveURL: String?
     private var groundTruth: GroundTruth?
@@ -126,7 +126,7 @@ public class SecureClient {
     ///     TDX enclaves, ignored for SEV-SNP.
     public convenience init(
         enclaveURL: String,
-        pinnedMeasurement: AttestationMeasurement,
+        pinnedMeasurement: CodeMeasurement,
         vmShape: VMShape? = nil
     ) {
         self.init(
@@ -140,7 +140,7 @@ public class SecureClient {
     private init(
         githubRepo: String,
         configuredEnclaveURL: String?,
-        pinnedMeasurement: AttestationMeasurement? = nil,
+        pinnedMeasurement: CodeMeasurement? = nil,
         vmShape: VMShape? = nil
     ) {
         self.githubRepo = githubRepo
@@ -180,7 +180,7 @@ public class SecureClient {
     /// because gomobile cannot bind the struct types.
     private static func makePinnedGoClient(
         host: String,
-        pinnedMeasurement: AttestationMeasurement,
+        pinnedMeasurement: CodeMeasurement,
         vmShape: VMShape?
     ) throws -> ClientSecureClient {
         let encoder = JSONEncoder()
@@ -484,7 +484,7 @@ public class SecureClient {
     internal static func makeFailureDocument(
         configRepo: String,
         enclaveHost: String,
-        pinnedMeasurement: AttestationMeasurement?,
+        pinnedMeasurement: CodeMeasurement?,
         steps: VerificationDocument.Steps
     ) -> VerificationDocument {
         let failureSteps = VerificationDocument.Steps(
@@ -502,7 +502,7 @@ public class SecureClient {
             configRepo: configRepo,
             enclaveHost: enclaveHost,
             releaseDigest: pinnedMeasurement == nil ? "" : TinfoilConstants.pinnedNoDigest,
-            codeMeasurement: pinnedMeasurement ?? AttestationMeasurement(type: "", registers: []),
+            codeMeasurement: AttestationMeasurement(type: "", registers: []),
             enclaveMeasurement: AttestationResponse(
                 measurement: AttestationMeasurement(type: "", registers: [])
             ),

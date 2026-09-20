@@ -110,7 +110,7 @@ final class TinfoilAITests: XCTestCase {
     // MARK: - Pinned Measurement Tests
 
     func testPinnedMeasurementRequiresEnclaveURL() async throws {
-        let measurement = AttestationMeasurement(type: "type", registers: ["abc"])
+        let measurement = CodeMeasurement(snpMeasurement: "abc")
         do {
             _ = try await TinfoilAI.create(apiKey: "test-key", pinnedMeasurement: measurement)
             XCTFail("pinnedMeasurement without enclaveURL should be rejected")
@@ -185,7 +185,7 @@ final class TinfoilAITests: XCTestCase {
         let client = try await TinfoilAI.create(
             apiKey: try getAPIKey(),
             enclaveURL: enclaveURL,
-            pinnedMeasurement: AttestationMeasurement(type: measurement.type, registers: measurement.registers),
+            pinnedMeasurement: CodeMeasurement(snpMeasurement: measurement.registers[0]),
             onVerification: { documents.value.append($0) }
         )
 
