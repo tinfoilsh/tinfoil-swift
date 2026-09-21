@@ -84,6 +84,36 @@ for try await chunk in client.chatsStream(query: chatQuery) {
 }
 ```
 
+### Streaming Speech
+
+Speech requests use the same verified EHBP client as chat requests. Custom model
+and voice identifiers are forwarded to the provider without substitution:
+
+```swift
+let query = AudioSpeechQuery(
+    model: "qwen3-tts",
+    input: "Hello, world!",
+    voice: .custom("aiden"),
+    responseFormat: .pcm,
+    streamFormat: .audio
+)
+let stream = client.audioCreateSpeechStream(
+    query: query,
+    options: .init(expectedContentType: "audio/pcm")
+)
+```
+
+Iterate over `stream` to receive decrypted audio in `AudioSpeechResult.audio`.
+The expected content type is validated before audio is delivered. The existing
+`audioCreateSpeechStream(query:)` overload remains available and accepts audio
+content types or `application/octet-stream`. Neither overload accepts JSON, HTML,
+or SSE as audio.
+
+Cancel the consuming task to stop the request. Audio decoding and playback stay
+in the application: chunks can split PCM samples or audio frames, and the async
+stream uses unbounded buffering, so consume promptly and bound generation at the
+application level. No audio is written to disk by the SDK.
+
 ### Security Architecture
 
 Tinfoil Swift combines **remote attestation** and **certificate pinning** to ensure your data only reaches verified enclave code. During setup, the SDK requests an attestation report that cryptographically proves the exact code running in the enclave and includes the enclave's TLS public key fingerprint. On every API request, the SDK validates the server's TLS certificate matches this attested fingerprint. This creates a cryptographic chain from GitHub source code → attestation → TLS connection, preventing man-in-the-middle attacks even if DNS or router selection is compromised.

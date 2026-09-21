@@ -67,6 +67,7 @@ final class LocalTestServer: @unchecked Sendable {
     /// Responses served in order, one per request, before falling back to the
     /// default fields above.
     var queuedResponses: [Response] = []
+    var responseHandler: ((CapturedHTTPRequest) -> Response)?
 
     init(port: UInt16 = 0) {
         self.port = port
@@ -191,11 +192,13 @@ final class LocalTestServer: @unchecked Sendable {
 
         guard !allData.isEmpty else { return }
 
+        var customResponse: Response?
         if let request = parseHTTPRequest(allData) {
             requestStore.append(request)
+            customResponse = responseHandler?(request)
         }
 
-        let response = buildHTTPResponse()
+        let response = buildHTTPResponse(customResponse)
         _ = response.withUnsafeBytes { ptr in
             send(clientSocket, ptr.baseAddress, response.count, 0)
         }
@@ -241,15 +244,15 @@ final class LocalTestServer: @unchecked Sendable {
         return CapturedHTTPRequest(method: method, path: path, headers: headers, body: body)
     }
 
-    private func buildHTTPResponse() -> Data {
-        let next = queuedResponses.isEmpty
+    private func buildHTTPResponse(_ response: Response? = nil) -> Data {
+        let next = response ?? (queuedResponses.isEmpty
             ? Response(
                 statusCode: responseStatusCode,
                 contentType: responseContentType,
                 body: responseBody,
                 includeNonce: includeResponseNonce
             )
-            : queuedResponses.removeFirst()
+            : queuedResponses.removeFirst())
         var response = "HTTP/1.1 \(next.statusCode) OK\r\n"
         response += "Content-Type: \(next.contentType)\r\n"
         if next.includeNonce {
@@ -2077,6 +2080,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that TinfoilAI.audioCreateSpeechStream() uses EHBP encryption end-to-end
     func testTinfoilAIAudioCreateSpeechStreamUsesEHBPEncryption() async throws {
+        server.responseContentType = "audio/mpeg"
         let tinfoilClient = try TinfoilAI(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
@@ -2091,8 +2095,12 @@ final class EHBPTests: XCTestCase {
         )
 
         let stream = tinfoilClient.audioCreateSpeechStream(query: query)
-        for try await _ in stream {
-            break
+        do {
+            for try await _ in stream {
+                XCTFail("The empty fixture must not yield audio")
+            }
+            XCTFail("Expected the empty-audio response to fail")
+        } catch OpenAIError.emptyData {
         }
 
         try await Task.sleep(nanoseconds: 100_000_000)
