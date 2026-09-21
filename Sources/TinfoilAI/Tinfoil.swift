@@ -281,6 +281,12 @@ public class TinfoilAI {
         openAIClient.audioCreateSpeechStream(query: query)
     }
 
+    /// Streams EHBP-encrypted speech with response validation options, such as
+    /// requiring `audio/pcm` before delivering bytes to a PCM player.
+    public func audioCreateSpeechStream(query: AudioSpeechQuery, options: AudioSpeechStreamOptions) -> AsyncThrowingStream<AudioSpeechResult, Error> {
+        openAIClient.audioCreateSpeechStream(query: query, options: options)
+    }
+
     public func audioTranscriptions(query: AudioTranscriptionQuery) async throws -> AudioTranscriptionResult {
         try await openAIClient.audioTranscriptions(query: query)
     }
