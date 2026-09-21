@@ -244,8 +244,8 @@ final class LocalTestServer: @unchecked Sendable {
         return CapturedHTTPRequest(method: method, path: path, headers: headers, body: body)
     }
 
-    private func buildHTTPResponse(_ response: Response? = nil) -> Data {
-        let next = response ?? (queuedResponses.isEmpty
+    private func buildHTTPResponse(_ customResponse: Response? = nil) -> Data {
+        let next = customResponse ?? (queuedResponses.isEmpty
             ? Response(
                 statusCode: responseStatusCode,
                 contentType: responseContentType,
