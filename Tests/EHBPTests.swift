@@ -351,7 +351,7 @@ final class EHBPTests: XCTestCase {
 
         let plainTextBody = """
         {
-            "model": "gpt-4",
+            "model": "gpt-oss-120b",
             "messages": [{"role": "user", "content": "Hello"}]
         }
         """
@@ -839,7 +839,7 @@ final class EHBPTests: XCTestCase {
             publicKey: testPublicKey
         )
 
-        let testBody = Data("{\"model\": \"gpt-4\", \"stream\": true}".utf8)
+        let testBody = Data("{\"model\": \"gpt-oss-120b\", \"stream\": true}".utf8)
 
         do {
             let (stream, _) = try await ehbpClient.requestStream(
@@ -878,7 +878,7 @@ final class EHBPTests: XCTestCase {
 
         let plainTextBody = """
         {
-            "model": "gpt-4",
+            "model": "gpt-oss-120b",
             "messages": [{"role": "user", "content": "Hello streaming!"}],
             "stream": true
         }
@@ -912,7 +912,7 @@ final class EHBPTests: XCTestCase {
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
             XCTAssertFalse(bodyString.contains("streaming"), "Encrypted body should not contain plaintext 'streaming'")
-            XCTAssertFalse(bodyString.contains("gpt-4"), "Encrypted body should not contain plaintext 'gpt-4'")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "Encrypted body should not contain plaintext 'gpt-oss-120b'")
         }
     }
 
@@ -1044,7 +1044,7 @@ final class EHBPTests: XCTestCase {
 
         let query = ChatQuery(
             messages: [.user(.init(content: .string("Hello from TinfoilAI test!")))],
-            model: "gpt-4"
+            model: "gpt-oss-120b"
         )
 
         do {
@@ -1074,7 +1074,7 @@ final class EHBPTests: XCTestCase {
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
             XCTAssertFalse(bodyString.contains("Hello from TinfoilAI"), "TinfoilAI.chats() body MUST be encrypted - found plaintext message")
-            XCTAssertFalse(bodyString.contains("gpt-4"), "TinfoilAI.chats() body MUST be encrypted - found plaintext model")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "TinfoilAI.chats() body MUST be encrypted - found plaintext model")
             XCTAssertFalse(bodyString.contains("messages"), "TinfoilAI.chats() body MUST be encrypted - found plaintext 'messages'")
         }
 
@@ -1168,7 +1168,7 @@ final class EHBPTests: XCTestCase {
 
         let query = ChatQuery(
             messages: [.user(.init(content: .string("Hello streaming from TinfoilAI!")))],
-            model: "gpt-4",
+            model: "gpt-oss-120b",
             stream: true
         )
 
@@ -1201,7 +1201,7 @@ final class EHBPTests: XCTestCase {
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
             XCTAssertFalse(bodyString.contains("Hello streaming from TinfoilAI"), "TinfoilAI.chatsStream() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("gpt-4"), "TinfoilAI.chatsStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "TinfoilAI.chatsStream() body MUST be encrypted")
         }
     }
 
@@ -1304,7 +1304,7 @@ final class EHBPTests: XCTestCase {
 
         let query = CreateModelResponseQuery(
             input: .textInput("Hello from Responses API test!"),
-            model: "gpt-4"
+            model: "gpt-oss-120b"
         )
 
         do {
@@ -1333,7 +1333,7 @@ final class EHBPTests: XCTestCase {
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
             XCTAssertFalse(bodyString.contains("Responses API test"), "TinfoilAI.createResponse() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("gpt-4"), "TinfoilAI.createResponse() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "TinfoilAI.createResponse() body MUST be encrypted")
         }
     }
 
@@ -1348,7 +1348,7 @@ final class EHBPTests: XCTestCase {
 
         let query = CreateModelResponseQuery(
             input: .textInput("Hello streaming from Responses API!"),
-            model: "gpt-4",
+            model: "gpt-oss-120b",
             stream: true
         )
 
@@ -1380,7 +1380,7 @@ final class EHBPTests: XCTestCase {
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
             XCTAssertFalse(bodyString.contains("streaming from Responses API"), "TinfoilAI.createResponseStream() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("gpt-4"), "TinfoilAI.createResponseStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "TinfoilAI.createResponseStream() body MUST be encrypted")
         }
     }
 
@@ -1599,7 +1599,7 @@ final class EHBPTests: XCTestCase {
         )
 
         let query = AssistantsQuery(
-            model: "gpt-4",
+            model: "gpt-oss-120b",
             name: "Test Assistant",
             description: "A test assistant for EHBP verification",
             instructions: "You are a helpful test assistant",
@@ -1909,13 +1909,13 @@ final class EHBPTests: XCTestCase {
         await testEndpoint("chats") {
             _ = try await tinfoilClient.chats(query: ChatQuery(
                 messages: [.user(.init(content: .string("test")))],
-                model: "gpt-4"
+                model: "gpt-oss-120b"
             ))
         }
 
         await testStreamingEndpoint("chatsStream", stream: tinfoilClient.chatsStream(query: ChatQuery(
             messages: [.user(.init(content: .string("test")))],
-            model: "gpt-4",
+            model: "gpt-oss-120b",
             stream: true
         )))
 
@@ -1979,7 +1979,7 @@ final class EHBPTests: XCTestCase {
 
         await testEndpoint("assistantCreate") {
             _ = try await tinfoilClient.assistantCreate(query: AssistantsQuery(
-                model: "gpt-4",
+                model: "gpt-oss-120b",
                 name: "test",
                 description: nil,
                 instructions: nil,
@@ -1990,7 +1990,7 @@ final class EHBPTests: XCTestCase {
         await testEndpoint("assistantModify") {
             _ = try await tinfoilClient.assistantModify(
                 query: AssistantsQuery(
-                    model: "gpt-4",
+                    model: "gpt-oss-120b",
                     name: "test",
                     description: nil,
                     instructions: nil,
@@ -2047,13 +2047,13 @@ final class EHBPTests: XCTestCase {
         await testEndpoint("createResponse") {
             _ = try await tinfoilClient.createResponse(query: CreateModelResponseQuery(
                 input: .textInput("test"),
-                model: "gpt-4"
+                model: "gpt-oss-120b"
             ))
         }
 
         await testStreamingEndpoint("createResponseStream", stream: tinfoilClient.createResponseStream(query: CreateModelResponseQuery(
             input: .textInput("test"),
-            model: "gpt-4",
+            model: "gpt-oss-120b",
             stream: true
         )))
 
@@ -2198,7 +2198,7 @@ final class EHBPTests: XCTestCase {
         )
 
         let query = AssistantsQuery(
-            model: "gpt-4",
+            model: "gpt-oss-120b",
             name: "Modified Assistant",
             description: "Updated description",
             instructions: "Updated secret instructions",
