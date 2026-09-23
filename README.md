@@ -1,15 +1,17 @@
-# Tinfoil Swift
+# Tinfoil Swift Client
 
 [![Swift](https://img.shields.io/badge/Swift-5.9-orange.svg)](https://swift.org)
 [![Platforms](https://img.shields.io/badge/Platforms-iOS%20|%20macOS-blue.svg)](https://developer.apple.com)
 [![Tests](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml)
-[![Docs](https://img.shields.io/badge/Docs-Swift%20SDK-blue.svg)](https://docs.tinfoil.sh/sdk/swift-sdk)
+[![Documentation](https://img.shields.io/badge/docs-tinfoil.sh-blue)](https://docs.tinfoil.sh/sdk/swift-sdk)
 
-A secure Swift SDK for communicating with AI models running in Tinfoil's confidential computing enclaves. This SDK configures the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with additional security features including automatic enclave attestation verification and certificate pinning for direct-to-enclave encrypted communication.
+A Swift client for verifiably private AI inference with Tinfoil. It wraps the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with the same API, and before sending any request it verifies the enclave's attestation and encrypts the request body to the attested key using [EHBP](https://docs.tinfoil.sh/resources/ehbp), so only the verified enclave can read it.
+
+For complete documentation, see the [Swift SDK documentation](https://docs.tinfoil.sh/sdk/swift-sdk).
 
 ## Installation
 
-### Swift Package Manager
+Requires iOS 17 or macOS 14, and Swift 5.9.
 
 ```swift
 dependencies: [
@@ -17,80 +19,40 @@ dependencies: [
 ]
 ```
 
-Or in Xcode:
-
-1. Go to File > Add Packages...
-2. Enter the repository URL: `https://github.com/tinfoilsh/tinfoil-swift.git`
-3. Select the branch or version you want to use
-4. Click "Add Package"
-
-The OpenAI SDK dependency will be automatically included.
+Or in Xcode, File > Add Packages and enter `https://github.com/tinfoilsh/tinfoil-swift.git`.
 
 ## Quick Start
 
 ```swift
 import TinfoilAI
-import OpenAI
 
-// Create a secure OpenAI client
-// This automatically:
-// - Fetches an available router from Tinfoil's network
-// - Verifies the enclave is running genuine Tinfoil code
-// - Sets up certificate pinning for all requests
-let client = try await TinfoilAI.create(
-    apiKey: "YOUR_API_KEY" // Optional, uses TINFOIL_API_KEY env var if not provided
+// Reads TINFOIL_API_KEY from the environment when apiKey is omitted.
+// Enclave verification and encryption happen automatically.
+let client = try await TinfoilAI.create(apiKey: "YOUR_API_KEY")
+
+let query = ChatQuery(
+    messages: [.user(.init(content: .string("Hello, world!")))],
+    model: "llama3-3-70b" // see https://docs.tinfoil.sh/models/catalog
 )
 
-// Use the client exactly like the OpenAI SDK
-let chatQuery = ChatQuery(
-    messages: [
-        .user(.init(content: .string("Hello, world!")))
-    ],
-    model: "model-name"
-)
-
-let response = try await client.chats(query: chatQuery)
+let response = try await client.chats(query: query)
 print(response.choices.first?.message.content ?? "No response")
 ```
 
-
-## Key Features
-
-- **Automatic Router Selection**: Dynamically selects from available Tinfoil routers
-- **Enclave Verification**: Verifies code integrity via GitHub and Sigstore
-- **Remote Attestation**: Validates the enclave runtime environment (AMD SEV-SNP / Intel TDX)
-- **Certificate Pinning**: Ensures direct-to-enclave encrypted communication
-- **OpenAI Compatible**: Drop-in replacement for OpenAI SDK
-
-## Advanced Features
-
-### Streaming Responses
-
-Stream responses in real-time as they're generated:
+### Streaming
 
 ```swift
-let client = try await TinfoilAI.create()
-
-let chatQuery = ChatQuery(
-    messages: [.user(.init(content: .string("Tell me a story")))],
-    model: "model-name"
-)
-
-// Stream the response
-for try await chunk in client.chatsStream(query: chatQuery) {
+for try await chunk in client.chatsStream(query: query) {
     if let delta = chunk.choices.first?.delta.content {
         print(delta, terminator: "")
     }
 }
 ```
 
-### Streaming Speech
-
-Speech requests use the same verified EHBP client as chat requests. Custom model
-and voice identifiers are forwarded to the provider without substitution:
+### Streaming speech
 
 ```swift
-let query = AudioSpeechQuery(
+let speech = AudioSpeechQuery(
     model: "qwen3-tts",
     input: "Hello, world!",
     voice: .custom("aiden"),
@@ -98,119 +60,85 @@ let query = AudioSpeechQuery(
     streamFormat: .audio
 )
 let stream = client.audioCreateSpeechStream(
-    query: query,
+    query: speech,
     options: .init(expectedContentType: "audio/pcm")
 )
 ```
 
-Iterate over `stream` to receive decrypted audio in `AudioSpeechResult.audio`.
-The expected content type is validated before audio is delivered. The existing
-`audioCreateSpeechStream(query:)` overload remains available and accepts audio
-content types or `application/octet-stream`. Neither overload accepts JSON, HTML,
-or SSE as audio.
+Iterate over `stream` to receive decrypted audio in `AudioSpeechResult.audio`. Chunks can split PCM samples or frames, and the stream buffers without bound, so consume promptly. Cancel the consuming task to stop the request.
 
-Cancel the consuming task to stop the request. Audio decoding and playback stay
-in the application: chunks can split PCM samples or audio frames, and the async
-stream uses unbounded buffering, so consume promptly and bound generation at the
-application level. No audio is written to disk by the SDK.
+## Verification document
 
-### Security Architecture
-
-Tinfoil Swift combines **remote attestation** and **certificate pinning** to ensure your data only reaches verified enclave code. During setup, the SDK requests an attestation report that cryptographically proves the exact code running in the enclave and includes the enclave's TLS public key fingerprint. On every API request, the SDK validates the server's TLS certificate matches this attested fingerprint. This creates a cryptographic chain from GitHub source code → attestation → TLS connection, preventing man-in-the-middle attacks even if DNS or router selection is compromised.
-
-#### Verification Callback
-
-You can receive the verification document through an optional callback:
+Receive the verification result through an optional callback, invoked once during `create` and again whenever the enclave rotates its key:
 
 ```swift
-let verificationCallback: VerificationCallback = { verificationDocument in
-    if let doc = verificationDocument {
-        print("✅ Attestation verification successful")
+let client = try await TinfoilAI.create(
+    apiKey: "YOUR_API_KEY",
+    onVerification: { document in
+        guard let doc = document else { return }
         print("Code fingerprint: \(doc.codeFingerprint)")
         print("Enclave fingerprint: \(doc.enclaveFingerprint)")
         print("Release: \(doc.releaseTag ?? "unavailable")")
         print("Verifier: \(doc.verifier.name) \(doc.verifier.version)")
         print("Verified at: \(doc.verifiedAt ?? "unknown")")
         print("Security verified: \(doc.securityVerified)")
-        print("All steps succeeded: \(doc.allStepsSucceeded)")
     }
-}
-
-let client = try await TinfoilAI.create(
-    apiKey: "YOUR_API_KEY",
-    onVerification: verificationCallback
 )
 ```
 
+`verifiedAt` is recorded from the local clock after successful verification. It is not an attested timestamp or a freshness guarantee.
+
 ## Prompt Cache Scoping
 
-The inference router partitions prompt-prefix caches using both the authenticated API identity and `user_cache_secret`. Cache reuse requires the same identity, secret, model, and matching prompt prefix. Changing the identity or secret selects a different cache namespace, so those requests do not share cache entries or cache-hit timing.
-
-`user_cache_secret` is sensitive application data used only for cache partitioning. It is not an API credential or encryption key. Do not log or expose it unnecessarily: a caller who can send requests with the same API identity and secret joins that cache namespace and can observe its cache-hit timing. The SDK adds it to eligible request bodies before they are protected for transport to the verified enclave.
-
-By default, the SDK generates a random secret and persists it at `~/.tinfoil/user_cache_secret`, requesting mode `0600` where supported. Tinfoil SDKs using the same home directory reuse this value. This default is suitable for a single-user application, but it does not separate end users who share one application process or home directory. You can control the scope explicitly:
+The router partitions prompt caches by API identity and a `user_cache_secret` that the SDK adds to eligible requests. By default it generates one and persists it at `~/.tinfoil/user_cache_secret`, which is suitable for single-user applications. Multi-user services should scope each request to its end user:
 
 ```swift
-// Pin a stable, non-empty, opaque secret for this client.
+// Pin a stable, opaque secret for this client (or set TINFOIL_USER_CACHE_SECRET).
 let client = try await TinfoilAI.create(
     apiKey: "YOUR_API_KEY",
     userCacheSecret: secret
 )
 
-// Or provision it via the environment
-//   TINFOIL_USER_CACHE_SECRET=<secret>   use this value
-
-// Multi-user services should scope every request to its end user.
-// A non-empty string field set here wins over the client-level secret:
+// A per-request value wins over the client-level secret.
 let query = ChatQuery(
     messages: [.user(.init(content: .string("Hello!")))],
-    model: "model-name",
+    model: "llama3-3-70b",
     extraBody: ["user_cache_secret": .string(perUserSecret)]
 )
 ```
 
-Resolution order is a non-empty per-request string, a non-empty client value, a non-empty `TINFOIL_USER_CACHE_SECRET`, then the generated default. Empty client or environment values are treated as unset, and an empty per-request string is replaced with the resolved client value. The SDK leaves non-string values unchanged, and applications should not use them for cache scoping.
+See [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching) for resolution order and guidance on choosing a scope.
 
-Multi-user services must provide a stable, non-empty, opaque value for each user (or group whose members may share cache-hit timing) on every eligible request. Do not use a raw user identifier, API key, or encryption key. A single client, environment, or generated value groups all requests using it under the same API identity. If persistence is unavailable, the SDK uses an in-memory value and cache continuity ends when the process exits.
+## Advanced Functionality
 
-## Configuration Options
-
-### TinfoilAI.create() Parameters
+`TinfoilAI.create()` accepts:
 
 ```swift
-let client = try await TinfoilAI.create(
-    apiKey: String? = nil,              // API key (uses TINFOIL_API_KEY env var if nil)
-    baseURL: String? = nil,             // Proxy server URL (requests go directly to enclave if nil)
-    enclaveURL: String? = nil,          // Custom enclave URL (auto-selects router if nil)
-    githubRepo: String = "tinfoilsh/confidential-model-router", // GitHub repo for verification
-    parsingOptions: ParsingOptions = .relaxed,  // OpenAI parsing options
-    userCacheSecret: String? = nil,             // Prompt cache scoping secret (see "Prompt Cache Scoping")
-    onVerification: VerificationCallback? = nil // Verification callback
+TinfoilAI.create(
+    apiKey: String? = nil,                        // falls back to TINFOIL_API_KEY
+    apiKeyProvider: (() -> String?)? = nil,       // resolve the key per request instead
+    baseURL: String? = nil,                       // proxy URL; requests go directly to the enclave if nil
+    githubRepo: String = "tinfoilsh/confidential-model-router",
+    attestationBundleURL: String? = nil,          // fetch the attestation bundle through the proxy
+    parsingOptions: ParsingOptions = .relaxed,
+    customHeaders: [String: String] = [:],
+    tinfoilEvents: Set<TinfoilEvent> = [],
+    userCacheSecret: String? = nil,
+    onVerification: VerificationCallback? = nil
 )
-
-// Returns: TinfoilAI - A client with the same API as OpenAI
 ```
 
-### Proxy Server Support
-
-See the [Proxy Server Guide](https://docs.tinfoil.sh/guides/proxy-server) for routing requests through a proxy while maintaining end-to-end encryption.
+To route through a proxy, set both `baseURL` and `attestationBundleURL` to the proxy; request bodies stay encrypted to the enclave. See the [proxy server guide](https://docs.tinfoil.sh/guides/proxy-server).
 
 ## API Documentation
 
-This library is a secure wrapper around the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) that can be used with Tinfoil. The `TinfoilAI.create()` method returns a `TinfoilAI` client that provides the same API as the OpenAI client, configured for secure communication with Tinfoil enclaves.
-
-For complete documentation, see:
-- [Swift SDK Documentation](https://docs.tinfoil.sh/sdk/swift-sdk)
-- [MacPaw OpenAI SDK Documentation](https://github.com/MacPaw/OpenAI)
-
-## Requirements
-
-- iOS 17.0+ / macOS 12.0+
-- Swift 5.9+
-- Xcode 15.0+
+This library is a drop-in replacement for the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI). All methods and types are identical; see its documentation for API usage.
 
 ## Reporting Vulnerabilities
 
-Please report security vulnerabilities by emailing [security@tinfoil.sh](mailto:security@tinfoil.sh).
+Please report security vulnerabilities by either:
+
+- Emailing [security@tinfoil.sh](mailto:security@tinfoil.sh)
+- Opening an issue on GitHub on this repository
 
 We aim to respond to (legitimate) security reports within 24 hours.
