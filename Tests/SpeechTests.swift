@@ -123,10 +123,10 @@ final class SpeechTests: XCTestCase {
             }
             XCTFail("Expected a missing encryption header error")
         } catch {
-            guard case EHBPError.missingHeader(let name) = error else {
-                return XCTFail("Expected a missing header error, got \(error)")
+            guard let ehbpError = error as? EHBPError, ehbpError.code == .missingResponseNonce else {
+                return XCTFail("Expected a missing response nonce error, got \(error)")
             }
-            XCTAssertEqual(name, EHBPProtocol.responseNonceHeader)
+            XCTAssertTrue(ehbpError.detail.contains(EHBPProtocol.responseNonceHeader))
         }
     }
 

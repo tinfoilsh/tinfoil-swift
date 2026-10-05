@@ -14,7 +14,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/tinfoilsh/openai-swift-fork.git", exact: "0.0.15"),
-        .package(url: "https://github.com/tinfoilsh/encrypted-http-body-protocol.git", exact: "0.3.2"),
+        .package(url: "https://github.com/tinfoilsh/encrypted-http-body-protocol.git", exact: "0.4.0"),
     ],
     targets: [
         .binaryTarget(
