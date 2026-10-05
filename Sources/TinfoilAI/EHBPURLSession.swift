@@ -28,7 +28,7 @@ private func prepareEHBPRequest(
 ) async throws -> PreparedEHBPRequest {
     try Task.checkCancellation()
     guard let url = request.url else {
-        throw EHBPError.invalidInput("request has no URL")
+        throw EHBPError(.invalidInput, "request has no URL")
     }
 
     let snapshot = await verifiedState.snapshot()
@@ -89,7 +89,7 @@ private enum EHBPReplayPolicy {
     /// from `refresh`, so this is unreachable in practice. It exists so a
     /// future edit to the loop cannot silently leave a request unfinished.
     static var attemptsExhausted: Error {
-        EHBPError.invalidResponse("EHBP retry limit exhausted")
+        EHBPError.network("EHBP retry limit exhausted")
     }
 
     static func refresh(
@@ -98,7 +98,7 @@ private enum EHBPReplayPolicy {
         attempt: Int
     ) async throws {
         guard attempt + 1 < maximumAttempts else {
-            throw EHBPError.invalidResponse(
+            throw EHBPError.network(
                 "EHBP key configuration still mismatched after refresh"
             )
         }
@@ -242,7 +242,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
                 } else if let data = data, let response = response {
                     continuation.resume(returning: (data, response))
                 } else {
-                    continuation.resume(throwing: EHBPError.invalidResponse("Missing data or response"))
+                    continuation.resume(throwing: EHBPError.network("Missing data or response"))
                 }
             }
             task.resume()
@@ -272,7 +272,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
                 } else if let data = data, let response = response {
                     promise(.success((data, response)))
                 } else {
-                    promise(.failure(EHBPError.invalidResponse("Missing data or response")))
+                    promise(.failure(EHBPError.network("Missing data or response")))
                 }
             }
             task.resume()
@@ -384,7 +384,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
             finish(
                 data: nil,
                 response: nil,
-                error: EHBPError.invalidInput("session was deallocated")
+                error: EHBPError(.invalidInput, "session was deallocated")
             )
             return
         }
