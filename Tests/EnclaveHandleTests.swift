@@ -43,6 +43,7 @@ final class EnclaveHandleTests: XCTestCase {
         let verification = try await handle.verify()
 
         XCTAssertEqual(verification.enclaveHost, "enclave.example")
+        XCTAssertEqual(verification.configRepo, "org/repo")
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"], "A configured enclave is never discovered.")
         let latest = await handle.verification
         XCTAssertEqual(latest, verification)
