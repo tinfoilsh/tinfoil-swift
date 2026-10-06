@@ -1,9 +1,10 @@
 import Foundation
 
-/// Verifies an enclave's attestation. The SDK fetches each attestation
-/// document itself and tinfoil-go verifies it; every `verify()` checks fresh
-/// evidence, and the latest successful result stays in `verification`.
-public actor SecureClient {
+/// A handle on one attested enclave, matching tinfoil-go's `enclave.Handle`.
+/// The SDK fetches each attestation document itself and tinfoil-go verifies
+/// it; every `verify()` checks fresh evidence, and the latest successful result
+/// stays in `verification`.
+public actor EnclaveHandle {
     private let enclave: String?
     private let repo: String
     private let attestationRelay: String?

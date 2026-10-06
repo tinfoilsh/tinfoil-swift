@@ -78,7 +78,7 @@ public class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
 
-        let secureClient = try SecureClient(
+        let handle = try EnclaveHandle(
             enclave: enclave,
             repo: repo,
             attestationRelay: attestationRelay,
@@ -86,7 +86,7 @@ public class TinfoilAI {
         )
         let verify: @Sendable () async throws -> Verification = {
             do {
-                let verification = try await secureClient.verify()
+                let verification = try await handle.verify()
                 onVerification?(.success(verification))
                 return verification
             } catch let error as TinfoilError {
