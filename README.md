@@ -89,11 +89,11 @@ let client = try await TinfoilAI.create(
 
 A verification stops authorizing new requests at `freshnessExpiresAt`; the client verifies again before sending the next one. `verifiedAt` is when the document was appraised, by the device's clock; it is not an attested timestamp.
 
-To verify an enclave without sending inference requests, use `SecureClient`:
+To verify an enclave without sending inference requests, use `EnclaveHandle`:
 
 ```swift
-let verifier = try SecureClient() // or SecureClient(enclave: "enclave.example.com", repo: "org/repo")
-let verification = try await verifier.verify()
+let handle = try EnclaveHandle() // or EnclaveHandle(enclave: "enclave.example.com", repo: "org/repo")
+let verification = try await handle.verify()
 ```
 
 ## Prompt Cache Scoping

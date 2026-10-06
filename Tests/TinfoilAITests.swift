@@ -260,11 +260,11 @@ final class TinfoilAITests: XCTestCase {
         }
     }
 
-    func testSecureClientVerifiesTheDefaultRouter() async throws {
+    func testEnclaveHandleVerifiesTheDefaultRouter() async throws {
         try requireLiveIntegration()
-        let client = try SecureClient()
+        let handle = try EnclaveHandle()
 
-        let verification = try await client.verify()
+        let verification = try await handle.verify()
 
         XCTAssertFalse(verification.enclaveHost.isEmpty)
         XCTAssertEqual(verification.configRepo, TinfoilConstants.defaultGithubRepo)
@@ -272,7 +272,7 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertEqual(verification.tlsPublicKeyFingerprint.count, 64)
         XCTAssertNotNil(verification.codeMeasurement)
         XCTAssertNotNil(verification.enclaveMeasurement)
-        let latest = await client.verification
+        let latest = await handle.verification
         XCTAssertEqual(latest, verification)
     }
 
