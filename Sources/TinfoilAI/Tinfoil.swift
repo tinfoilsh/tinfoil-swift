@@ -11,33 +11,20 @@ public class TinfoilAI {
         self.openAIClient = client
     }
 
-    private static func makeVerifier(
-        githubRepo: String,
-        enclaveURL: String?,
-        attestationBundleURL: String?
-    ) -> SecureClient {
-        if let enclaveURL {
-            return SecureClient(
-                githubRepo: githubRepo,
-                enclaveURL: enclaveURL,
-                attestationBundleURL: attestationBundleURL
-                    ?? TinfoilConstants.attestationBaseURL
-            )
-        }
-        return SecureClient(
-            githubRepo: githubRepo,
-            attestationBundleURL: attestationBundleURL
-        )
-    }
-
     /// Creates a new TinfoilAI client configured for communication with a Tinfoil enclave
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
-    ///   - githubRepo: GitHub repository containing the enclave config
-    ///   - attestationBundleURL: Optional URL to fetch a precomputed attestation bundle from.
-    ///     If not provided, uses the default Tinfoil endpoint. The enclave URL is discovered from
-    ///     the attestation bundle during verification.
+    ///   - enclave: Host of the enclave to use, such as "inference.tinfoil.sh".
+    ///     When nil, one of Tinfoil's routers is discovered and verified, which
+    ///     requires the default `repo`.
+    ///   - repo: The trusted owner/name[@tag][@sha256:digest] the enclave's
+    ///     code must come from.
+    ///   - attestationRelay: Host, with an optional port, that forwards
+    ///     attestation requests to the enclave, such as your proxy. When nil,
+    ///     attestation is fetched from the enclave directly.
+    ///   - verificationPolicy: Checks beyond the defaults: pinned registers and
+    ///     the freshness bound.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - customHeaders: Additional request headers to forward verbatim on
     ///     every outbound request (merged over the headers synthesized by
@@ -60,20 +47,22 @@ public class TinfoilAI {
     ///     client-level secret; an empty string is replaced with it.
     ///   - onVerification: Optional callback for verification results. Invoked
     ///     once during `create`, and again from the request's task context
-    ///     whenever the enclave rotates its key and the client re-attests
-    ///     before replaying the request.
+    ///     whenever the client re-verifies because the attestation expired or
+    ///     the enclave rejected its key.
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     ///
-    /// When using a proxy, set both `baseURL` and `attestationBundleURL` to your proxy server
-    /// (e.g., "http://localhost:8080"). The SDK will fetch the attestation bundle through the proxy,
-    /// verify the enclave, and encrypt requests with EHBP. The proxy receives the `X-Tinfoil-Enclave-Url`
-    /// header to know where to forward requests.
+    /// When using a proxy, set `baseURL` to it. Request bodies stay encrypted
+    /// to the verified enclave, and the proxy receives the
+    /// `X-Tinfoil-Enclave-Url` header to know where to forward requests. To
+    /// fetch attestation through the proxy as well, set `attestationRelay`.
     public static func create(
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         baseURL: String? = nil,
-        githubRepo: String = TinfoilConstants.defaultGithubRepo,
-        attestationBundleURL: String? = nil,
+        enclave: String? = nil,
+        repo: String = TinfoilConstants.defaultGithubRepo,
+        attestationRelay: String? = nil,
+        verificationPolicy: VerificationPolicy = VerificationPolicy(),
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
         tinfoilEvents: Set<TinfoilEvent> = [],
@@ -89,95 +78,90 @@ public class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
 
-        let verifier = makeVerifier(
-            githubRepo: githubRepo,
-            enclaveURL: nil,
-            attestationBundleURL: attestationBundleURL
+        let secureClient = try SecureClient(
+            enclave: enclave,
+            repo: repo,
+            attestationRelay: attestationRelay,
+            policy: verificationPolicy
         )
-
-        do {
-            let groundTruth = try await verifier.verify()
-
-            guard let enclaveURL = verifier.verifiedEnclaveURL else {
-                throw TinfoilError.invalidConfiguration("Verification succeeded but enclave URL not available")
+        let verify: @Sendable () async throws -> Verification = {
+            do {
+                let verification = try await secureClient.verify()
+                onVerification?(.success(verification))
+                return verification
+            } catch let error as TinfoilError {
+                onVerification?(.failure(error))
+                throw error
             }
-
-            onVerification?(verifier.verificationDocument)
-
-            let finalBaseURL = baseURL ?? enclaveURL
-            // A configured base URL is an EHBP forwarding proxy, so ATC may
-            // rotate the endpoint/key pair behind it. A direct client keeps its
-            // selected domain and refreshes that domain's bundle.
-            let pinnedRefreshEnclaveURL = baseURL == nil ? enclaveURL : nil
-            let refreshEndpoint: EHBPVerifiedState.Refresh = {
-                let refreshVerifier = Self.makeVerifier(
-                    githubRepo: githubRepo,
-                    enclaveURL: pinnedRefreshEnclaveURL,
-                    attestationBundleURL: attestationBundleURL
-                )
-
-                defer { onVerification?(refreshVerifier.verificationDocument) }
-                let refreshedTruth = try await refreshVerifier.verify()
-                guard let refreshedURL = refreshVerifier.verifiedEnclaveURL,
-                      let keyHex = refreshedTruth.hpkePublicKey,
-                      let key = Data(hexString: keyHex),
-                      key.count == TinfoilConstants.hpkePublicKeyByteCount
-                else {
-                    throw TinfoilError.invalidConfiguration(
-                        "Refreshed attestation did not provide a valid enclave HPKE key"
-                    )
-                }
-                return EHBPVerifiedEndpoint(enclaveURL: refreshedURL, publicKey: key)
-            }
-
-            return try TinfoilAI(
-                apiKey: staticApiKey,
-                apiKeyProvider: apiKeyProvider,
-                baseURL: finalBaseURL,
-                enclaveURL: enclaveURL,
-                hpkePublicKeyHex: groundTruth.hpkePublicKey,
-                parsingOptions: parsingOptions,
-                customHeaders: customHeaders,
-                tinfoilEvents: tinfoilEvents,
-                userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
-                refreshEndpoint: refreshEndpoint
-            )
-        } catch {
-            onVerification?(verifier.verificationDocument)
-            throw error
         }
+
+        let verification = try await verify()
+        let enclaveURL = Self.enclaveURL(for: verification)
+        return try TinfoilAI(
+            apiKey: staticApiKey,
+            apiKeyProvider: apiKeyProvider,
+            baseURL: baseURL ?? enclaveURL,
+            enclaveURL: enclaveURL,
+            hpkePublicKeyHex: verification.hpkePublicKey,
+            expiresAt: verification.freshnessExpiresAt,
+            parsingOptions: parsingOptions,
+            customHeaders: customHeaders,
+            tinfoilEvents: tinfoilEvents,
+            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
+            refreshEndpoint: {
+                // The client stays with the enclave it verified; a refresh
+                // re-verifies that enclave for a current key and deadline.
+                let refreshed = try await verify()
+                return EHBPVerifiedEndpoint(
+                    enclaveURL: Self.enclaveURL(for: refreshed),
+                    publicKey: try Self.ehbpPublicKey(hex: refreshed.hpkePublicKey),
+                    expiresAt: refreshed.freshnessExpiresAt
+                )
+            }
+        )
+    }
+
+    private static func enclaveURL(for verification: Verification) -> String {
+        "https://\(verification.enclaveHost)"
+    }
+
+    /// The X25519 key EHBP encrypts request bodies to, from its hex form
+    private static func ehbpPublicKey(hex: String?) throws -> Data {
+        guard let hex, !hex.isEmpty else {
+            throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
+        }
+        guard let key = Data(hexString: hex), key.count == TinfoilConstants.hpkePublicKeyByteCount else {
+            throw TinfoilError.invalidConfiguration("Invalid HPKE public key format (expected 32 bytes)")
+        }
+        return key
     }
 
     /// Internal initializer that sets up the EHBP session and OpenAI client.
     /// `userCacheSecret` is the already-resolved prompt-cache scoping secret
-    /// (see `UserCacheSecret.resolve`).
+    /// (see `UserCacheSecret.resolve`). `expiresAt` is when the key's
+    /// attestation stops authorizing new requests.
     internal convenience init(
         apiKey: String?,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         baseURL: String,
         enclaveURL: String,
         hpkePublicKeyHex: String?,
+        expiresAt: Date = .distantFuture,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
         tinfoilEvents: Set<TinfoilEvent> = [],
         userCacheSecret: String = "",
         refreshEndpoint: EHBPVerifiedState.Refresh? = nil
     ) throws {
-        guard let hpkeKeyHex = hpkePublicKeyHex, !hpkeKeyHex.isEmpty else {
-            throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
-        }
-
-        guard let hpkePublicKey = Data(hexString: hpkeKeyHex),
-              hpkePublicKey.count == TinfoilConstants.hpkePublicKeyByteCount else {
-            throw TinfoilError.invalidConfiguration("Invalid HPKE public key format (expected 32 bytes)")
-        }
+        let hpkePublicKey = try Self.ehbpPublicKey(hex: hpkePublicKeyHex)
 
         let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
 
         let verifiedState = EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(
                 enclaveURL: enclaveURL,
-                publicKey: hpkePublicKey
+                publicKey: hpkePublicKey,
+                expiresAt: expiresAt
             ),
             refresh: refreshEndpoint
         )

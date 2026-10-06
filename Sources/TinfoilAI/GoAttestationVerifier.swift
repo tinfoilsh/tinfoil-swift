@@ -1,15 +1,7 @@
 import Foundation
 import Tinfoil
 
-/// Verification policy beyond the defaults, as tinfoil-go's options JSON
-/// carries it.
-struct VerificationPolicy: Equatable, Sendable {
-    /// Register values the enclave measurement must also match. An empty
-    /// register keeps its default check.
-    var pinnedRegisters: Verification.Measurement?
-    /// Oldest freshness witness accepted. Nil keeps the seven-day default.
-    var freshnessMaxAge: TimeInterval?
-
+extension VerificationPolicy {
     /// The options JSON `MobileNewVerifier` takes; empty for the defaults.
     /// Out-of-range values are left for Go to reject.
     func optionsJSON() throws -> String {
