@@ -7,3 +7,4 @@ verifier-*.zip
 .swiftpm
 Package.resolved
 tuf-repo-cdn.sigstore.dev.json
+.env
