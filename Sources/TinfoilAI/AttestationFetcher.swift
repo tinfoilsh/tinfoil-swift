@@ -42,7 +42,6 @@ struct AttestationFetcher: Sendable {
         let configuration = makeConfiguration()
         configuration.timeoutIntervalForRequest = timeout
         configuration.timeoutIntervalForResource = timeout
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
         configuration.httpShouldSetCookies = false
         let redirects = RedirectPolicy(maximumRedirects: Self.maximumRedirects)
