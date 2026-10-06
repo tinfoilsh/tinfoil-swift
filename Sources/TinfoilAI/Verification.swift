@@ -1,5 +1,35 @@
 import Foundation
 
+/// Receives each verification outcome: once when a client is created, and
+/// again whenever it re-verifies because the attestation expired or the
+/// enclave rejected its key. A cancelled verification is not reported.
+public typealias VerificationCallback = @Sendable (Result<Verification, TinfoilError>) -> Void
+
+/// Identifies the software that performed verification
+public struct SoftwareIdentity: Codable, Sendable, Equatable {
+    public let name: String
+    public let version: String
+
+    public init(name: String, version: String) {
+        self.name = name
+        self.version = version
+    }
+}
+
+/// Checks a verification makes beyond the defaults
+public struct VerificationPolicy: Equatable, Sendable {
+    /// Register values the enclave measurement must also match. An empty
+    /// register keeps its default check.
+    public var pinnedRegisters: Verification.Measurement?
+    /// Oldest freshness witness accepted. Nil keeps the seven-day default.
+    public var freshnessMaxAge: TimeInterval?
+
+    public init(pinnedRegisters: Verification.Measurement? = nil, freshnessMaxAge: TimeInterval? = nil) {
+        self.pinnedRegisters = pinnedRegisters
+        self.freshnessMaxAge = freshnessMaxAge
+    }
+}
+
 /// What a verified attestation document proved about an enclave, together with
 /// the SDK's own record of where it asked and who verified.
 public struct Verification: Sendable, Equatable {
@@ -7,6 +37,11 @@ public struct Verification: Sendable, Equatable {
     public struct Measurement: Sendable, Equatable, Decodable {
         public let type: String
         public let registers: [String]
+
+        public init(type: String, registers: [String]) {
+            self.type = type
+            self.registers = registers
+        }
     }
 
     /// A key the enclave endorses, bound into its hardware evidence

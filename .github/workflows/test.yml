@@ -27,3 +27,4 @@ jobs:
         run: swift test
         env:
           TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
+          RUN_TINFOIL_INTEGRATION: "true"
