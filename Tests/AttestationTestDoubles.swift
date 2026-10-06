@@ -40,7 +40,7 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         }
         switch parts[0] {
         case "ok":
-            return .stub(host: enclaveHost)
+            return .stub(host: enclaveHost, repo: repo)
         case "config":
             throw TinfoilError.invalidConfiguration("bad repo")
         default:
@@ -84,10 +84,12 @@ final class FakeNetwork: @unchecked Sendable {
 }
 
 extension Verification {
-    static func stub(host: String) -> Verification {
+    /// A verification of host against repo, which records the repository
+    /// without its tag or digest pins, as the verifier does.
+    static func stub(host: String, repo: String = TinfoilConstants.defaultGithubRepo) -> Verification {
         Verification(
             enclaveHost: host,
-            configRepo: TinfoilConstants.defaultGithubRepo,
+            configRepo: String(repo.prefix { $0 != "@" }),
             codeDigest: "abc123",
             codeTag: nil,
             codeMeasurement: nil,
