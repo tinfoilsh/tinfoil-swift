@@ -104,7 +104,7 @@ private extension Verification {
 }
 
 final class AttestorTests: XCTestCase {
-    private let routerList = URL(string: TinfoilConstants.routerListURL)!
+    private let routerList = TinfoilConstants.routerListURL
 
     private func attestor(
         _ verifier: FakeVerifier,

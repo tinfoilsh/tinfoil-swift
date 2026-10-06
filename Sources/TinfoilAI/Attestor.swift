@@ -62,11 +62,8 @@ struct Attestor: Sendable {
     /// The router list is untrusted: each entry is only a host to try, and
     /// is verified like any other.
     private func discoveredRouters() async throws -> [String] {
-        guard let url = URL(string: TinfoilConstants.routerListURL) else {
-            return []
-        }
         do {
-            return try JSONDecoder().decode([String].self, from: try await fetch(url))
+            return try JSONDecoder().decode([String].self, from: try await fetch(TinfoilConstants.routerListURL))
         } catch is CancellationError {
             throw CancellationError()
         } catch {
