@@ -73,8 +73,6 @@ struct Attestor: Sendable {
 }
 
 private extension TinfoilError {
-    /// Fetch and attestation failures may pass on a second try against fresh
-    /// evidence; a configuration error will not.
     var isRetryable: Bool {
         switch self {
         case .fetchError, .attestationError:
