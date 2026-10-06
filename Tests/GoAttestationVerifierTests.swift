@@ -88,15 +88,16 @@ final class GoAttestationVerifierTests: XCTestCase {
         XCTAssertNoThrow(try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: 3600)))
     }
 
-    func testAgesGoCannotRepresentAreRefusedWithoutTrapping() {
-        for age in [TimeInterval.nan, .infinity, -.infinity, 1e300] {
+    func testNegativeOrUnrepresentableAgesAreRefused() {
+        // -1e-10 is a tenth of a nanosecond: it rounds to zero, which would
+        // otherwise select the default rather than fail.
+        for age in [-1, -1e-10, TimeInterval.nan, .infinity, -.infinity, 1e300] {
             assertCategory(isConfiguration) { try VerificationPolicy(freshnessMaxAge: age).optionsJSON() }
             assertCategory(isConfiguration) { try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: age)) }
         }
     }
 
     func testGoRejectsAnInvalidPolicy() {
-        assertCategory(isConfiguration) { try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: -1)) }
         assertCategory(isConfiguration) {
             try GoAttestationVerifier(policy: VerificationPolicy(pinnedRegisters: .init(type: "bogus", registers: ["aa"])))
         }
