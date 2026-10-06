@@ -95,9 +95,11 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertFalse(response.choices.isEmpty, "Request should succeed with EHBP encryption")
     }
 
+    // These use a local port that refuses connections, so they fail fast and
+    // never leave the machine.
     func testCreateFailsForAnUnreachableEnclave() async throws {
         do {
-            _ = try await TinfoilAI.create(apiKey: "test-key", enclave: "invalid-attestation-12345.example.com")
+            _ = try await TinfoilAI.create(apiKey: "test-key", enclave: "127.0.0.1:9")
             XCTFail("Should have failed to fetch attestation from an unreachable enclave")
         } catch TinfoilError.fetchError {
         } catch {
@@ -247,7 +249,7 @@ final class TinfoilAITests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                enclave: "invalid-attestation-12345.example.com",
+                enclave: "127.0.0.1:9",
                 onVerification: { result in
                     captured.value = result
                 }
