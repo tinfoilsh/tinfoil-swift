@@ -4,44 +4,33 @@ import OpenAI
 
 final class TinfoilIntegrationTests: XCTestCase {
 
-    func testCreateWithCustomAttestationBundleURL() async throws {
-        // Test that when an explicit attestation bundle URL is provided, it's used
-        // This test validates the behavior without making actual network calls
-
-        let customURL = "https://custom.example.com/attestation"
-
+    func testCreateRequiresAnEnclaveForACustomRepo() async {
         do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                attestationBundleURL: customURL
-            )
-            XCTFail("Expected verification to fail for custom URL")
+            _ = try await TinfoilAI.create(apiKey: "test-key", repo: "org/repo")
+            XCTFail("Only Tinfoil's routers can be discovered, so a custom repo needs an enclave")
+        } catch TinfoilError.invalidConfiguration {
         } catch {
-            // Expected to fail during verification, but that's OK for this test
-            // We're just testing that the URL parameter is properly handled
-            if let tinfoilError = error as? TinfoilError {
-                XCTAssertNotEqual(tinfoilError, TinfoilError.missingAPIKey)
-            }
+            XCTFail("expected a configuration error, got \(error)")
         }
     }
 
-    func testCreateWithDefaultAttestationEndpoint() async throws {
-        // Test that when no attestation bundle URL is provided, default Tinfoil endpoint is used
-        // This test validates the behavior without making actual network calls
+    func testCreateVerifiesTheDefaultRouter() async throws {
+        try requireLiveIntegration()
+        // Attestation does not use the API key, so a placeholder is enough to
+        // exercise discovery and verification end to end.
+        let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
-        do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key"
-                // No attestationBundleURL provided - should use default endpoint
-            )
-            // If API key is valid, this may succeed - that's acceptable
-        } catch {
-            // Expected to fail (either during fetch or verification)
-            // We're validating that the default attestation path is triggered
-            if let tinfoilError = error as? TinfoilError {
-                XCTAssertNotEqual(tinfoilError, TinfoilError.missingAPIKey)
+        _ = try await TinfoilAI.create(
+            apiKey: "test-key",
+            onVerification: { result in
+                captured.value = result
             }
+        )
+
+        guard case .success(let verification) = captured.value else {
+            return XCTFail("A successful verification should be reported, got \(String(describing: captured.value))")
         }
+        XCTAssertFalse(verification.enclaveHost.isEmpty)
     }
 
     func testMissingAPIKeyError() async throws {
@@ -60,18 +49,17 @@ final class TinfoilIntegrationTests: XCTestCase {
         }
     }
 
-    func testCreateWithProxyConfiguration() async throws {
-        // Test TinfoilAI with proxy configuration (both baseURL and attestationBundleURL)
+    func testCreateFailsWhenTheAttestationRelayIsUnreachable() async {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
                 baseURL: "http://localhost:8080",
-                attestationBundleURL: "http://localhost:8080"
+                attestationRelay: "127.0.0.1:9"
             )
-            XCTFail("Expected verification to fail for proxy URL")
+            XCTFail("Attestation through an unreachable relay must fail")
+        } catch TinfoilError.fetchError {
         } catch {
-            // Expected to fail during verification
-            XCTAssertNotNil(error)
+            XCTFail("expected a fetch error, got \(error)")
         }
     }
 }

@@ -93,7 +93,7 @@ internal actor EHBPVerifiedState {
         }
 
         do {
-            let refreshed = try await Self.waitForRefresh(operation.task)
+            let refreshed = try await waitForSharedTask(operation.task)
             return install(
                 refreshed,
                 from: operation,
@@ -145,31 +145,6 @@ internal actor EHBPVerifiedState {
         case .failure:
             clearRefreshOperation(operation)
         }
-    }
-
-    /// Wait for a shared, unstructured refresh without transferring the
-    /// caller's cancellation to it. AsyncThrowingStream makes this individual
-    /// wait cancellation-aware while allowing other waiters to keep using the
-    /// same attestation task.
-    private nonisolated static func waitForRefresh(
-        _ task: Task<EHBPVerifiedEndpoint, Error>
-    ) async throws -> EHBPVerifiedEndpoint {
-        try Task.checkCancellation()
-        let results = AsyncThrowingStream<EHBPVerifiedEndpoint, Error> { continuation in
-            Task {
-                do {
-                    continuation.yield(try await task.value)
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-        }
-        for try await result in results {
-            try Task.checkCancellation()
-            return result
-        }
-        throw CancellationError()
     }
 }
 

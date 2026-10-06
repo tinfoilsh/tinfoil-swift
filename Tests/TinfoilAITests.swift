@@ -95,17 +95,13 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertFalse(response.choices.isEmpty, "Request should succeed with EHBP encryption")
     }
 
-    func testVerificationFailureWithInvalidAttestationURL() async throws {
+    func testCreateFailsForAnUnreachableEnclave() async throws {
         do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                attestationBundleURL: "https://invalid-attestation-12345.example.com"
-            )
-            XCTFail("Should have failed with invalid attestation URL")
+            _ = try await TinfoilAI.create(apiKey: "test-key", enclave: "invalid-attestation-12345.example.com")
+            XCTFail("Should have failed to fetch attestation from an unreachable enclave")
+        } catch TinfoilError.fetchError {
         } catch {
-            // Expected - verification should reject invalid attestation URL
-            // Error may be VerificationError or NSError from Go bindings
-            XCTAssertNotNil(error)
+            XCTFail("expected a fetch error, got \(error)")
         }
     }
 
@@ -215,31 +211,24 @@ final class TinfoilAITests: XCTestCase {
 
     // MARK: - Integration Tests for Verification Flow
 
-    func testCompleteVerificationFlowWithNewFormat() async throws {
+    func testCompleteVerificationFlow() async throws {
         try skipIfNoAPIKey()
 
-        let capturedDocument = Box<VerificationDocument?>(value: nil)
+        let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
         let client = try await TinfoilAI.create(
             apiKey: try getAPIKey(),
-            onVerification: { document in
-                capturedDocument.value = document
+            onVerification: { result in
+                captured.value = result
             }
         )
 
-        // Verify that verification document was captured
-        XCTAssertNotNil(capturedDocument.value, "Verification document should be captured")
-
-        if let doc = capturedDocument.value {
-            // Verify document has all required fields from new format
-            XCTAssertFalse(doc.tlsPublicKey.isEmpty, "TLS public key should be present")
-            XCTAssertFalse(doc.codeFingerprint.isEmpty, "Code fingerprint should be present")
-            XCTAssertFalse(doc.enclaveFingerprint.isEmpty, "Enclave fingerprint should be present")
-            XCTAssertFalse(doc.selectedRouterEndpoint.isEmpty, "Selected router endpoint should be present")
-            XCTAssertTrue(doc.securityVerified, "Security should be verified for successful flow")
-
-            XCTAssertTrue(doc.allStepsSucceeded, "All verification steps should be complete")
+        guard case .success(let verification) = captured.value else {
+            return XCTFail("A successful verification should be reported, got \(String(describing: captured.value))")
         }
+        XCTAssertFalse(verification.enclaveHost.isEmpty)
+        XCTAssertEqual(verification.hpkePublicKey?.count, 64, "EHBP needs the enclave's HPKE key")
+        XCTAssertGreaterThan(verification.freshnessExpiresAt, Date())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -252,95 +241,39 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertFalse(response.choices.isEmpty, "Should receive response after verification")
     }
 
-    func testVerificationFailureCallbackWithNewFormat() async throws {
-        let capturedDocument = Box<VerificationDocument?>(value: nil)
-        var verificationFailed = false
+    func testVerificationFailureIsReported() async throws {
+        let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                attestationBundleURL: "https://invalid-attestation-12345.example.com",
-                onVerification: { document in
-                    capturedDocument.value = document
+                enclave: "invalid-attestation-12345.example.com",
+                onVerification: { result in
+                    captured.value = result
                 }
             )
-            XCTFail("Should have failed with invalid attestation URL")
+            XCTFail("Should have failed to verify an unreachable enclave")
         } catch {
-            verificationFailed = true
-
-            // Verify that document was still captured on failure
-            XCTAssertNotNil(capturedDocument.value, "Verification document should be captured even on failure")
-
-            if let doc = capturedDocument.value {
-                XCTAssertFalse(doc.securityVerified, "Security should not be verified on failure")
-
-                // At least one step should be failed or pending
-                var hasNonSuccessStep = false
-
-                if doc.steps.fetchDigest.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                if doc.steps.verifyCode.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                if doc.steps.verifyEnclave.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                if doc.steps.compareMeasurements.status != .success {
-                    hasNonSuccessStep = true
-                }
-
-                XCTAssertTrue(hasNonSuccessStep, "At least one step should not be successful on failure")
+            guard case .failure(.fetchError) = captured.value else {
+                return XCTFail("The failure should be reported, got \(String(describing: captured.value))")
             }
         }
-
-        XCTAssertTrue(verificationFailed, "Verification should have failed")
     }
 
-    func testNewGroundTruthFieldsIntegration() async throws {
-        // Use SecureClient with default attestation bundle flow
-        let secureClient = SecureClient(githubRepo: TinfoilConstants.defaultGithubRepo)
+    func testSecureClientVerifiesTheDefaultRouter() async throws {
+        try requireLiveIntegration()
+        let client = try SecureClient()
 
-        do {
-            let groundTruth = try await secureClient.verify()
+        let verification = try await client.verify()
 
-            // Test all new fields in GroundTruth
-            XCTAssertFalse(groundTruth.tlsPublicKey.isEmpty, "TLS public key should exist")
-            XCTAssertNotNil(groundTruth.hpkePublicKey, "HPKE public key field should exist")
-            XCTAssertFalse(groundTruth.digest.isEmpty, "Digest should exist")
-            XCTAssertFalse(groundTruth.codeFingerprint.isEmpty, "Code fingerprint should exist")
-            XCTAssertFalse(groundTruth.enclaveFingerprint.isEmpty, "Enclave fingerprint should exist")
-
-            // Verify enclave host is populated from attestation bundle
-            XCTAssertNotNil(groundTruth.enclaveHost, "Enclave host should exist")
-            XCTAssertFalse(groundTruth.enclaveHost?.isEmpty ?? true, "Enclave host should not be empty")
-
-            // Verify measurements
-            if let codeMeasurement = groundTruth.codeMeasurement {
-                XCTAssertFalse(codeMeasurement.type.isEmpty, "Code measurement type should exist")
-                XCTAssertFalse(codeMeasurement.registers.isEmpty, "Code measurement should have registers")
-            }
-
-            if let enclaveMeasurement = groundTruth.enclaveMeasurement {
-                XCTAssertFalse(enclaveMeasurement.type.isEmpty, "Enclave measurement type should exist")
-                XCTAssertFalse(enclaveMeasurement.registers.isEmpty, "Enclave measurement should have registers")
-            }
-
-            // Hardware measurement may or may not exist depending on platform
-            if let hwMeasurement = groundTruth.hardwareMeasurement {
-                XCTAssertFalse(hwMeasurement.id.isEmpty, "Hardware ID should exist if present")
-                XCTAssertFalse(hwMeasurement.mrtd.isEmpty, "MRTD should exist if present")
-                XCTAssertFalse(hwMeasurement.rtmr0.isEmpty, "RTMR0 should exist if present")
-            }
-
-        } catch is VerificationError {
-            // Verification errors are acceptable (may occur due to network issues in CI)
-        } catch {
-            XCTFail("Unexpected error type: \(error)")
-        }
+        XCTAssertFalse(verification.enclaveHost.isEmpty)
+        XCTAssertEqual(verification.configRepo, TinfoilConstants.defaultGithubRepo)
+        XCTAssertFalse(verification.codeDigest.isEmpty)
+        XCTAssertEqual(verification.tlsPublicKeyFingerprint.count, 64)
+        XCTAssertNotNil(verification.codeMeasurement)
+        XCTAssertNotNil(verification.enclaveMeasurement)
+        let latest = await client.verification
+        XCTAssertEqual(latest, verification)
     }
 
 }
