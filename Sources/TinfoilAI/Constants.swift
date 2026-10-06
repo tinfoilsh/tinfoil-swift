@@ -14,7 +14,7 @@ public enum TinfoilConstants {
     public static let sdkVersion = "0.9.0"
 
     /// Lists the routers a client tries when no enclave is configured
-    internal static let routerListURL = "https://atc.tinfoil.sh/routers"
+    internal static let routerListURL = URL(string: "https://atc.tinfoil.sh/routers")!
 
     /// Router used when no discovered router verifies
     internal static let fallbackEnclave = "inference.tinfoil.sh"
