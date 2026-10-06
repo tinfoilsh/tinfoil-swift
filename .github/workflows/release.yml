@@ -24,6 +24,14 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Check SDK version matches tag
+        run: |
+          version=$(sed -nE 's/^ *public static let sdkVersion = "([^"]+)"$/\1/p' Sources/TinfoilAI/Constants.swift)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::TinfoilConstants.sdkVersion is '$version' but the tag is $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
       - name: Create Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
