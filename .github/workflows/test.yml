@@ -27,4 +27,6 @@ jobs:
         run: swift test
         env:
           TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
-          RUN_TINFOIL_INTEGRATION: "true"
+          # Live tests reach production, so only run them where the key
+          # exists; pull requests from forks get no secrets.
+          RUN_TINFOIL_INTEGRATION: ${{ secrets.TINFOIL_API_KEY != '' }}

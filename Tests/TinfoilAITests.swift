@@ -14,11 +14,19 @@ final class TinfoilAITests: XCTestCase {
 
     // MARK: - Test Configuration
 
+    /// The API key, if one is set. CI renders an unavailable secret as an
+    /// empty string, so that counts as unset.
     private func getAPIKey() throws -> String? {
-        return ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
+        guard let key = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"], !key.isEmpty else {
+            return nil
+        }
+        return key
     }
 
+    /// These tests send inference requests to production, so they are live
+    /// tests as well as needing a key.
     private func skipIfNoAPIKey() throws {
+        try requireLiveIntegration()
         guard try getAPIKey() != nil else {
             throw XCTSkip("Skipping test: TINFOIL_API_KEY environment variable not set")
         }
