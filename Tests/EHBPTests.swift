@@ -591,6 +591,154 @@ final class EHBPTests: XCTestCase {
         }
     }
 
+    // MARK: - Attestation Freshness
+
+    private static let oldRouter = "https://old-router.example"
+    private static let newRouter = "https://new-router.example"
+
+    private func makeExpiringState(
+        clock: TestClock,
+        expiresAt: Date,
+        refreshCounter: AsyncCounter,
+        refreshedExpiresAt: @escaping @Sendable () -> Date,
+        beforeRefreshing: @escaping @Sendable () async -> Void = {},
+        onClockRead: @escaping @Sendable () -> Void = {}
+    ) -> EHBPVerifiedState {
+        EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: Self.oldRouter,
+                publicKey: testPublicKey,
+                expiresAt: expiresAt
+            ),
+            refresh: {
+                await refreshCounter.increment()
+                await beforeRefreshing()
+                return EHBPVerifiedEndpoint(
+                    enclaveURL: Self.newRouter,
+                    publicKey: Data(repeating: 0x43, count: 32),
+                    expiresAt: refreshedExpiresAt()
+                )
+            },
+            now: {
+                onClockRead()
+                return clock.now
+            }
+        )
+    }
+
+    func testUnexpiredEndpointIsUsedWithoutRefreshing() async throws {
+        let clock = TestClock()
+        let refreshCounter = AsyncCounter()
+        let state = makeExpiringState(
+            clock: clock,
+            expiresAt: clock.now.addingTimeInterval(1),
+            refreshCounter: refreshCounter,
+            refreshedExpiresAt: { clock.now.addingTimeInterval(3600) }
+        )
+
+        let current = try await state.current()
+
+        XCTAssertEqual(current.endpoint.enclaveURL, Self.oldRouter)
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshCount, 0)
+    }
+
+    func testExpiredEndpointIsRefreshedOnceForConcurrentRequests() async throws {
+        let clock = TestClock()
+        let refreshStarted = expectation(description: "refresh started")
+        // Without single-flight every request starts a refresh; let the count
+        // assertion below report that rather than an over-fulfilled expectation.
+        refreshStarted.assertForOverFulfill = false
+        // Each request reads the clock once before joining the refresh, and
+        // again only after it ends, so five reads mean all five are waiting.
+        let allChecked = expectation(description: "every request found the key expired")
+        allChecked.expectedFulfillmentCount = 5
+        allChecked.assertForOverFulfill = false
+        let gate = AsyncGate()
+        let refreshCounter = AsyncCounter()
+        let state = makeExpiringState(
+            clock: clock,
+            expiresAt: clock.now,
+            refreshCounter: refreshCounter,
+            refreshedExpiresAt: { clock.now.addingTimeInterval(3600) },
+            beforeRefreshing: {
+                refreshStarted.fulfill()
+                await gate.wait()
+            },
+            onClockRead: { allChecked.fulfill() }
+        )
+
+        let requests = (0..<5).map { _ in Task { try await state.current() } }
+        await fulfillment(of: [refreshStarted, allChecked], timeout: 1)
+        await gate.open()
+
+        for request in requests {
+            let current = try await request.value
+            XCTAssertEqual(current.endpoint.enclaveURL, Self.newRouter)
+        }
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshCount, 1, "Requests that find the key expired share one refresh.")
+    }
+
+    func testRefreshThatIsAlreadyExpiredFails() async {
+        let clock = TestClock()
+        let state = makeExpiringState(
+            clock: clock,
+            expiresAt: clock.now,
+            refreshCounter: AsyncCounter(),
+            refreshedExpiresAt: { clock.now }
+        )
+
+        do {
+            _ = try await state.current()
+            XCTFail("An expired refresh must not authorize a request")
+        } catch TinfoilError.attestationError(let message) {
+            XCTAssertTrue(message.contains("freshness deadline"))
+        } catch {
+            XCTFail("expected an attestation error, got \(error)")
+        }
+    }
+
+    func testExpiredEndpointWithoutRefreshFails() async {
+        let clock = TestClock()
+        let state = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(enclaveURL: Self.oldRouter, publicKey: testPublicKey, expiresAt: clock.now),
+            now: { clock.now }
+        )
+
+        do {
+            _ = try await state.current()
+            XCTFail("An expired key without a refresh must not authorize a request")
+        } catch TinfoilError.invalidConfiguration {
+        } catch {
+            XCTFail("expected a configuration error, got \(error)")
+        }
+    }
+
+    func testExpiredAttestationIsRefreshedBeforeTheRequestIsSent() async throws {
+        let clock = TestClock()
+        let refreshCounter = AsyncCounter()
+        let state = makeExpiringState(
+            clock: clock,
+            expiresAt: clock.now.addingTimeInterval(60),
+            refreshCounter: refreshCounter,
+            refreshedExpiresAt: { clock.now.addingTimeInterval(3600) }
+        )
+        let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: state)
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+
+        clock.advance(by: 60)
+        // The stub cannot encrypt a response, so the request itself fails;
+        // what matters is where it was sent.
+        _ = try? await session.data(for: request, delegate: nil)
+
+        let refreshCount = await refreshCounter.value
+        XCTAssertEqual(refreshCount, 1)
+        XCTAssertEqual(enclaveRoutes(), [Self.newRouter], "Nothing may be sealed to the expired key.")
+    }
+
     func testStreamingKeyMismatchReplaysOnceAndDeliversOnlyReplayedResponse() async throws {
         server.queuedResponses = [
             .init(
@@ -2291,6 +2439,24 @@ private actor AsyncCounter {
 
     func increment() {
         value += 1
+    }
+}
+
+/// A clock tests move by hand.
+private final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = Date(timeIntervalSince1970: 1_790_000_000)
+
+    var now: Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
+    }
+
+    func advance(by seconds: TimeInterval) {
+        lock.lock()
+        current += seconds
+        lock.unlock()
     }
 }
 
