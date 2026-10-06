@@ -2,16 +2,16 @@ import XCTest
 import Foundation
 @testable import TinfoilAI
 
-/// How SecureClient picks the enclave to verify, using the stand-ins from
+/// How EnclaveHandle picks the enclave to verify, using the stand-ins from
 /// AttestationTestDoubles.swift in place of the network and Go.
-final class SecureClientTests: XCTestCase {
-    private func client(
+final class EnclaveHandleTests: XCTestCase {
+    private func handle(
         enclave: String? = nil,
         repo: String = TinfoilConstants.defaultGithubRepo,
         relay: String? = nil,
         network: FakeNetwork
-    ) throws -> SecureClient {
-        try SecureClient(
+    ) throws -> EnclaveHandle {
+        try EnclaveHandle(
             enclave: enclave,
             repo: repo,
             attestationRelay: relay,
@@ -27,33 +27,33 @@ final class SecureClientTests: XCTestCase {
 
     func testCustomRepoRequiresAnEnclave() {
         let network = approving()
-        XCTAssertThrowsError(try client(repo: "org/repo", network: network)) { error in
+        XCTAssertThrowsError(try handle(repo: "org/repo", network: network)) { error in
             guard case TinfoilError.invalidConfiguration = error else {
                 return XCTFail("expected a configuration error, got \(error)")
             }
         }
-        XCTAssertNoThrow(try client(enclave: "enclave.example", repo: "org/repo", network: network))
+        XCTAssertNoThrow(try handle(enclave: "enclave.example", repo: "org/repo", network: network))
         XCTAssertTrue(network.urls.isEmpty)
     }
 
     func testVerifiesTheConfiguredEnclave() async throws {
         let network = approving()
-        let client = try client(enclave: "enclave.example", repo: "org/repo", network: network)
+        let handle = try handle(enclave: "enclave.example", repo: "org/repo", network: network)
 
-        let verification = try await client.verify()
+        let verification = try await handle.verify()
 
         XCTAssertEqual(verification.enclaveHost, "enclave.example")
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"], "A configured enclave is never discovered.")
-        let latest = await client.verification
+        let latest = await handle.verification
         XCTAssertEqual(latest, verification)
     }
 
     func testDiscoveryPicksARouterOnceAndStaysWithIt() async throws {
         let network = approving()
-        let client = try client(network: network)
+        let handle = try handle(network: network)
 
-        let first = try await client.verify()
-        let second = try await client.verify()
+        let first = try await handle.verify()
+        let second = try await handle.verify()
 
         XCTAssertEqual(first.enclaveHost, "router-a.example")
         XCTAssertEqual(second.enclaveHost, "router-a.example")
@@ -62,9 +62,9 @@ final class SecureClientTests: XCTestCase {
 
     func testRelayWithoutAnEnclaveAttestsTheFallbackRouter() async throws {
         let network = approving()
-        let client = try client(relay: "relay.example", network: network)
+        let handle = try handle(relay: "relay.example", network: network)
 
-        let verification = try await client.verify()
+        let verification = try await handle.verify()
 
         XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
         let url = try XCTUnwrap(network.urls.first)
@@ -77,26 +77,26 @@ final class SecureClientTests: XCTestCase {
         let network = FakeNetwork { url, previous in
             FakeNetwork.document(previous == 0 ? "ok" : "reject", for: url)
         }
-        let client = try client(enclave: "enclave.example", network: network)
-        let first = try await client.verify()
+        let handle = try handle(enclave: "enclave.example", network: network)
+        let first = try await handle.verify()
 
         do {
-            _ = try await client.verify()
+            _ = try await handle.verify()
             XCTFail("a rejected attestation must fail verification")
         } catch TinfoilError.attestationError {
         }
 
-        let latest = await client.verification
+        let latest = await handle.verification
         XCTAssertEqual(latest, first)
     }
 
-    /// A client whose router list fetch waits on gate, reporting each
+    /// A handle whose router list fetch waits on gate, reporting each
     /// discovery it starts. A fetch checks for cancellation once it resumes,
     /// so a cancelled verification fails rather than finishing unnoticed.
-    private func gatedClient(
+    private func gatedHandle(
         gate: AsyncGate,
         discoveries: DiscoveryCounter
-    ) throws -> SecureClient {
+    ) throws -> EnclaveHandle {
         let network = approving()
         let fetch: Attestor.Fetch = { url in
             if url == TinfoilConstants.routerListURL {
@@ -106,7 +106,7 @@ final class SecureClientTests: XCTestCase {
             }
             return try network.fetch(url)
         }
-        return try SecureClient(
+        return try EnclaveHandle(
             enclave: nil,
             repo: TinfoilConstants.defaultGithubRepo,
             attestationRelay: nil,
@@ -120,9 +120,9 @@ final class SecureClientTests: XCTestCase {
             first: expectation(description: "discovery started"),
             more: expectation(description: "a second discovery")
         )
-        let client = try gatedClient(gate: gate, discoveries: discoveries)
+        let handle = try gatedHandle(gate: gate, discoveries: discoveries)
 
-        let calls = (0..<3).map { _ in Task { try await client.verify() } }
+        let calls = (0..<3).map { _ in Task { try await handle.verify() } }
         await fulfillment(of: [discoveries.first], timeout: 1)
         // Inverted: passes only if no other call starts its own discovery
         // while the first is held.
@@ -143,15 +143,15 @@ final class SecureClientTests: XCTestCase {
             first: expectation(description: "discovery started"),
             more: expectation(description: "a second discovery")
         )
-        let client = try gatedClient(gate: gate, discoveries: discoveries)
+        let handle = try gatedHandle(gate: gate, discoveries: discoveries)
 
         let cancelledReturned = expectation(description: "the cancelled call returned")
         let cancelled = Task {
             defer { cancelledReturned.fulfill() }
-            return try await client.verify()
+            return try await handle.verify()
         }
         await fulfillment(of: [discoveries.first], timeout: 1)
-        let waiting = Task { try await client.verify() }
+        let waiting = Task { try await handle.verify() }
         cancelled.cancel()
         // The cancelled call must return without waiting for the shared
         // verification, which stays held until the gate opens.
@@ -165,7 +165,7 @@ final class SecureClientTests: XCTestCase {
 
         let verification = try await waiting.value
         XCTAssertEqual(verification.enclaveHost, "router-a.example")
-        let latest = await client.verification
+        let latest = await handle.verification
         XCTAssertEqual(latest, verification)
         await fulfillment(of: [discoveries.more], timeout: 0.1)
         XCTAssertEqual(discoveries.count, 1)
