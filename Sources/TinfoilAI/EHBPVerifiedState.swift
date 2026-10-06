@@ -8,6 +8,15 @@ import FoundationNetworking
 internal struct EHBPVerifiedEndpoint: Sendable {
     let enclaveURL: String
     let publicKey: Data
+    /// No new request may be sealed to this key at or after this instant. A
+    /// key supplied by the caller rather than attested never expires.
+    let expiresAt: Date
+
+    init(enclaveURL: String, publicKey: Data, expiresAt: Date = .distantFuture) {
+        self.enclaveURL = enclaveURL
+        self.publicKey = publicKey
+        self.expiresAt = expiresAt
+    }
 }
 
 /// Shares the active attested endpoint between regular and streaming sessions.
@@ -24,16 +33,32 @@ internal actor EHBPVerifiedState {
     private var endpoint: EHBPVerifiedEndpoint
     private var generation: UInt64 = 0
     private let refreshEndpoint: Refresh?
+    private let now: @Sendable () -> Date
     private var nextRefreshID: UInt64 = 0
     private var refreshOperation: RefreshOperation?
 
-    init(endpoint: EHBPVerifiedEndpoint, refresh: Refresh? = nil) {
+    init(
+        endpoint: EHBPVerifiedEndpoint,
+        refresh: Refresh? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.endpoint = endpoint
         self.refreshEndpoint = refresh
+        self.now = now
     }
 
-    func snapshot() -> (endpoint: EHBPVerifiedEndpoint, generation: UInt64) {
-        (endpoint, generation)
+    /// The endpoint to seal a new request to. One whose attestation has
+    /// expired is refreshed first, through the same single-flight refresh as a
+    /// rejected key, so an expired key never seals a request.
+    func current() async throws -> (endpoint: EHBPVerifiedEndpoint, generation: UInt64) {
+        if now() < endpoint.expiresAt {
+            return (endpoint, generation)
+        }
+        _ = try await refresh(afterRejectedGeneration: generation)
+        guard now() < endpoint.expiresAt else {
+            throw TinfoilError.attestationError("refreshed attestation is already past its freshness deadline")
+        }
+        return (endpoint, generation)
     }
 
     func refresh(afterRejectedGeneration rejectedGeneration: UInt64) async throws -> EHBPVerifiedEndpoint {
@@ -43,7 +68,7 @@ internal actor EHBPVerifiedState {
 
         guard let refreshEndpoint else {
             throw TinfoilError.invalidConfiguration(
-                "EHBP key configuration changed, but no attestation refresh is configured"
+                "EHBP key must be re-attested, but no attestation refresh is configured"
             )
         }
 
