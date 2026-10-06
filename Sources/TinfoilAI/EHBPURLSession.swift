@@ -31,7 +31,7 @@ private func prepareEHBPRequest(
         throw EHBPError.invalidInput("request has no URL")
     }
 
-    let snapshot = await verifiedState.snapshot()
+    let snapshot = try await verifiedState.current()
     try Task.checkCancellation()
     let client = try EHBPClient(
         baseURL: baseURL,
