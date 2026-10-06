@@ -601,7 +601,8 @@ final class EHBPTests: XCTestCase {
         expiresAt: Date,
         refreshCounter: AsyncCounter,
         refreshedExpiresAt: @escaping @Sendable () -> Date,
-        beforeRefreshing: @escaping @Sendable () async -> Void = {}
+        beforeRefreshing: @escaping @Sendable () async -> Void = {},
+        onClockRead: @escaping @Sendable () -> Void = {}
     ) -> EHBPVerifiedState {
         EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(
@@ -618,7 +619,10 @@ final class EHBPTests: XCTestCase {
                     expiresAt: refreshedExpiresAt()
                 )
             },
-            now: { clock.now }
+            now: {
+                onClockRead()
+                return clock.now
+            }
         )
     }
 
@@ -642,6 +646,14 @@ final class EHBPTests: XCTestCase {
     func testExpiredEndpointIsRefreshedOnceForConcurrentRequests() async throws {
         let clock = TestClock()
         let refreshStarted = expectation(description: "refresh started")
+        // Without single-flight every request starts a refresh; let the count
+        // assertion below report that rather than an over-fulfilled expectation.
+        refreshStarted.assertForOverFulfill = false
+        // Each request reads the clock once before joining the refresh, and
+        // again only after it ends, so five reads mean all five are waiting.
+        let allChecked = expectation(description: "every request found the key expired")
+        allChecked.expectedFulfillmentCount = 5
+        allChecked.assertForOverFulfill = false
         let gate = AsyncGate()
         let refreshCounter = AsyncCounter()
         let state = makeExpiringState(
@@ -652,13 +664,12 @@ final class EHBPTests: XCTestCase {
             beforeRefreshing: {
                 refreshStarted.fulfill()
                 await gate.wait()
-            }
+            },
+            onClockRead: { allChecked.fulfill() }
         )
 
         let requests = (0..<5).map { _ in Task { try await state.current() } }
-        await fulfillment(of: [refreshStarted], timeout: 1)
-        // Let the other requests reach the refresh in progress before it ends.
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await fulfillment(of: [refreshStarted, allChecked], timeout: 1)
         await gate.open()
 
         for request in requests {
