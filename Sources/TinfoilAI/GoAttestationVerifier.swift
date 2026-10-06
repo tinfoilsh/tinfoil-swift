@@ -3,8 +3,7 @@ import Tinfoil
 
 extension VerificationPolicy {
     /// The options JSON `MobileNewVerifier` takes; empty for the defaults.
-    /// Values Go can represent but rejects, such as a negative age, are left
-    /// for Go to reject.
+    /// Go validates the rest, such as the shape of pinned registers.
     func optionsJSON() throws -> String {
         guard pinnedRegisters != nil || freshnessMaxAge != nil else {
             return ""
@@ -16,12 +15,16 @@ extension VerificationPolicy {
         return String(decoding: try JSONEncoder().encode(options), as: UTF8.self)
     }
 
-    /// Go takes the age as an integer count of nanoseconds. A value with no
-    /// such count, such as NaN, infinity or more than about 292 years, is
-    /// refused here rather than trapping in the conversion.
+    /// Go takes the age as an integer count of nanoseconds. A negative age
+    /// is refused before rounding, since one under half a nanosecond would
+    /// round to zero and silently select the default. A value with no such
+    /// count, such as NaN, infinity or more than about 292 years, is refused
+    /// rather than trapping in the conversion.
     private static func nanoseconds(_ seconds: TimeInterval) throws -> Int64 {
-        guard let nanoseconds = Int64(exactly: (seconds * 1_000_000_000).rounded()) else {
-            throw TinfoilError.invalidConfiguration("freshness maximum age must be a finite number of seconds, not \(seconds)")
+        guard seconds >= 0, let nanoseconds = Int64(exactly: (seconds * 1_000_000_000).rounded()) else {
+            throw TinfoilError.invalidConfiguration(
+                "freshness maximum age must be a non-negative, finite number of seconds, not \(seconds)"
+            )
         }
         return nanoseconds
     }
