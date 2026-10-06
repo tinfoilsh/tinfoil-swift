@@ -94,7 +94,10 @@ extension Verification {
             enclaveMeasurement: nil,
             tlsPublicKeyFingerprint: "deadbeef",
             hpkePublicKey: "cafebabe",
-            cryptoMaterial: [],
+            cryptoMaterial: [
+                .init(id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "deadbeef"),
+                .init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: "cafebabe"),
+            ],
             freshnessExpiresAt: Date().addingTimeInterval(3600),
             verifiedAt: Date(),
             verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion)

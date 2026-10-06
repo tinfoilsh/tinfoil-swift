@@ -88,6 +88,13 @@ final class GoAttestationVerifierTests: XCTestCase {
         XCTAssertNoThrow(try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: 3600)))
     }
 
+    func testAgesGoCannotRepresentAreRefusedWithoutTrapping() {
+        for age in [TimeInterval.nan, .infinity, -.infinity, 1e300] {
+            assertCategory(isConfiguration) { try VerificationPolicy(freshnessMaxAge: age).optionsJSON() }
+            assertCategory(isConfiguration) { try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: age)) }
+        }
+    }
+
     func testGoRejectsAnInvalidPolicy() {
         assertCategory(isConfiguration) { try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: -1)) }
         assertCategory(isConfiguration) {
@@ -97,17 +104,13 @@ final class GoAttestationVerifierTests: XCTestCase {
 
     /// Attests the production router end to end: Swift fetches, Go verifies.
     func testLiveAttestation() async throws {
+        try requireLiveIntegration()
         let attestor = Attestor(verifier: try GoAttestationVerifier())
-        let verification: Verification
-        do {
-            verification = try await attestor.attest(
-                host: TinfoilConstants.fallbackEnclave,
-                relay: nil,
-                repo: Self.routerRepo
-            )
-        } catch TinfoilError.fetchError(let message) {
-            throw XCTSkip("Could not reach the enclave: \(message)")
-        }
+        let verification = try await attestor.attest(
+            host: TinfoilConstants.fallbackEnclave,
+            relay: nil,
+            repo: Self.routerRepo
+        )
 
         XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
         XCTAssertEqual(verification.configRepo, Self.routerRepo)

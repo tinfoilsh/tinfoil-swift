@@ -11,6 +11,9 @@ public actor SecureClient {
     /// The configured enclave, or the router discovery picked on the first
     /// verification; later verifications stay with it.
     private var selectedEnclave: String?
+    /// The verification in progress, shared by every caller that asks while
+    /// it runs
+    private var inFlight: Task<Verification, Error>?
 
     /// The latest successful verification, or nil before the first
     public private(set) var verification: Verification?
@@ -52,7 +55,24 @@ public actor SecureClient {
     }
 
     /// Verifies the enclave against fresh evidence and returns the result.
+    /// Calls made while a verification runs share it, so concurrent first
+    /// calls discover a single router. Cancelling a call ends only its own
+    /// wait; the shared verification still completes.
     public func verify() async throws -> Verification {
+        let task: Task<Verification, Error>
+        if let inFlight {
+            task = inFlight
+        } else {
+            task = Task {
+                defer { self.inFlight = nil }
+                return try await self.verifyNow()
+            }
+            inFlight = task
+        }
+        return try await waitForSharedTask(task)
+    }
+
+    private func verifyNow() async throws -> Verification {
         let verified: Verification
         if let host = selectedEnclave ?? enclave {
             verified = try await attestor.attest(host: host, relay: attestationRelay, repo: repo)

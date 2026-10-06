@@ -15,20 +15,17 @@ final class TinfoilIntegrationTests: XCTestCase {
     }
 
     func testCreateVerifiesTheDefaultRouter() async throws {
+        try requireLiveIntegration()
         // Attestation does not use the API key, so a placeholder is enough to
         // exercise discovery and verification end to end.
         let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
-        do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                onVerification: { result in
-                    captured.value = result
-                }
-            )
-        } catch TinfoilError.fetchError(let message) {
-            throw XCTSkip("Could not reach Tinfoil's routers: \(message)")
-        }
+        _ = try await TinfoilAI.create(
+            apiKey: "test-key",
+            onVerification: { result in
+                captured.value = result
+            }
+        )
 
         guard case .success(let verification) = captured.value else {
             return XCTFail("A successful verification should be reported, got \(String(describing: captured.value))")

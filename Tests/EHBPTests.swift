@@ -2460,27 +2460,6 @@ private final class TestClock: @unchecked Sendable {
     }
 }
 
-private actor AsyncGate {
-    private var isOpen = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    func wait() async {
-        guard !isOpen else { return }
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
-        }
-    }
-
-    func open() {
-        isOpen = true
-        let pending = waiters
-        waiters.removeAll()
-        for waiter in pending {
-            waiter.resume()
-        }
-    }
-}
-
 // MARK: - Test Doubles
 
 private final class CancellationRecorder: URLSessionDataDelegateProtocol, @unchecked Sendable {

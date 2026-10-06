@@ -261,14 +261,10 @@ final class TinfoilAITests: XCTestCase {
     }
 
     func testSecureClientVerifiesTheDefaultRouter() async throws {
+        try requireLiveIntegration()
         let client = try SecureClient()
 
-        let verification: Verification
-        do {
-            verification = try await client.verify()
-        } catch TinfoilError.fetchError(let message) {
-            throw XCTSkip("Could not reach Tinfoil's routers: \(message)")
-        }
+        let verification = try await client.verify()
 
         XCTAssertFalse(verification.enclaveHost.isEmpty)
         XCTAssertEqual(verification.configRepo, TinfoilConstants.defaultGithubRepo)
