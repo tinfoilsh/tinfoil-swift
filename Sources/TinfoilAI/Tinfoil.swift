@@ -379,4 +379,8 @@ public enum TinfoilError: Error, Equatable {
     case missingAPIKey
     case invalidConfiguration(String)
     case connectionError(String)
+    /// The enclave's attestation document could not be fetched
+    case fetchError(String)
+    /// The enclave's attestation was rejected or could not be used
+    case attestationError(String)
 }

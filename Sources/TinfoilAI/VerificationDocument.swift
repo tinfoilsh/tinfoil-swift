@@ -106,7 +106,7 @@ public struct HardwareMeasurement: Codable {
 }
 
 /// Identifies the software that performed verification
-public struct SoftwareIdentity: Codable {
+public struct SoftwareIdentity: Codable, Sendable, Equatable {
     public let name: String
     public let version: String
 
