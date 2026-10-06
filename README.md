@@ -67,26 +67,34 @@ let stream = client.audioCreateSpeechStream(
 
 Iterate over `stream` to receive decrypted audio in `AudioSpeechResult.audio`. Chunks can split PCM samples or frames, and the stream buffers without bound, so consume promptly. Cancel the consuming task to stop the request.
 
-## Verification document
+## Verification
 
-Receive the verification result through an optional callback, invoked once during `create` and again whenever the enclave rotates its key:
+Receive each verification result through an optional callback, invoked once during `create` and again whenever the client re-verifies because the attestation expired or the enclave rotated its key:
 
 ```swift
 let client = try await TinfoilAI.create(
     apiKey: "YOUR_API_KEY",
-    onVerification: { document in
-        guard let doc = document else { return }
-        print("Code fingerprint: \(doc.codeFingerprint)")
-        print("Enclave fingerprint: \(doc.enclaveFingerprint)")
-        print("Release: \(doc.releaseTag ?? "unavailable")")
-        print("Verifier: \(doc.verifier.name) \(doc.verifier.version)")
-        print("Verified at: \(doc.verifiedAt ?? "unknown")")
-        print("Security verified: \(doc.securityVerified)")
+    onVerification: { result in
+        switch result {
+        case .success(let verification):
+            print("Enclave: \(verification.enclaveHost)")
+            print("Code: \(verification.configRepo) \(verification.codeTag ?? verification.codeDigest)")
+            print("Valid until: \(verification.freshnessExpiresAt)")
+        case .failure(let error):
+            print("Verification failed: \(error)")
+        }
     }
 )
 ```
 
-`verifiedAt` is recorded from the local clock after successful verification. It is not an attested timestamp or a freshness guarantee.
+A verification stops authorizing new requests at `freshnessExpiresAt`; the client verifies again before sending the next one. `verifiedAt` is when the document was appraised, by the device's clock; it is not an attested timestamp.
+
+To verify an enclave without sending inference requests, use `SecureClient`:
+
+```swift
+let verifier = try SecureClient() // or SecureClient(enclave: "enclave.example.com", repo: "org/repo")
+let verification = try await verifier.verify()
+```
 
 ## Prompt Cache Scoping
 
@@ -118,8 +126,10 @@ TinfoilAI.create(
     apiKey: String? = nil,                        // falls back to TINFOIL_API_KEY
     apiKeyProvider: (() -> String?)? = nil,       // resolve the key per request instead
     baseURL: String? = nil,                       // proxy URL; requests go directly to the enclave if nil
-    githubRepo: String = "tinfoilsh/confidential-model-router",
-    attestationBundleURL: String? = nil,          // fetch the attestation bundle through the proxy
+    enclave: String? = nil,                       // enclave host; one of Tinfoil's routers is discovered if nil
+    repo: String = "tinfoilsh/confidential-model-router", // owner/name[@tag][@sha256:digest]
+    attestationRelay: String? = nil,              // host that relays attestation requests to the enclave
+    verificationPolicy: VerificationPolicy = VerificationPolicy(), // register pins, freshness bound
     parsingOptions: ParsingOptions = .relaxed,
     customHeaders: [String: String] = [:],
     tinfoilEvents: Set<TinfoilEvent> = [],
@@ -128,7 +138,9 @@ TinfoilAI.create(
 )
 ```
 
-To route through a proxy, set both `baseURL` and `attestationBundleURL` to the proxy; request bodies stay encrypted to the enclave. See the [proxy server guide](https://docs.tinfoil.sh/guides/proxy-server).
+A custom `repo` needs an `enclave`, since only Tinfoil's routers are discovered.
+
+To route through a proxy, set `baseURL` to it; request bodies stay encrypted to the enclave. Attestation is fetched from the enclave directly unless `attestationRelay` names a host, such as your proxy, that relays it over HTTPS. See the [proxy server guide](https://docs.tinfoil.sh/guides/proxy-server).
 
 ## API Documentation
 
