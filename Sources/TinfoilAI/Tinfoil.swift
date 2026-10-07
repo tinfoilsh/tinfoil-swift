@@ -343,3 +343,17 @@ public enum TinfoilError: Error, Equatable {
     /// An `onEnclaveVerified` callback rejected the enclave
     case enclaveRejected(String)
 }
+
+/// Gives `localizedDescription` each error's message, rather than Foundation's
+/// generic "The operation couldn't be completed" with an enum case number.
+extension TinfoilError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .missingAPIKey:
+            return "no API key was given; pass apiKey or apiKeyProvider, or set TINFOIL_API_KEY"
+        case .invalidConfiguration(let message), .connectionError(let message), .fetchError(let message),
+             .attestationError(let message), .enclaveRejected(let message):
+            return message
+        }
+    }
+}
