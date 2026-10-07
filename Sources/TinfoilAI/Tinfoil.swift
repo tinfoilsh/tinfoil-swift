@@ -336,8 +336,12 @@ public enum TinfoilError: Error, Equatable {
     case missingAPIKey
     case invalidConfiguration(String)
     case connectionError(String)
-    /// The enclave's attestation document could not be fetched
-    case fetchError(String)
+    /// The enclave's attestation document could not be fetched. `urlError` is
+    /// set when the request failed in transit, as when offline or timed out,
+    /// and `status` when the server answered with an HTTP error. Neither is
+    /// set when the SDK refused the response itself, as for one too large or
+    /// a redirect off HTTPS.
+    case fetchError(String, urlError: URLError? = nil, status: Int? = nil)
     /// The enclave's attestation was rejected or could not be used
     case attestationError(String)
     /// An `onEnclaveVerified` callback rejected the enclave
@@ -351,7 +355,7 @@ extension TinfoilError: LocalizedError {
         switch self {
         case .missingAPIKey:
             return "no API key was given; pass apiKey or apiKeyProvider, or set TINFOIL_API_KEY"
-        case .invalidConfiguration(let message), .connectionError(let message), .fetchError(let message),
+        case .invalidConfiguration(let message), .connectionError(let message), .fetchError(let message, _, _),
              .attestationError(let message), .enclaveRejected(let message):
             return message
         }
