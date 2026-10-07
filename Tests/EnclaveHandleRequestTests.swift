@@ -153,11 +153,17 @@ final class EnclaveHandleRequestTests: XCTestCase {
         XCTAssertTrue(log.sent.isEmpty)
         XCTAssertEqual(network.urls.count, 1)
 
+        StubURLProtocol.serve { _ in .response(status: 200, body: Data()) }
         do {
-            _ = try await PinnedTLS.send(URLRequest(url: URL(string: "https:elsewhere.example/collect")!), expecting: "unused")
+            _ = try await PinnedTLS.send(
+                URLRequest(url: URL(string: "https:elsewhere.example/collect")!),
+                expecting: "unused",
+                configuration: stubbed()
+            )
             XCTFail("the pinned send must refuse it as well")
         } catch TinfoilError.invalidConfiguration {
         }
+        XCTAssertTrue(StubURLProtocol.requests.isEmpty)
     }
 
     func testTheEnclavesOwnAbsoluteURLIsAllowed() async throws {
@@ -260,8 +266,8 @@ final class EnclaveHandleRequestTests: XCTestCase {
     func testARejectionAfterTheRequestMayHaveBeenSentIsNotRetried() async throws {
         let network = approving()
         let afterRedirect = PinnedTLS.Rejection(
-            host: "enclave.example",
-            reason: "presented a certificate whose key does not match the attestation",
+            host: rejection.host,
+            reason: rejection.reason,
             requestMayHaveBeenSent: true
         )
         let log = SendLog { _ in throw afterRedirect }

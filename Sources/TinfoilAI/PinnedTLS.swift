@@ -89,8 +89,9 @@ enum CertificateFingerprint {
 enum PinnedTLS {
     typealias Send = @Sendable (_ request: URLRequest, _ fingerprint: String) async throws -> (Data, HTTPURLResponse)
 
-    /// A TLS connection was refused because its certificate does not prove the
-    /// attested key. Its handshake failed, so nothing went over it.
+    /// A TLS connection was refused because its certificate, though trusted,
+    /// holds a key the attestation does not record. Its handshake failed, so
+    /// nothing went over it.
     struct Rejection: Error, CustomStringConvertible {
         let host: String
         let reason: String
@@ -188,7 +189,7 @@ final class PinningDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendab
             return
         }
         let trust = challenge.protectionSpace.serverTrust
-        if let trust, admit(trust, host: challenge.protectionSpace.host) {
+        if admit(trust, host: challenge.protectionSpace.host), let trust {
             completionHandler(.useCredential, URLCredential(trust: trust))
         } else {
             completionHandler(.cancelAuthenticationChallenge, nil)
@@ -198,13 +199,16 @@ final class PinningDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendab
     /// Decides one server-trust challenge: the system's usual validation, then
     /// the certificate's key against the attested fingerprint. A challenge
     /// with no trust to evaluate is refused rather than left to the default.
+    /// Failed validation is a `URLError`, as URLSession reports it, since
+    /// verifying the enclave again cannot fix it.
     func admit(_ trust: SecTrust?, host: String) -> Bool {
         guard let trust else {
-            reject(host, "offered no certificate to check")
+            fail(Self.tlsError(.secureConnectionFailed, "\(host) offered no certificate to check"))
             return false
         }
-        guard SecTrustEvaluateWithError(trust, nil) else {
-            reject(host, "presented a certificate that is not trusted")
+        var evaluation: CFError?
+        guard SecTrustEvaluateWithError(trust, &evaluation) else {
+            fail(Self.tlsError(.serverCertificateUntrusted, "\(host) presented a certificate that is not trusted", underlying: evaluation))
             return false
         }
         guard let leaf = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first,
@@ -225,6 +229,12 @@ final class PinningDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendab
         let mayHaveSent = pinnedConnections > 0
         lock.unlock()
         fail(PinnedTLS.Rejection(host: host, reason: reason, requestMayHaveBeenSent: mayHaveSent))
+    }
+
+    private static func tlsError(_ code: URLError.Code, _ description: String, underlying: Error? = nil) -> URLError {
+        var info: [String: Any] = [NSLocalizedDescriptionKey: description]
+        info[NSUnderlyingErrorKey] = underlying
+        return URLError(code, userInfo: info)
     }
 
     func urlSession(

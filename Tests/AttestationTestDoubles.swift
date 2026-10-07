@@ -181,11 +181,11 @@ final class StubURLProtocol: URLProtocol {
     override func startLoading() {
         Self.lock.lock()
         Self.recorded.append(request)
-        let reply = Self.reply(request)
+        let reply = Self.reply
         Self.lock.unlock()
 
         let url = request.url!
-        switch reply {
+        switch reply(request) {
         case .response(let status, let body):
             let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
