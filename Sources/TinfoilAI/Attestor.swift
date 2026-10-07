@@ -9,17 +9,23 @@ struct Attestor: Sendable {
     private let verifier: any AttestationVerifier
     private let fetch: Fetch
     private let retryDelay: TimeInterval
+    private let onEnclaveVerified: EnclaveVerifiedCallback?
 
-    /// - Parameter retryDelay: Wait before the one retry of a failed fetch or
-    ///   verification, as in the Go SDK.
+    /// - Parameters:
+    ///   - retryDelay: Wait before the one retry of a failed fetch or
+    ///     verification, as in the Go SDK.
+    ///   - onEnclaveVerified: The caller's check on each enclave whose evidence
+    ///     verifies.
     init(
         verifier: any AttestationVerifier,
         fetch: @escaping Fetch = { try await AttestationFetcher().fetch($0) },
-        retryDelay: TimeInterval = 1
+        retryDelay: TimeInterval = 1,
+        onEnclaveVerified: EnclaveVerifiedCallback? = nil
     ) {
         self.verifier = verifier
         self.fetch = fetch
         self.retryDelay = retryDelay
+        self.onEnclaveVerified = onEnclaveVerified
     }
 
     /// Verifies host against repo, fetching through relay when it is not nil.
@@ -56,7 +62,21 @@ struct Attestor: Sendable {
         let nonce = verifier.newNonce()
         let url = try verifier.attestationURL(host: host, relay: relay, nonce: nonce)
         let document = try await fetch(url)
-        return try verifier.verify(document: document, nonce: nonce, repo: repo, enclaveHost: host)
+        return try accepted(verifier.verify(document: document, nonce: nonce, repo: repo, enclaveHost: host))
+    }
+
+    /// A rejection is a decision about this evidence, so it is not retried;
+    /// during discovery the next router is tried instead.
+    private func accepted(_ verification: Verification) throws -> Verification {
+        guard let onEnclaveVerified else {
+            return verification
+        }
+        do {
+            try onEnclaveVerified(verification)
+        } catch {
+            throw TinfoilError.enclaveRejected("onEnclaveVerified rejected \(verification.enclaveHost): \(error)")
+        }
+        return verification
     }
 
     /// The router list is untrusted: each entry is only a host to try, and

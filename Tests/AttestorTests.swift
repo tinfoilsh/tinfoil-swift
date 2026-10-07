@@ -8,9 +8,10 @@ final class AttestorTests: XCTestCase {
     private func attestor(
         _ verifier: FakeVerifier,
         _ network: FakeNetwork,
-        retryDelay: TimeInterval = 0
+        retryDelay: TimeInterval = 0,
+        onEnclaveVerified: EnclaveVerifiedCallback? = nil
     ) -> Attestor {
-        Attestor(verifier: verifier, fetch: { try network.fetch($0) }, retryDelay: retryDelay)
+        Attestor(verifier: verifier, fetch: { try network.fetch($0) }, retryDelay: retryDelay, onEnclaveVerified: onEnclaveVerified)
     }
 
     private func assertThrows<T>(
@@ -151,5 +152,50 @@ final class AttestorTests: XCTestCase {
 
         XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
         XCTAssertEqual(network.urls.filter { $0.host == TinfoilConstants.fallbackEnclave }.count, 2)
+    }
+
+    func testOnEnclaveVerifiedSeesEachVerifiedEnclaveOnce() async throws {
+        let verified = Recorder<String>()
+        let network = FakeNetwork { url, previous in
+            FakeNetwork.document(previous == 0 ? "reject" : "ok", for: url)
+        }
+
+        _ = try await attestor(FakeVerifier(), network, onEnclaveVerified: { verified.record($0.enclaveHost) })
+            .attest(host: "enclave.example", relay: nil, repo: "org/repo")
+
+        XCTAssertEqual(verified.values, ["enclave.example"], "A failed attempt is never passed to the callback.")
+    }
+
+    func testARejectedEnclaveIsNotRetried() async {
+        let network = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
+
+        await assertThrows(
+            {
+                try await self.attestor(FakeVerifier(), network, onEnclaveVerified: { _ in throw Refusal() })
+                    .attest(host: "enclave.example", relay: nil, repo: "org/repo")
+            },
+            { error in
+                guard case TinfoilError.enclaveRejected(let message) = error else { return false }
+                return message.contains("enclave.example") && message.contains("refused by the test")
+            }
+        )
+        XCTAssertEqual(network.urls.count, 1)
+    }
+
+    func testDiscoveryPassesOverARejectedRouter() async throws {
+        let network = FakeNetwork { url, _ in
+            url.host == "atc.tinfoil.sh"
+                ? #"["router-a.example","router-b.example"]"#
+                : FakeNetwork.document("ok", for: url)
+        }
+        let onEnclaveVerified: EnclaveVerifiedCallback = { verification in
+            if verification.enclaveHost == "router-a.example" {
+                throw Refusal()
+            }
+        }
+
+        let verification = try await attestor(FakeVerifier(), network, onEnclaveVerified: onEnclaveVerified).attestDefaultRouter()
+
+        XCTAssertEqual(verification.enclaveHost, "router-b.example")
     }
 }

@@ -1,9 +1,17 @@
 import Foundation
 
-/// Receives each verification outcome: once when a client is created, and
-/// again whenever it re-verifies because the attestation expired or the
-/// enclave rejected its key. A cancelled verification is not reported.
-public typealias VerificationCallback = @Sendable (Result<Verification, TinfoilError>) -> Void
+/// Called with the result of each `EnclaveHandle.verify()` run: for a
+/// `TinfoilAI` client, once when it is created and again whenever it
+/// re-verifies because the attestation expired or the enclave rejected its
+/// key. It only observes. A cancelled run is not reported.
+public typealias VerificationResultCallback = @Sendable (Result<Verification, TinfoilError>) -> Void
+
+/// Called each time an enclave's evidence verifies, before the enclave is
+/// used. Throw to reject it: discovery moves to the next router; otherwise
+/// the run fails with `TinfoilError.enclaveRejected` and the enclave's key is
+/// never used. It runs synchronously, so keep it fast: requests waiting on a
+/// refresh wait on it too.
+public typealias EnclaveVerifiedCallback = @Sendable (Verification) throws -> Void
 
 /// Identifies the software that performed verification
 public struct SoftwareIdentity: Codable, Sendable, Equatable {

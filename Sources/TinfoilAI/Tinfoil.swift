@@ -15,16 +15,12 @@ public class TinfoilAI {
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
     ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
-    ///   - enclave: Host of the enclave to use, such as "inference.tinfoil.sh".
-    ///     When nil, one of Tinfoil's routers is discovered and verified, which
-    ///     requires the default `repo`.
-    ///   - repo: The trusted owner/name[@tag][@sha256:digest] the enclave's
-    ///     code must come from.
-    ///   - attestationRelay: Host, with an optional port, that forwards
-    ///     attestation requests to the enclave, such as your proxy. When nil,
-    ///     attestation is fetched from the enclave directly.
-    ///   - verificationPolicy: Checks beyond the defaults: pinned registers and
-    ///     the freshness bound.
+    ///   - handle: Verifies the enclave this client sends to. When nil, a
+    ///     default handle discovers and verifies one of Tinfoil's routers.
+    ///     Configure an `EnclaveHandle` to choose the enclave, pin the repo,
+    ///     relay attestation, tighten the policy, or observe and reject
+    ///     verifications. The client verifies through it on create and on
+    ///     every refresh.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - customHeaders: Additional request headers to forward verbatim on
     ///     every outbound request (merged over the headers synthesized by
@@ -45,29 +41,22 @@ public class TinfoilAI {
     ///     the `user_cache_secret` field per request (e.g. via
     ///     `ChatQuery.extraBody`). A non-empty per-request string wins over the
     ///     client-level secret; an empty string is replaced with it.
-    ///   - onVerification: Optional callback for verification results. Invoked
-    ///     once during `create`, and again from the request's task context
-    ///     whenever the client re-verifies because the attestation expired or
-    ///     the enclave rejected its key.
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     ///
     /// When using a proxy, set `baseURL` to it. Request bodies stay encrypted
     /// to the verified enclave, and the proxy receives the
     /// `X-Tinfoil-Enclave-Url` header to know where to forward requests. To
-    /// fetch attestation through the proxy as well, set `attestationRelay`.
+    /// fetch attestation through the proxy as well, give the handle an
+    /// `attestationRelay`.
     public static func create(
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         baseURL: String? = nil,
-        enclave: String? = nil,
-        repo: String = TinfoilConstants.defaultGithubRepo,
-        attestationRelay: String? = nil,
-        verificationPolicy: VerificationPolicy = VerificationPolicy(),
+        handle: EnclaveHandle? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
         tinfoilEvents: Set<TinfoilEvent> = [],
-        userCacheSecret: String? = nil,
-        onVerification: VerificationCallback? = nil
+        userCacheSecret: String? = nil
     ) async throws -> TinfoilAI {
         let staticApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
         // Attestation itself does not use the API key; it only authorizes
@@ -78,24 +67,8 @@ public class TinfoilAI {
             throw TinfoilError.missingAPIKey
         }
 
-        let handle = try EnclaveHandle(
-            enclave: enclave,
-            repo: repo,
-            attestationRelay: attestationRelay,
-            policy: verificationPolicy
-        )
-        let verify: @Sendable () async throws -> Verification = {
-            do {
-                let verification = try await handle.verify()
-                onVerification?(.success(verification))
-                return verification
-            } catch let error as TinfoilError {
-                onVerification?(.failure(error))
-                throw error
-            }
-        }
-
-        let verification = try await verify()
+        let handle = try handle ?? EnclaveHandle()
+        let verification = try await handle.verify()
         let enclaveURL = Self.enclaveURL(for: verification)
         return try TinfoilAI(
             apiKey: staticApiKey,
@@ -111,7 +84,7 @@ public class TinfoilAI {
             refreshEndpoint: {
                 // The client stays with the enclave it verified; a refresh
                 // re-verifies that enclave for a current key and deadline.
-                let refreshed = try await verify()
+                let refreshed = try await handle.verify()
                 return EHBPVerifiedEndpoint(
                     enclaveURL: Self.enclaveURL(for: refreshed),
                     publicKey: try Self.ehbpPublicKey(hex: refreshed.hpkePublicKey),
@@ -367,4 +340,6 @@ public enum TinfoilError: Error, Equatable {
     case fetchError(String)
     /// The enclave's attestation was rejected or could not be used
     case attestationError(String)
+    /// An `onEnclaveVerified` callback rejected the enclave
+    case enclaveRejected(String)
 }

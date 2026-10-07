@@ -69,12 +69,18 @@ Iterate over `stream` to receive decrypted audio in `AudioSpeechResult.audio`. C
 
 ## Verification
 
-Receive each verification result through an optional callback, invoked once during `create` and again whenever the client re-verifies because the attestation expired or the enclave rotated its key:
+An `EnclaveHandle` decides which enclave to verify and how. Without one, `create` uses a default handle that discovers one of Tinfoil's routers. Pass your own to choose the enclave, pin the repo to a tag or digest, relay attestation, tighten the policy, or observe and reject verifications:
 
 ```swift
-let client = try await TinfoilAI.create(
-    apiKey: "YOUR_API_KEY",
-    onVerification: { result in
+let handle = try EnclaveHandle(
+    enclave: "enclave.example.com",
+    repo: "org/repo@v1.2.3",
+    onEnclaveVerified: { verification in
+        guard verification.codeMeasurement != nil else {
+            throw MyPolicyError.unexpectedEnclave
+        }
+    },
+    onVerificationResult: { result in
         switch result {
         case .success(let verification):
             print("Enclave: \(verification.enclaveHost)")
@@ -85,14 +91,19 @@ let client = try await TinfoilAI.create(
         }
     }
 )
+let client = try await TinfoilAI.create(apiKey: "YOUR_API_KEY", handle: handle)
 ```
 
-A verification stops authorizing new requests at `freshnessExpiresAt`; the client verifies again before sending the next one. `verifiedAt` is when the document was appraised, by the device's clock; it is not an attested timestamp.
+The client verifies through the handle once during `create`, and again whenever the attestation expires or the enclave rotates its key. Each of these runs fetches the enclave's attestation document and verifies it, retrying a failed attempt once; a handle without an `enclave` may try several routers on its first run. The two callbacks see different things:
 
-To verify an enclave without sending inference requests, use `EnclaveHandle`:
+- `onEnclaveVerified` is called each time an enclave's evidence verifies, before the enclave is used. Throw to reject it: discovery moves to the next router; otherwise the run fails with `TinfoilError.enclaveRejected` and the enclave's key is never used. It runs synchronously, so a rejection cannot race a request.
+- `onVerificationResult` is called once with each run's final result, success or failure, after any retries and rejections. It only observes.
+
+A verification stops authorizing new requests at `freshnessExpiresAt`; the client verifies again before sending the next one. `verifiedAt` is when the document was appraised, by the device's clock; it is not an attested timestamp. A custom `repo` needs an `enclave`, since only Tinfoil's routers are discovered.
+
+The same handle verifies without sending inference requests, and holds the latest result:
 
 ```swift
-let handle = try EnclaveHandle() // or EnclaveHandle(enclave: "enclave.example.com", repo: "org/repo")
 let verification = try await handle.verify()
 ```
 
@@ -126,21 +137,17 @@ TinfoilAI.create(
     apiKey: String? = nil,                        // falls back to TINFOIL_API_KEY
     apiKeyProvider: (() -> String?)? = nil,       // resolve the key per request instead
     baseURL: String? = nil,                       // proxy URL; requests go directly to the enclave if nil
-    enclave: String? = nil,                       // enclave host; one of Tinfoil's routers is discovered if nil
-    repo: String = "tinfoilsh/confidential-model-router", // owner/name[@tag][@sha256:digest]
-    attestationRelay: String? = nil,              // host that relays attestation requests to the enclave
-    verificationPolicy: VerificationPolicy = VerificationPolicy(), // register pins, freshness bound
+    handle: EnclaveHandle? = nil,                 // how the enclave is verified; a router is discovered if nil
     parsingOptions: ParsingOptions = .relaxed,
     customHeaders: [String: String] = [:],
     tinfoilEvents: Set<TinfoilEvent> = [],
-    userCacheSecret: String? = nil,
-    onVerification: VerificationCallback? = nil
+    userCacheSecret: String? = nil
 )
 ```
 
-A custom `repo` needs an `enclave`, since only Tinfoil's routers are discovered.
+`EnclaveHandle(enclave:repo:attestationRelay:policy:onEnclaveVerified:onVerificationResult:)` takes the enclave host, the `owner/name[@tag][@sha256:digest]` repo, an attestation relay, a `VerificationPolicy` (register pins, freshness bound) and the two callbacks described under [Verification](#verification).
 
-To route through a proxy, set `baseURL` to it; request bodies stay encrypted to the enclave. Attestation is fetched from the enclave directly unless `attestationRelay` names a host, such as your proxy, that relays it over HTTPS. See the [proxy server guide](https://docs.tinfoil.sh/guides/proxy-server).
+To route through a proxy, set `baseURL` to it; request bodies stay encrypted to the enclave. Attestation is fetched from the enclave directly unless the handle's `attestationRelay` names a host, such as your proxy, that relays it over HTTPS. See the [proxy server guide](https://docs.tinfoil.sh/guides/proxy-server).
 
 ## API Documentation
 

@@ -84,6 +84,9 @@ final class FakeNetwork: @unchecked Sendable {
 }
 
 extension Verification {
+    /// A 32-byte key, so a stub verification can configure EHBP.
+    static let stubHPKEKey = String(repeating: "42", count: 32)
+
     /// A verification of host against repo, which records the repository
     /// without its tag or digest pins, as the verifier does.
     static func stub(host: String, repo: String = TinfoilConstants.defaultGithubRepo) -> Verification {
@@ -95,14 +98,40 @@ extension Verification {
             codeMeasurement: nil,
             enclaveMeasurement: nil,
             tlsPublicKeyFingerprint: "deadbeef",
-            hpkePublicKey: "cafebabe",
+            hpkePublicKey: stubHPKEKey,
             cryptoMaterial: [
                 .init(id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "deadbeef"),
-                .init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: "cafebabe"),
+                .init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: stubHPKEKey),
             ],
             freshnessExpiresAt: Date().addingTimeInterval(3600),
             verifiedAt: Date(),
             verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion)
         )
+    }
+}
+
+/// What an approval closure throws to reject a verification
+struct Refusal: Error, CustomStringConvertible {
+    var description: String { "refused by the test" }
+}
+
+/// Records values from Sendable closures, in order.
+final class Recorder<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _values: [Value] = []
+
+    var values: [Value] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _values
+    }
+
+    /// Appends value and returns how many have been recorded.
+    @discardableResult
+    func record(_ value: Value) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        _values.append(value)
+        return _values.count
     }
 }

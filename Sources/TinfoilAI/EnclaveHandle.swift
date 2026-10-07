@@ -1,14 +1,21 @@
 import Foundation
 
 /// A handle on one attested enclave, matching tinfoil-go's `enclave.Handle`.
-/// The SDK fetches each attestation document itself and tinfoil-go verifies
-/// it; every `verify()` checks fresh evidence, and the latest successful result
-/// stays in `verification`.
+/// Pass one to `TinfoilAI.create` to configure how the client's enclave is
+/// verified.
+///
+/// Each `verify()` is one run. A run fetches an enclave's attestation document
+/// and has tinfoil-go verify it, retrying a failed attempt once. Before the
+/// first run picks an enclave, it may try several of Tinfoil's routers. Every
+/// enclave whose evidence verifies is passed to `onEnclaveVerified`, which can
+/// reject it, and the run's final result goes to `onVerificationResult`. The
+/// latest successful result stays in `verification`.
 public actor EnclaveHandle {
     private let enclave: String?
     private let repo: String
     private let attestationRelay: String?
     private let attestor: Attestor
+    private let onVerificationResult: VerificationResultCallback?
     /// The configured enclave, or the router discovery picked on the first
     /// verification; later verifications stay with it.
     private var selectedEnclave: String?
@@ -29,21 +36,38 @@ public actor EnclaveHandle {
     ///     attestation requests to the enclave. Without an enclave, a relay is
     ///     asked for the fallback router rather than running discovery.
     ///   - policy: Checks beyond the defaults.
+    ///   - onEnclaveVerified: Called each time an enclave's evidence verifies,
+    ///     before it is used; throw to reject the enclave. This callback can
+    ///     be used to define additional user-specific policies that further
+    ///     restrict which enclaves are accepted.
+    ///   - onVerificationResult: Called with each `verify()` run's final result
+    ///     (i.e. after potentially several enclaves are tried); this callback
+    ///     only observes the end verification result and cannot synchronously
+    ///     reject enclaves.
     public init(
         enclave: String? = nil,
         repo: String = TinfoilConstants.defaultGithubRepo,
         attestationRelay: String? = nil,
-        policy: VerificationPolicy = VerificationPolicy()
+        policy: VerificationPolicy = VerificationPolicy(),
+        onEnclaveVerified: EnclaveVerifiedCallback? = nil,
+        onVerificationResult: VerificationResultCallback? = nil
     ) throws {
         try self.init(
             enclave: enclave,
             repo: repo,
             attestationRelay: attestationRelay,
-            attestor: Attestor(verifier: GoAttestationVerifier(policy: policy))
+            attestor: Attestor(verifier: GoAttestationVerifier(policy: policy), onEnclaveVerified: onEnclaveVerified),
+            onVerificationResult: onVerificationResult
         )
     }
 
-    init(enclave: String?, repo: String, attestationRelay: String?, attestor: Attestor) throws {
+    init(
+        enclave: String?,
+        repo: String,
+        attestationRelay: String?,
+        attestor: Attestor,
+        onVerificationResult: VerificationResultCallback? = nil
+    ) throws {
         guard enclave != nil || repo == TinfoilConstants.defaultGithubRepo else {
             throw TinfoilError.invalidConfiguration(
                 "an enclave is required to verify against \(repo); only Tinfoil's routers are discovered"
@@ -53,6 +77,7 @@ public actor EnclaveHandle {
         self.repo = repo
         self.attestationRelay = attestationRelay
         self.attestor = attestor
+        self.onVerificationResult = onVerificationResult
     }
 
     /// Verifies the enclave against fresh evidence and returns the result.
@@ -66,7 +91,15 @@ public actor EnclaveHandle {
         } else {
             task = Task {
                 defer { self.inFlight = nil }
-                return try await self.verifyNow()
+                // Reported here, once per run, however many callers share it.
+                do {
+                    let verified = try await self.verifyNow()
+                    self.onVerificationResult?(.success(verified))
+                    return verified
+                } catch let error as TinfoilError {
+                    self.onVerificationResult?(.failure(error))
+                    throw error
+                }
             }
             inFlight = task
         }

@@ -107,7 +107,7 @@ final class TinfoilAITests: XCTestCase {
     // never leave the machine.
     func testCreateFailsForAnUnreachableEnclave() async throws {
         do {
-            _ = try await TinfoilAI.create(apiKey: "test-key", enclave: "127.0.0.1:9")
+            _ = try await TinfoilAI.create(apiKey: "test-key", handle: EnclaveHandle(enclave: "127.0.0.1:9"))
             XCTFail("Should have failed to fetch attestation from an unreachable enclave")
         } catch TinfoilError.fetchError {
         } catch {
@@ -228,9 +228,9 @@ final class TinfoilAITests: XCTestCase {
 
         let client = try await TinfoilAI.create(
             apiKey: try getAPIKey(),
-            onVerification: { result in
+            handle: EnclaveHandle(onVerificationResult: { result in
                 captured.value = result
-            }
+            })
         )
 
         guard case .success(let verification) = captured.value else {
@@ -257,10 +257,9 @@ final class TinfoilAITests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                enclave: "127.0.0.1:9",
-                onVerification: { result in
+                handle: EnclaveHandle(enclave: "127.0.0.1:9", onVerificationResult: { result in
                     captured.value = result
-                }
+                })
             )
             XCTFail("Should have failed to verify an unreachable enclave")
         } catch {
