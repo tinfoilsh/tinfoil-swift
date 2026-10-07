@@ -4,13 +4,11 @@ import OpenAI
 
 final class TinfoilIntegrationTests: XCTestCase {
 
-    func testCreateRequiresAnEnclaveForACustomRepo() async {
-        do {
-            _ = try await TinfoilAI.create(apiKey: "test-key", repo: "org/repo")
-            XCTFail("Only Tinfoil's routers can be discovered, so a custom repo needs an enclave")
-        } catch TinfoilError.invalidConfiguration {
-        } catch {
-            XCTFail("expected a configuration error, got \(error)")
+    func testHandleRequiresAnEnclaveForACustomRepo() {
+        XCTAssertThrowsError(try EnclaveHandle(repo: "org/repo"), "Only Tinfoil's routers are discovered") { error in
+            guard case TinfoilError.invalidConfiguration = error else {
+                return XCTFail("expected a configuration error, got \(error)")
+            }
         }
     }
 
@@ -22,9 +20,9 @@ final class TinfoilIntegrationTests: XCTestCase {
 
         _ = try await TinfoilAI.create(
             apiKey: "test-key",
-            onVerification: { result in
+            handle: EnclaveHandle(onVerificationResult: { result in
                 captured.value = result
-            }
+            })
         )
 
         guard case .success(let verification) = captured.value else {
@@ -54,7 +52,7 @@ final class TinfoilIntegrationTests: XCTestCase {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
                 baseURL: "http://localhost:8080",
-                attestationRelay: "127.0.0.1:9"
+                handle: EnclaveHandle(attestationRelay: "127.0.0.1:9")
             )
             XCTFail("Attestation through an unreachable relay must fail")
         } catch TinfoilError.fetchError {
