@@ -101,10 +101,10 @@ The client verifies through the handle once during `create`, and again whenever 
 
 A verification stops authorizing new requests at `freshnessExpiresAt`; the client verifies again before sending the next one. `verifiedAt` is when the document was appraised, by the device's clock; it is not an attested timestamp. A custom `repo` needs an `enclave`, since only Tinfoil's routers are discovered.
 
-The same handle verifies without sending inference requests, and holds the latest result:
+The same handle verifies without sending inference requests. `verify()` always fetches and verifies fresh evidence. `verifyIfNeeded()` reuses the latest verification until its `freshnessExpiresAt` and verifies again after, which suits warming up before requests. `verification` holds the latest result, which may have expired.
 
 ```swift
-let verification = try await handle.verify()
+let verification = try await handle.verifyIfNeeded()
 ```
 
 ### Other enclave endpoints

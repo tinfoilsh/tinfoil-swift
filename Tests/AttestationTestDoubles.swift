@@ -146,6 +146,24 @@ final class Recorder<Value: Sendable>: @unchecked Sendable {
     }
 }
 
+/// A clock tests move by hand
+final class ManualClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = Date()
+
+    var now: Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
+    }
+
+    func advance(by seconds: TimeInterval) {
+        lock.lock()
+        current += seconds
+        lock.unlock()
+    }
+}
+
 /// Serves canned responses to sessions configured with it, so fetches to
 /// https URLs run without a network or TLS.
 final class StubURLProtocol: URLProtocol {

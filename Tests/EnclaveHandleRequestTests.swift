@@ -31,24 +31,6 @@ private final class SendLog: @unchecked Sendable {
     }
 }
 
-/// A clock tests move by hand
-private final class Clock: @unchecked Sendable {
-    private let lock = NSLock()
-    private var current = Date()
-
-    var now: Date {
-        lock.lock()
-        defer { lock.unlock() }
-        return current
-    }
-
-    func advance(by seconds: TimeInterval) {
-        lock.lock()
-        current += seconds
-        lock.unlock()
-    }
-}
-
 final class EnclaveHandleRequestTests: XCTestCase {
     private let rejection = PinnedTLS.Rejection(host: "enclave.example", reason: "presented a certificate whose key does not match the attestation")
 
@@ -57,7 +39,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
     private func handle(
         network: FakeNetwork,
         log: SendLog,
-        clock: Clock = Clock(),
+        clock: ManualClock = ManualClock(),
         evidenceClock: (@Sendable () -> Date)? = nil
     ) throws -> EnclaveHandle {
         try EnclaveHandle(
@@ -285,7 +267,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
     func testAVerificationAlreadyPastItsDeadlineIsRefused() async throws {
         // The evidence is good for an hour of real time, but the handle's clock
         // is two hours ahead, so the new verification arrives already expired.
-        let clock = Clock()
+        let clock = ManualClock()
         clock.advance(by: 2 * 3600)
         let log = SendLog()
         let handle = try handle(network: approving(), log: log, clock: clock, evidenceClock: { Date() })
@@ -316,7 +298,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
 
     func testAnExpiredVerificationIsRenewedBeforeSending() async throws {
         let network = approving()
-        let clock = Clock()
+        let clock = ManualClock()
         let handle = try handle(network: network, log: SendLog(), clock: clock)
 
         _ = try await handle.data(from: URL(string: "/health")!)
