@@ -59,7 +59,8 @@ struct AttestationFetcher: Sendable {
             }
             guard (200...299).contains(response.statusCode) else {
                 throw TinfoilError.fetchError(
-                    "HTTP GET \(url.absoluteString): \(response.statusCode) \(HTTPURLResponse.localizedString(forStatusCode: response.statusCode))"
+                    "HTTP GET \(url.absoluteString): \(response.statusCode) \(HTTPURLResponse.localizedString(forStatusCode: response.statusCode))",
+                    status: response.statusCode
                 )
             }
             if response.expectedContentLength > Int64(maximumBodyBytes) {
@@ -79,10 +80,11 @@ struct AttestationFetcher: Sendable {
             if Task.isCancelled {
                 throw CancellationError()
             }
-            if let urlError = error as? URLError, urlError.code == .timedOut {
-                throw TinfoilError.fetchError("GET \(url.absoluteString) timed out after \(Int(timeout)) seconds")
+            let urlError = error as? URLError
+            if urlError?.code == .timedOut {
+                throw TinfoilError.fetchError("GET \(url.absoluteString) timed out after \(Int(timeout)) seconds", urlError: urlError)
             }
-            throw TinfoilError.fetchError("GET \(url.absoluteString): \(error.localizedDescription)")
+            throw TinfoilError.fetchError("GET \(url.absoluteString): \(error.localizedDescription)", urlError: urlError)
         }
     }
 

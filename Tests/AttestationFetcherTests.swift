@@ -10,6 +10,8 @@ private final class StubURLProtocol: URLProtocol {
         case redirect(to: URL)
         /// Never answers, so the request ends only by timeout or cancellation.
         case hang
+        /// Fails in transit, as when offline.
+        case failure(URLError)
     }
 
     private static let lock = NSLock()
@@ -57,6 +59,8 @@ private final class StubURLProtocol: URLProtocol {
             client?.urlProtocolDidFinishLoading(self)
         case .hang:
             break
+        case .failure(let error):
+            client?.urlProtocol(self, didFailWithError: error)
         }
     }
 
@@ -74,17 +78,24 @@ final class AttestationFetcherTests: XCTestCase {
         }
     }
 
+    /// - Parameters:
+    ///   - urlError: The code of the network error it must carry, if any.
+    ///   - status: The HTTP status it must carry, if any.
     private func assertFetchError(
         _ body: () async throws -> Data,
         containing expected: String,
+        urlError expectedCode: URLError.Code? = nil,
+        status expectedStatus: Int? = nil,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         do {
             _ = try await body()
             XCTFail("expected a fetch error mentioning \(expected)", file: file, line: line)
-        } catch TinfoilError.fetchError(let message) {
+        } catch TinfoilError.fetchError(let message, let urlError, let status) {
             XCTAssertTrue(message.contains(expected), "\(message) should mention \(expected)", file: file, line: line)
+            XCTAssertEqual(urlError?.code, expectedCode, file: file, line: line)
+            XCTAssertEqual(status, expectedStatus, file: file, line: line)
         } catch {
             XCTFail("expected a fetch error, got \(error)", file: file, line: line)
         }
@@ -150,7 +161,17 @@ final class AttestationFetcherTests: XCTestCase {
     func testRejectsUnsuccessfulStatus() async {
         StubURLProtocol.serve { _ in .response(status: 503, body: Data("unavailable".utf8)) }
 
-        await assertFetchError({ try await self.fetcher().fetch(self.documentURL) }, containing: "503")
+        await assertFetchError({ try await self.fetcher().fetch(self.documentURL) }, containing: "503", status: 503)
+    }
+
+    func testKeepsTheNetworkError() async {
+        StubURLProtocol.serve { _ in .failure(URLError(.notConnectedToInternet)) }
+
+        await assertFetchError(
+            { try await self.fetcher().fetch(self.documentURL) },
+            containing: self.documentURL.absoluteString,
+            urlError: .notConnectedToInternet
+        )
     }
 
     func testCapsTheBody() async throws {
@@ -164,7 +185,7 @@ final class AttestationFetcherTests: XCTestCase {
     func testTimesOut() async {
         StubURLProtocol.serve { _ in .hang }
 
-        await assertFetchError({ try await self.fetcher(timeout: 0.5).fetch(self.documentURL) }, containing: "timed out")
+        await assertFetchError({ try await self.fetcher(timeout: 0.5).fetch(self.documentURL) }, containing: "timed out", urlError: .timedOut)
     }
 
     func testCancellationStopsTheFetch() async {
