@@ -10,7 +10,7 @@ public enum TinfoilConstants {
 
     /// Version of this SDK. The release workflow requires the release tag to be
     /// `v` followed by this value.
-    public static let sdkVersion = "0.9.0-rc.1"
+    public static let sdkVersion = "0.9.0-rc.2"
 
     /// Lists the routers a client tries when no enclave is configured
     internal static let routerListURL = URL(string: "https://atc.tinfoil.sh/routers")!
