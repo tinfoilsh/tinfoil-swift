@@ -107,6 +107,20 @@ The same handle verifies without sending inference requests, and holds the lates
 let verification = try await handle.verify()
 ```
 
+### Other enclave endpoints
+
+For endpoints outside the OpenAI API, the handle loads requests over TLS pinned to the enclave's attested key, with URLSession-like `data(from:)` and `data(for:)` methods that return `(Data, HTTPURLResponse)`. A URL without a host resolves against the verified enclave:
+
+```swift
+let (data, response) = try await handle.data(from: URL(string: "/health")!)
+
+var request = URLRequest(url: URL(string: "/v1/status")!)
+request.setValue("Bearer YOUR_API_KEY", forHTTPHeaderField: "Authorization")
+let (body, status) = try await handle.data(for: request)
+```
+
+Requests go only to the verified enclave: an absolute URL for another host is refused, as is a redirect to another host or to plain HTTP, so credentials in headers never leave it. Each connection must present a certificate that passes the system's usual validation and whose key matches the attestation. Requests use the current verification and re-verify once it expires. If the enclave presents a key the attestation does not endorse before the request is sent, the handle verifies again and retries once; otherwise, or if it happens again, it throws `TinfoilError.attestationError`. Network failures, including a certificate the system does not trust, surface as `URLError`.
+
 ## Prompt Cache Scoping
 
 The router partitions prompt caches by API identity and a `user_cache_secret` that the SDK adds to eligible requests. By default it generates one and persists it at `~/.tinfoil/user_cache_secret`, which is suitable for single-user applications. Multi-user services should scope each request to its end user:

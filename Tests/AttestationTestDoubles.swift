@@ -8,6 +8,12 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
     private let lock = NSLock()
     private var issued: UInt8 = 0
     private var _repos: [String] = []
+    /// The clock a verification's hour of freshness is counted from
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = { Date() }) {
+        self.now = now
+    }
 
     var repos: [String] {
         lock.lock()
@@ -40,7 +46,7 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         }
         switch parts[0] {
         case "ok":
-            return .stub(host: enclaveHost, repo: repo)
+            return .stub(host: enclaveHost, repo: repo, expiresAt: now().addingTimeInterval(3600))
         case "config":
             throw TinfoilError.invalidConfiguration("bad repo")
         default:
@@ -89,7 +95,11 @@ extension Verification {
 
     /// A verification of host against repo, which records the repository
     /// without its tag or digest pins, as the verifier does.
-    static func stub(host: String, repo: String = TinfoilConstants.defaultGithubRepo) -> Verification {
+    static func stub(
+        host: String,
+        repo: String = TinfoilConstants.defaultGithubRepo,
+        expiresAt: Date = Date().addingTimeInterval(3600)
+    ) -> Verification {
         Verification(
             enclaveHost: host,
             configRepo: String(repo.prefix { $0 != "@" }),
@@ -103,7 +113,7 @@ extension Verification {
                 .init(id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "deadbeef"),
                 .init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: stubHPKEKey),
             ],
-            freshnessExpiresAt: Date().addingTimeInterval(3600),
+            freshnessExpiresAt: expiresAt,
             verifiedAt: Date(),
             verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion)
         )
@@ -134,4 +144,69 @@ final class Recorder<Value: Sendable>: @unchecked Sendable {
         _values.append(value)
         return _values.count
     }
+}
+
+/// Serves canned responses to sessions configured with it, so fetches to
+/// https URLs run without a network or TLS.
+final class StubURLProtocol: URLProtocol {
+    enum Reply {
+        case response(status: Int, body: Data)
+        case redirect(to: URL)
+        /// Never answers, so the request ends only by timeout or cancellation.
+        case hang
+        /// Fails in transit, as when offline.
+        case failure(URLError)
+    }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var reply: (URLRequest) -> Reply = { _ in .response(status: 200, body: Data()) }
+    nonisolated(unsafe) private static var recorded: [URLRequest] = []
+
+    static func serve(_ reply: @escaping (URLRequest) -> Reply) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.reply = reply
+        recorded = []
+    }
+
+    static var requests: [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.lock.lock()
+        Self.recorded.append(request)
+        let reply = Self.reply
+        Self.lock.unlock()
+
+        let url = request.url!
+        switch reply(request) {
+        case .response(let status, let body):
+            let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: body)
+            client?.urlProtocolDidFinishLoading(self)
+        case .redirect(let location):
+            let response = HTTPURLResponse(
+                url: url, statusCode: 302, httpVersion: "HTTP/1.1",
+                headerFields: ["Location": location.absoluteString]
+            )!
+            var next = URLRequest(url: location)
+            next.allHTTPHeaderFields = request.allHTTPHeaderFields
+            client?.urlProtocol(self, wasRedirectedTo: next, redirectResponse: response)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+        case .hang:
+            break
+        case .failure(let error):
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
