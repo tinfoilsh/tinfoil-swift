@@ -25,7 +25,8 @@ public actor EnclaveHandle {
     /// it runs
     private var inFlight: Task<Verification, Error>?
 
-    /// The latest successful verification, or nil before the first
+    /// The latest successful verification, or nil before the first. It may
+    /// have expired; `verifyIfNeeded()` returns one that has not.
     public private(set) var verification: Verification?
 
     /// The verified enclave's base URL, or nil before the first verification.
@@ -95,7 +96,8 @@ public actor EnclaveHandle {
     /// Verifies the enclave against fresh evidence and returns the result.
     /// Calls made while a verification runs share it, so concurrent first
     /// calls discover a single router. Cancelling a call ends only its own
-    /// wait; the shared verification still completes.
+    /// wait; the shared verification still completes. To reuse a verification
+    /// that is still fresh, use `verifyIfNeeded()`.
     public func verify() async throws -> Verification {
         let task: Task<Verification, Error>
         if let inFlight {
@@ -148,7 +150,7 @@ public actor EnclaveHandle {
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         var attempt = 0
         while true {
-            let verification = try await current()
+            let verification = try await verifyIfNeeded()
             var pinned = request
             pinned.url = try Self.resolve(request.url, against: verification)
             do {
@@ -173,9 +175,12 @@ public actor EnclaveHandle {
         try await data(for: URLRequest(url: url))
     }
 
-    /// The latest verification while it still authorizes requests, otherwise
-    /// a fresh one
-    private func current() async throws -> Verification {
+    /// Verifies the enclave only when there is no verification yet or the
+    /// latest has reached its `freshnessExpiresAt`, as requests through the
+    /// handle do, and otherwise returns the latest. Call it to warm up or
+    /// check the handle without attesting on every call, rather than
+    /// comparing `freshnessExpiresAt` with the time yourself.
+    public func verifyIfNeeded() async throws -> Verification {
         if let verification, now() < verification.freshnessExpiresAt {
             return verification
         }

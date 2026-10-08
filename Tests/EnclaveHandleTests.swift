@@ -9,13 +9,15 @@ final class EnclaveHandleTests: XCTestCase {
         enclave: String? = nil,
         repo: String = TinfoilConstants.defaultGithubRepo,
         relay: String? = nil,
-        network: FakeNetwork
+        network: FakeNetwork,
+        clock: ManualClock = ManualClock()
     ) throws -> EnclaveHandle {
         try EnclaveHandle(
             enclave: enclave,
             repo: repo,
             attestationRelay: relay,
-            attestor: Attestor(verifier: FakeVerifier(), fetch: { try network.fetch($0) }, retryDelay: 0)
+            attestor: Attestor(verifier: FakeVerifier(now: { clock.now }), fetch: { try network.fetch($0) }, retryDelay: 0),
+            now: { clock.now }
         )
     }
 
@@ -72,6 +74,53 @@ final class EnclaveHandleTests: XCTestCase {
         XCTAssertEqual(network.urls.count, 1, "A relay does not run discovery.")
         XCTAssertEqual(url.host, "relay.example")
         XCTAssertTrue(url.query?.contains("enclave=\(TinfoilConstants.fallbackEnclave)") ?? false)
+    }
+
+    func testVerifyIfNeededVerifiesWhenThereIsNone() async throws {
+        let network = approving()
+        let handle = try handle(enclave: "enclave.example", network: network)
+
+        let current = try await handle.verifyIfNeeded()
+
+        XCTAssertEqual(current.enclaveHost, "enclave.example")
+        XCTAssertEqual(network.urls.count, 1)
+    }
+
+    func testVerifyIfNeededReusesAFreshOne() async throws {
+        let network = approving()
+        let clock = ManualClock()
+        let handle = try handle(enclave: "enclave.example", network: network, clock: clock)
+        let verified = try await handle.verify()
+
+        clock.advance(by: verified.freshnessExpiresAt.timeIntervalSince(clock.now) - 1)
+        let current = try await handle.verifyIfNeeded()
+
+        XCTAssertEqual(current, verified)
+        XCTAssertEqual(network.urls.count, 1, "A fresh verification is not attested again.")
+    }
+
+    func testVerifyIfNeededRenewsAnExpiredOne() async throws {
+        let network = approving()
+        let clock = ManualClock()
+        let handle = try handle(enclave: "enclave.example", network: network, clock: clock)
+        let verified = try await handle.verify()
+
+        clock.advance(by: verified.freshnessExpiresAt.timeIntervalSince(clock.now))
+        let current = try await handle.verifyIfNeeded()
+
+        XCTAssertNotEqual(current, verified)
+        XCTAssertGreaterThan(current.freshnessExpiresAt, clock.now)
+        XCTAssertEqual(network.urls.count, 2, "At its deadline the verification is renewed.")
+    }
+
+    func testVerifyAlwaysAttestsAgain() async throws {
+        let network = approving()
+        let handle = try handle(enclave: "enclave.example", network: network)
+
+        _ = try await handle.verify()
+        _ = try await handle.verify()
+
+        XCTAssertEqual(network.urls.count, 2)
     }
 
     func testFailedVerificationKeepsTheLastResult() async throws {
