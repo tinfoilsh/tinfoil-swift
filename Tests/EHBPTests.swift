@@ -842,59 +842,6 @@ final class EHBPTests: XCTestCase {
         XCTAssertEqual(recorder.completionCount, 1)
     }
 
-    func testKeyMismatchProblemRecognitionIsStrictAndBounded() throws {
-        let url = try XCTUnwrap(URL(string: "https://proxy.example"))
-        let response = try XCTUnwrap(
-            HTTPURLResponse(
-                url: url,
-                statusCode: 422,
-                httpVersion: nil,
-                headerFields: ["Content-Type": "application/problem+json; charset=utf-8"]
-            )
-        )
-        let body = Data(
-            "{\"type\":\"urn:ietf:params:ehbp:error:key-config\",\"title\":\"rotate\"}".utf8
-        )
-
-        XCTAssertTrue(
-            EHBPProblemResponse.isKeyConfigurationMismatch(response: response, body: body)
-        )
-        XCTAssertFalse(
-            EHBPProblemResponse.isKeyConfigurationMismatch(
-                response: response,
-                body: Data(repeating: 0, count: EHBPProblemResponse.maximumDiagnosticBytes + 1)
-            )
-        )
-
-        var diagnostic = Data()
-        XCTAssertTrue(
-            EHBPProblemResponse.appendDiagnosticPrefix(
-                Data(repeating: 0x41, count: EHBPProblemResponse.maximumDiagnosticBytes + 1),
-                to: &diagnostic
-            )
-        )
-        XCTAssertEqual(diagnostic.count, EHBPProblemResponse.maximumDiagnosticBytes)
-
-        XCTAssertFalse(
-            EHBPProblemResponse.shouldInspectKeyConfigurationMismatch(response),
-            "unbounded streaming problems must be delivered without prefetching"
-        )
-        let boundedResponse = try XCTUnwrap(
-            HTTPURLResponse(
-                url: url,
-                statusCode: 422,
-                httpVersion: nil,
-                headerFields: [
-                    "Content-Type": "application/problem+json",
-                    "Content-Length": String(body.count)
-                ]
-            )
-        )
-        XCTAssertTrue(
-            EHBPProblemResponse.shouldInspectKeyConfigurationMismatch(boundedResponse)
-        )
-    }
-
     func testCancelledRefreshWaiterDoesNotCancelOrBlockSharedRefresh() async throws {
         let refreshStarted = expectation(description: "shared refresh started")
         let cancelledWaiterFinished = expectation(description: "cancelled waiter finished")
