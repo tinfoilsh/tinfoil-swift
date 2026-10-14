@@ -106,7 +106,7 @@ final class SpeechTests: XCTestCase {
             }
             XCTFail("Expected authentication failure")
         } catch {
-            guard case CryptoKitError.authenticationFailure = error else {
+            guard (error as? EHBPError)?.code == .aeadDecryptFailed else {
                 return XCTFail("Expected authentication failure, got \(error)")
             }
         }
