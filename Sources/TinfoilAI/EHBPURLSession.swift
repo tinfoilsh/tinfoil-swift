@@ -98,7 +98,7 @@ private enum EHBPReplayPolicy {
         attempt: Int
     ) async throws {
         guard attempt + 1 < maximumAttempts else {
-            throw EHBPError(.invalidResponse,
+            throw EHBPError(.keyConfigMismatch,
                 "EHBP key configuration still mismatched after refresh"
             )
         }
