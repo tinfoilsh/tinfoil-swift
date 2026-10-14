@@ -399,42 +399,25 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                     session: networkSession
                 )
 
-                let (stream, response) = try await prepared.client.requestStream(
-                    method: prepared.method,
-                    path: prepared.path,
-                    headers: prepared.headers,
-                    body: prepared.body
-                )
-                var iterator = stream.makeAsyncIterator()
-                var prefetchedChunks: [Data] = []
-                var problemBody = Data()
-                var reachedEnd = false
-
-                if EHBPProblemResponse.shouldInspectKeyConfigurationMismatch(response) {
-                    var diagnosticWasTruncated = false
-                    while let chunk = try await iterator.next() {
-                        prefetchedChunks.append(chunk)
-                        if EHBPProblemResponse.appendDiagnosticPrefix(
-                            chunk,
-                            to: &problemBody
-                        ) {
-                            diagnosticWasTruncated = true
-                            break
-                        }
-                    }
-                    reachedEnd = !diagnosticWasTruncated
-                    if reachedEnd,
-                       EHBPProblemResponse.isKeyConfigurationMismatch(
-                           response: response,
-                           body: problemBody
-                       ) {
-                        try await EHBPReplayPolicy.refresh(
-                            verifiedState,
-                            afterRejectedGeneration: prepared.rejectedGeneration,
-                            attempt: attempt
-                        )
-                        continue
-                    }
+                // EHBP detects the key-config mismatch before any byte of
+                // the rejected response is returned, so nothing leaks to the
+                // delegate ahead of the replay.
+                let stream: AsyncThrowingStream<Data, Error>
+                let response: HTTPURLResponse
+                do {
+                    (stream, response) = try await prepared.client.requestStream(
+                        method: prepared.method,
+                        path: prepared.path,
+                        headers: prepared.headers,
+                        body: prepared.body
+                    )
+                } catch let error as EHBPError where error.code == .keyConfigMismatch {
+                    try await EHBPReplayPolicy.refresh(
+                        verifiedState,
+                        afterRejectedGeneration: prepared.rejectedGeneration,
+                        attempt: attempt
+                    )
+                    continue
                 }
 
                 delegate?.urlSession(
@@ -448,21 +431,12 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                 }
 
                 var accumulatedData = Data()
-                for chunk in prefetchedChunks {
+                for try await chunk in stream {
                     try Task.checkCancellation()
                     if accumulatesResponse {
                         accumulatedData.append(chunk)
                     }
                     delegate?.urlSession(session, dataTask: self, didReceive: chunk)
-                }
-                if !reachedEnd {
-                    while let chunk = try await iterator.next() {
-                        try Task.checkCancellation()
-                        if accumulatesResponse {
-                            accumulatedData.append(chunk)
-                        }
-                        delegate?.urlSession(session, dataTask: self, didReceive: chunk)
-                    }
                 }
                 try Task.checkCancellation()
 
@@ -612,18 +586,15 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
                 userCacheSecret: userCacheSecret,
                 session: session
             )
-            let (data, response) = try await prepared.client.request(
-                method: prepared.method,
-                path: prepared.path,
-                headers: prepared.headers,
-                body: prepared.body
-            )
-            try Task.checkCancellation()
-
-            if EHBPProblemResponse.isKeyConfigurationMismatch(
-                response: response,
-                body: data
-            ) {
+            let result: (Data, URLResponse)
+            do {
+                result = try await prepared.client.request(
+                    method: prepared.method,
+                    path: prepared.path,
+                    headers: prepared.headers,
+                    body: prepared.body
+                )
+            } catch let error as EHBPError where error.code == .keyConfigMismatch {
                 try await EHBPReplayPolicy.refresh(
                     verifiedState,
                     afterRejectedGeneration: prepared.rejectedGeneration,
@@ -631,8 +602,8 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
                 )
                 continue
             }
-
-            return (data, response)
+            try Task.checkCancellation()
+            return result
         }
         throw EHBPReplayPolicy.attemptsExhausted
     }
