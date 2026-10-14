@@ -69,9 +69,9 @@ final class GoAttestationVerifierTests: XCTestCase {
         assertCategory(isConfiguration) {
             try verifier.verify(document: document, nonce: nonce.dropFirst(), repo: Self.routerRepo, enclaveHost: "enclave.example")
         }
-        assertCategory(isConfiguration) {
-            try verifier.verify(document: document, nonce: nonce, repo: "owner", enclaveHost: "enclave.example")
-        }
+        // A malformed repo is also a configuration error, but the verifier
+        // only reads repo after parsing the document (its meaning depends on
+        // the collateral format), so it cannot be exercised with "{}".
     }
 
     func testPolicyOptionsJSON() throws {
