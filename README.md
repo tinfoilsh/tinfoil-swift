@@ -55,7 +55,7 @@ The handle also loads other enclave endpoints over TLS pinned to the attested ke
 
 ## Development
 
-Run `swift test`; tests that call a live enclave also need `TINFOIL_API_KEY`. `./update_verifier.sh [tag]` pins a new tinfoil-go release of the verifier framework.
+Run `swift test`. Live tests run only with `RUN_TINFOIL_INTEGRATION=true`, and those that send inference requests also need `TINFOIL_API_KEY`. `./update_verifier.sh [tag]` pins a new tinfoil-go release of the verifier framework.
 
 ## Reporting Vulnerabilities
 
