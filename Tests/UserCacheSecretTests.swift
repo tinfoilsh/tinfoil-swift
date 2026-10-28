@@ -159,6 +159,37 @@ final class UserCacheSecretTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: secretFile(in: home).path))
     }
 
+    func testAnEnclaveTheCallerNamesGetsOnlyAnExplicitSecret() throws {
+        let home = try makeTempHome()
+        let handle = try EnclaveHandle(enclave: "enclave.example", repo: "org/repo")
+
+        XCTAssertEqual(UserCacheSecret.resolve(explicit: "explicit", for: handle, environment: [:], homeDirectory: home), "explicit")
+        for explicit in [nil, ""] {
+            XCTAssertEqual(
+                UserCacheSecret.resolve(explicit: explicit, for: handle, environment: [envVar: "from-env"], homeDirectory: home),
+                "",
+                "Only Tinfoil's routers read the secret, so none is resolved for another enclave."
+            )
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: secretFile(in: home).deletingLastPathComponent().path),
+            "Only Tinfoil's routers provision the shared secret."
+        )
+    }
+
+    func testTinfoilsRoutersResolveTheSecret() throws {
+        for handle in [try EnclaveHandle(), try EnclaveHandle(attestationRelay: "relay.example")] {
+            let home = try makeTempHome()
+
+            XCTAssertEqual(
+                UserCacheSecret.resolve(explicit: nil, for: handle, environment: [envVar: "from-env"], homeDirectory: home),
+                "from-env"
+            )
+            assertIsGeneratedSecret(UserCacheSecret.resolve(explicit: nil, for: handle, environment: [:], homeDirectory: home))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: secretFile(in: home).path), "The router route provisions the shared secret.")
+        }
+    }
+
     // MARK: - Persistence
 
     func testGenerateAndPersist() throws {

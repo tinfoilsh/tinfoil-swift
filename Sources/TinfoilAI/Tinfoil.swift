@@ -32,11 +32,13 @@ public class TinfoilAI {
     ///     emits `<tinfoil-event>...</tinfoil-event>` markers inline with
     ///     the assistant text. Strict OpenAI SDKs render the markers as
     ///     text; callers parse and strip them before display.
-    ///   - userCacheSecret: Scopes the router's prompt cache. `nil` (the
-    ///     default) resolves the secret from `TINFOIL_USER_CACHE_SECRET` or a
-    ///     generated value persisted at `~/.tinfoil/user_cache_secret`; a
-    ///     non-empty string pins it (use one stable value per end user). An
-    ///     empty string is treated as unset.
+    ///   - userCacheSecret: Scopes the router's prompt cache. A non-empty
+    ///     string pins it (use one stable value per end user). `nil` (the
+    ///     default) or an empty string leaves it unset: a client of one of
+    ///     Tinfoil's routers then resolves the secret from
+    ///     `TINFOIL_USER_CACHE_SECRET` or a generated value persisted at
+    ///     `~/.tinfoil/user_cache_secret`, and a client of an enclave the
+    ///     handle names sends none, since only the router reads it.
     ///     Servers holding many end users' conversations should instead set
     ///     the `user_cache_secret` field per request (e.g. via
     ///     `ChatQuery.extraBody`). A non-empty per-request string wins over the
@@ -80,7 +82,7 @@ public class TinfoilAI {
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
             tinfoilEvents: tinfoilEvents,
-            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
+            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret, for: handle),
             refreshEndpoint: {
                 // The client stays with the enclave it verified; a refresh
                 // re-verifies that enclave for a current key and deadline.

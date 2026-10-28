@@ -35,6 +35,12 @@ public actor EnclaveHandle {
         verification.flatMap { URL(string: "https://\($0.enclaveHost)") }
     }
 
+    /// Whether the handle picks one of Tinfoil's routers, rather than
+    /// verifying an enclave the caller named
+    nonisolated var picksTinfoilRouter: Bool {
+        enclave == nil
+    }
+
     /// - Parameters:
     ///   - enclave: Host of the enclave to verify, such as
     ///     "inference.tinfoil.sh". When nil, the first verification picks one
