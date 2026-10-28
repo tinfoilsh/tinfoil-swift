@@ -728,6 +728,31 @@ final class EHBPTests: XCTestCase {
         }
     }
 
+    func testRefusesProtocolUpgradesAndTunnels() async {
+        let state = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey, expiresAt: .distantFuture),
+            refresh: nil
+        )
+        let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: state)
+        var websocket = URLRequest(url: URL(string: "\(server.baseURL)/v1/realtime")!)
+        websocket.setValue("websocket", forHTTPHeaderField: "upgrade")
+        websocket.setValue("Upgrade", forHTTPHeaderField: "Connection")
+        var tunnel = URLRequest(url: URL(string: "\(server.baseURL)/")!)
+        tunnel.httpMethod = "CONNECT"
+
+        for request in [websocket, tunnel] {
+            do {
+                _ = try await session.data(for: request, delegate: nil)
+                XCTFail("\(request.httpMethod ?? "GET") \(request.url!) must be refused")
+            } catch TinfoilError.configurationError(let failure) {
+                XCTAssertTrue(failure.message.contains("protocol upgrade"), failure.message)
+            } catch {
+                XCTFail("expected a configuration error, got \(error)")
+            }
+        }
+        XCTAssertTrue(server.requestStore.requests.isEmpty, "Nothing unsealed may leave the client.")
+    }
+
     func testExpiredAttestationIsRefreshedBeforeTheRequestIsSent() async throws {
         let clock = TestClock()
         let refreshCounter = AsyncCounter()
