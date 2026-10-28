@@ -49,6 +49,22 @@ internal enum UserCacheSecret {
 
     // MARK: - Resolution
 
+    /// Resolves the client-level secret for a client of handle's enclave.
+    /// Only Tinfoil's router reads the field, so a client of an enclave the
+    /// caller named sends only a non-empty explicit secret, as in the Go SDK,
+    /// and nothing is read from the environment or persisted for it.
+    static func resolve(
+        explicit: String?,
+        for handle: EnclaveHandle,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL? = defaultHomeDirectory
+    ) -> String {
+        guard handle.picksTinfoilRouter else {
+            return explicit ?? ""
+        }
+        return resolve(explicit: explicit, environment: environment, homeDirectory: homeDirectory)
+    }
+
     /// Resolves the client-level secret: a non-empty explicit
     /// `TinfoilAI.create` parameter wins, then a non-empty environment value,
     /// then the persisted (or generated) secret. Never throws: persistence
