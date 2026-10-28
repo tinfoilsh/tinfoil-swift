@@ -67,6 +67,8 @@ public struct Verification: Sendable, Equatable {
     public let configRepo: String
     public let codeDigest: String
     public let codeTag: String?
+    /// The registers the release fixes, in the enclave measurement's platform
+    /// layout, with an empty register for one the release leaves open
     public let codeMeasurement: Measurement?
     /// The hardware quote's authenticated registers
     public let enclaveMeasurement: Measurement?
@@ -184,19 +186,21 @@ extension Verification {
 extension TinfoilError {
     /// Classifies an error from the Go verifier. It crosses the FFI as a
     /// message alone, led by its category's prefix, which is dropped here
-    /// because the case carries the category. A message with neither prefix
-    /// is treated as a rejected attestation.
+    /// because the case carries the category. A verification error's message
+    /// then names the layer that rejected the document, as in
+    /// "quote: <detail>". A message with neither prefix is treated as a
+    /// rejected attestation.
     static func fromVerifier(
         _ error: Error,
-        configurationPrefix: String,
-        attestationPrefix: String
+        usagePrefix: String,
+        verificationPrefix: String
     ) -> TinfoilError {
         let message = error.localizedDescription
-        if message.hasPrefix(configurationPrefix) {
-            return .invalidConfiguration(String(message.dropFirst(configurationPrefix.count)))
+        if message.hasPrefix(usagePrefix) {
+            return .invalidConfiguration(String(message.dropFirst(usagePrefix.count)))
         }
-        if message.hasPrefix(attestationPrefix) {
-            return .attestationError(String(message.dropFirst(attestationPrefix.count)))
+        if message.hasPrefix(verificationPrefix) {
+            return .attestationError(String(message.dropFirst(verificationPrefix.count)))
         }
         return .attestationError(message)
     }

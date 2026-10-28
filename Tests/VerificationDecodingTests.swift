@@ -13,7 +13,7 @@ final class VerificationDecodingTests: XCTestCase {
             "config_repo": "tinfoilsh/confidential-model-router",
             "code_digest": "abc123",
             "code_tag": "v1.2.3",
-            "code_measurement": ["type": "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1", "registers": ["aa", "bb", "cc"]],
+            "code_measurement": ["type": "https://tinfoil.sh/predicate/tdx-guest/v2", "registers": ["", "", "bb", "cc", ""]],
             "enclave_measurement": ["type": "https://tinfoil.sh/predicate/tdx-guest/v2", "registers": ["dd", "ee"]],
             "tls_public_key_fp": "deadbeef",
             "hpke_public_key": "cafebabe",
@@ -52,7 +52,7 @@ final class VerificationDecodingTests: XCTestCase {
         XCTAssertEqual(verification.configRepo, "tinfoilsh/confidential-model-router")
         XCTAssertEqual(verification.codeDigest, "abc123")
         XCTAssertEqual(verification.codeTag, "v1.2.3")
-        XCTAssertEqual(verification.codeMeasurement?.registers, ["aa", "bb", "cc"])
+        XCTAssertEqual(verification.codeMeasurement?.registers, ["", "", "bb", "cc", ""])
         XCTAssertEqual(verification.enclaveMeasurement?.type, "https://tinfoil.sh/predicate/tdx-guest/v2")
         XCTAssertEqual(verification.tlsPublicKeyFingerprint, "deadbeef")
         XCTAssertEqual(verification.hpkePublicKey, "cafebabe")
@@ -130,12 +130,12 @@ final class VerificationDecodingTests: XCTestCase {
         func classify(_ message: String) -> TinfoilError {
             TinfoilError.fromVerifier(
                 NSError(domain: "go", code: 1, userInfo: [NSLocalizedDescriptionKey: message]),
-                configurationPrefix: "configuration error: ",
-                attestationPrefix: "attestation error: "
+                usagePrefix: "usage error: ",
+                verificationPrefix: "verification error: "
             )
         }
-        XCTAssertEqual(classify("configuration error: bad repo"), .invalidConfiguration("bad repo"))
-        XCTAssertEqual(classify("attestation error: quote rejected"), .attestationError("quote rejected"))
+        XCTAssertEqual(classify("usage error: bad repo"), .invalidConfiguration("bad repo"))
+        XCTAssertEqual(classify("verification error: quote: rejected"), .attestationError("quote: rejected"))
         XCTAssertEqual(
             classify("unexpected"),
             .attestationError("unexpected"),

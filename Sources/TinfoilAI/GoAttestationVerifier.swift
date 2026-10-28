@@ -94,8 +94,8 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
     private static func classify(_ error: Error) -> TinfoilError {
         TinfoilError.fromVerifier(
             error,
-            configurationPrefix: MobileConfigurationErrorPrefix,
-            attestationPrefix: MobileAttestationErrorPrefix
+            usagePrefix: MobileUsageErrorPrefix,
+            verificationPrefix: MobileVerificationErrorPrefix
         )
     }
 }
