@@ -1,0 +1,59 @@
+{
+  "pins" : [
+    {
+      "identity" : "encrypted-http-body-protocol",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tinfoilsh/encrypted-http-body-protocol.git",
+      "state" : {
+        "revision" : "6de58891fd9166508047ec3f88e5cc4796d9932b",
+        "version" : "0.4.1"
+      }
+    },
+    {
+      "identity" : "openai-swift-fork",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tinfoilsh/openai-swift-fork.git",
+      "state" : {
+        "revision" : "c8f838386296a0c47925f0cb833aef3031cffa45",
+        "version" : "0.0.15"
+      }
+    },
+    {
+      "identity" : "swift-asn1",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-asn1.git",
+      "state" : {
+        "revision" : "3b6410f7dee09eb33cdd26260c5fd47fda19b0e2",
+        "version" : "1.7.3"
+      }
+    },
+    {
+      "identity" : "swift-crypto",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-crypto.git",
+      "state" : {
+        "revision" : "95ba0316a9b733e92bb6b071255ff46263bbe7dc",
+        "version" : "3.15.1"
+      }
+    },
+    {
+      "identity" : "swift-http-types",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-http-types",
+      "state" : {
+        "revision" : "bff4b6903cdc99dda49649dd52f46c11cfd3ed50",
+        "version" : "1.8.0"
+      }
+    },
+    {
+      "identity" : "swift-openapi-runtime",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-openapi-runtime",
+      "state" : {
+        "revision" : "6927ad435adf4d00fe55fc61b9a07a04673c79c8",
+        "version" : "1.13.3"
+      }
+    }
+  ],
+  "version" : 2
+}
