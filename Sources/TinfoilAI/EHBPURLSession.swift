@@ -27,6 +27,7 @@ private func prepareEHBPRequest(
     session: URLSession
 ) async throws -> PreparedEHBPRequest {
     try Task.checkCancellation()
+    try refuseUnsealedTraffic(request)
     guard let url = request.url else {
         throw EHBPError(.invalidInput, "request has no URL")
     }
@@ -58,6 +59,19 @@ private func prepareEHBPRequest(
         headers: headers,
         body: body
     )
+}
+
+/// Refuses a request whose traffic would continue outside the bodies EHBP
+/// seals: a protocol upgrade, such as a WebSocket, or a CONNECT tunnel. Sending
+/// one would look protected while nothing after the handshake is. As in the Go
+/// SDK, other requests are allowed, with or without a body.
+func refuseUnsealedTraffic(_ request: URLRequest) throws {
+    let upgrade = request.value(forHTTPHeaderField: "Upgrade") ?? ""
+    guard request.httpMethod?.uppercased() != "CONNECT", upgrade.isEmpty else {
+        throw TinfoilError.configuration(
+            "EHBP seals only request and response bodies, so it can't protect a protocol upgrade, such as a WebSocket, or a CONNECT tunnel"
+        )
+    }
 }
 
 /// Pins a static endpoint/key pair as the initial verified state. Building a

@@ -1,8 +1,9 @@
 import Foundation
 
-/// A handle on one attested enclave, matching tinfoil-go's `enclave.Handle`.
-/// Pass one to `TinfoilAI.create` to configure how the client's enclave is
-/// verified.
+/// A handle on one attested enclave, the counterpart of tinfoil-go's
+/// `EnclaveHTTPClient`: it verifies the enclave and sends requests pinned to its
+/// attested TLS key. Pass one to `TinfoilAI.create` to configure how the
+/// client's enclave is verified.
 ///
 /// Each `verify()` is one run. A run fetches an enclave's attestation document
 /// and has tinfoil-go verify it, retrying a failed attempt once. Before the
