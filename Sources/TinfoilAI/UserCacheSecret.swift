@@ -7,7 +7,10 @@ import Security
 /// share cached prompt prefixes, requests carrying different secrets cannot
 /// observe each other's cache timing.
 ///
-/// Resolution order, mirroring the other Tinfoil clients:
+/// A client of one of Tinfoil's routers resolves it in this order, mirroring
+/// the other Tinfoil clients. A client of an enclave the handle names uses
+/// only the first two, since other enclaves don't read the field, and reads
+/// nothing from the environment or the home directory:
 ///
 ///  1. a non-empty per-request `user_cache_secret` field in the body, e.g.
 ///     set via `ChatQuery.extraBody`,

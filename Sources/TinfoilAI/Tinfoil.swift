@@ -66,7 +66,7 @@ public class TinfoilAI {
         // statically or via the dynamic provider, so a caller using a rotating
         // token (e.g. a short-lived JWT) is not forced to pass a placeholder key.
         guard staticApiKey != nil || apiKeyProvider != nil else {
-            throw TinfoilError.missingAPIKey
+            throw TinfoilError.configuration("no API key was given; pass apiKey or apiKeyProvider, or set TINFOIL_API_KEY")
         }
 
         let handle = try handle ?? EnclaveHandle()
@@ -103,10 +103,10 @@ public class TinfoilAI {
     /// The X25519 key EHBP encrypts request bodies to, from its hex form
     private static func ehbpPublicKey(hex: String?) throws -> Data {
         guard let hex, !hex.isEmpty else {
-            throw TinfoilError.invalidConfiguration("Server does not support EHBP (no HPKE public key)")
+            throw TinfoilError.attestation("Server does not support EHBP (no HPKE public key)")
         }
         guard let key = Data(hexString: hex), key.count == TinfoilConstants.hpkePublicKeyByteCount else {
-            throw TinfoilError.invalidConfiguration("Invalid HPKE public key format (expected 32 bytes)")
+            throw TinfoilError.attestation("Invalid HPKE public key format (expected 32 bytes)")
         }
         return key
     }
@@ -333,33 +333,101 @@ public class TinfoilAI {
     }
 }
 
-/// Errors that can occur when using the Tinfoil client
+/// Errors that can occur when using the Tinfoil client, in the three
+/// categories tinfoil-go reports. Each case carries a struct of details, as
+/// `DecodingError` does, so a detail can be added without breaking callers.
+/// Errors from the inference API itself keep their own types.
 public enum TinfoilError: Error, Equatable {
-    case missingAPIKey
-    case invalidConfiguration(String)
-    case connectionError(String)
-    /// The enclave's attestation document could not be fetched. `urlError` is
-    /// set when the request failed in transit, as when offline or timed out,
-    /// and `status` when the server answered with an HTTP error. Neither is
-    /// set when the SDK refused the response itself, as for one too large or
-    /// a redirect off HTTPS.
-    case fetchError(String, urlError: URLError? = nil, status: Int? = nil)
-    /// The enclave's attestation was rejected or could not be used
-    case attestationError(String)
-    /// An `onEnclaveVerified` callback rejected the enclave
-    case enclaveRejected(String)
+    /// The caller's arguments or client configuration are invalid, as is a
+    /// request the client refuses to send, such as one leaving the verified
+    /// enclave. Retrying will not help.
+    case configurationError(Configuration)
+    /// The client could not fetch the attestation material it needed.
+    case networkError(Network)
+    /// The enclave's evidence, the policy or the channel binding was rejected,
+    /// including by an `onEnclaveVerified` callback.
+    case attestationError(Attestation)
+
+    /// Details of a configuration error
+    public struct Configuration: Equatable, Sendable {
+        public let message: String
+    }
+
+    /// Details of a network error
+    public struct Network: Equatable, Sendable {
+        public let message: String
+        /// Set when the request failed in transit, as when offline or timed
+        /// out. Neither this nor `status` is set when the SDK refused the
+        /// response itself, as for one too large or a redirect off HTTPS.
+        public let urlError: URLError?
+        /// Set when the server answered with an HTTP error status
+        public let status: Int?
+    }
+
+    /// Details of an attestation error
+    public struct Attestation: Equatable, Sendable {
+        public let message: String
+        /// The layer of the verifier that rejected the attestation document,
+        /// when it did
+        public let layer: VerificationLayer?
+    }
+
+    /// The error's message, whatever its category
+    public var message: String {
+        switch self {
+        case .configurationError(let details):
+            return details.message
+        case .networkError(let details):
+            return details.message
+        case .attestationError(let details):
+            return details.message
+        }
+    }
+}
+
+/// Shorthand the SDK throws with, each building its case's details: for
+/// example, `.attestation("rejected")` is
+/// `.attestationError(Attestation(message: "rejected", layer: nil))`.
+extension TinfoilError {
+    static func configuration(_ message: String) -> TinfoilError {
+        .configurationError(Configuration(message: message))
+    }
+
+    static func network(_ message: String, urlError: URLError? = nil, status: Int? = nil) -> TinfoilError {
+        .networkError(Network(message: message, urlError: urlError, status: status))
+    }
+
+    static func attestation(_ message: String, layer: VerificationLayer? = nil) -> TinfoilError {
+        .attestationError(Attestation(message: message, layer: layer))
+    }
+}
+
+/// The verification layer that rejected an attestation document, as
+/// tinfoil-go's `verify.Layer` names it. More layers may be added, so match
+/// the ones you handle and tolerate any other.
+public struct VerificationLayer: RawRepresentable, Hashable, Sendable, CustomStringConvertible {
+    /// A document that can't be parsed or isn't bound to the request
+    public static let envelope = VerificationLayer(rawValue: "envelope")
+    /// Reference values that fail to authenticate
+    public static let provenance = VerificationLayer(rawValue: "provenance")
+    /// Hardware evidence that isn't authentic
+    public static let quote = VerificationLayer(rawValue: "quote")
+    /// Authentic evidence that doesn't satisfy the policy
+    public static let policy = VerificationLayer(rawValue: "policy")
+
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public var description: String { rawValue }
 }
 
 /// Gives `localizedDescription` each error's message, rather than Foundation's
 /// generic "The operation couldn't be completed" with an enum case number.
 extension TinfoilError: LocalizedError {
     public var errorDescription: String? {
-        switch self {
-        case .missingAPIKey:
-            return "no API key was given; pass apiKey or apiKeyProvider, or set TINFOIL_API_KEY"
-        case .invalidConfiguration(let message), .connectionError(let message), .fetchError(let message, _, _),
-             .attestationError(let message), .enclaveRejected(let message):
-            return message
-        }
+        message
     }
 }

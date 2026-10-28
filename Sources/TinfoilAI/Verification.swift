@@ -8,7 +8,7 @@ public typealias VerificationResultCallback = @Sendable (Result<Verification, Ti
 
 /// Called each time an enclave's evidence verifies, before the enclave is
 /// used. Throw to reject it: discovery moves to the next router; otherwise
-/// the run fails with `TinfoilError.enclaveRejected` and the enclave's key is
+/// the run fails with `TinfoilError.attestationError` and the enclave's key is
 /// never used. It runs synchronously, so keep it fast: requests waiting on a
 /// refresh wait on it too.
 public typealias EnclaveVerifiedCallback = @Sendable (Verification) throws -> Void
@@ -101,10 +101,10 @@ extension Verification {
         do {
             version = try decoder.decode(SchemaVersion.self, from: data)
         } catch {
-            throw TinfoilError.attestationError("unreadable verification payload: \(error.localizedDescription)")
+            throw TinfoilError.attestation("unreadable verification payload: \(error.localizedDescription)")
         }
         guard version.schemaVersion == Self.supportedSchemaVersion else {
-            throw TinfoilError.attestationError(
+            throw TinfoilError.attestation(
                 "unsupported verification schema version \(version.schemaVersion); this SDK reads version \(Self.supportedSchemaVersion)"
             )
         }
@@ -112,7 +112,7 @@ extension Verification {
         do {
             decoded = try decoder.decode(Payload.self, from: data)
         } catch {
-            throw TinfoilError.attestationError("unreadable verification payload: \(error.localizedDescription)")
+            throw TinfoilError.attestation("unreadable verification payload: \(error.localizedDescription)")
         }
 
         self.init(
@@ -179,7 +179,7 @@ extension Verification {
                 return date
             }
         }
-        throw TinfoilError.attestationError("verification payload has an invalid \(field): \(value)")
+        throw TinfoilError.attestation("verification payload has an invalid \(field): \(value)")
     }
 }
 
@@ -188,8 +188,9 @@ extension TinfoilError {
     /// message alone, led by its category's prefix, which is dropped here
     /// because the case carries the category. A verification error's message
     /// then names the layer that rejected the document, as in
-    /// "quote: <detail>". A message with neither prefix is treated as a
-    /// rejected attestation.
+    /// "quote: <detail>"; the layer is kept in the message and also lifted
+    /// out. A message with neither prefix is treated as a rejected
+    /// attestation.
     static func fromVerifier(
         _ error: Error,
         usagePrefix: String,
@@ -197,11 +198,26 @@ extension TinfoilError {
     ) -> TinfoilError {
         let message = error.localizedDescription
         if message.hasPrefix(usagePrefix) {
-            return .invalidConfiguration(String(message.dropFirst(usagePrefix.count)))
+            return .configuration(String(message.dropFirst(usagePrefix.count)))
         }
         if message.hasPrefix(verificationPrefix) {
-            return .attestationError(String(message.dropFirst(verificationPrefix.count)))
+            let rejection = String(message.dropFirst(verificationPrefix.count))
+            return .attestation(rejection, layer: layer(leading: rejection))
         }
-        return .attestationError(message)
+        return .attestation(message)
+    }
+
+    /// The layer a verification error's message leads with, as in
+    /// "quote: <detail>". Layer names are single lowercase words, so a message
+    /// whose text before ": " is anything else names no layer.
+    private static func layer(leading message: String) -> VerificationLayer? {
+        guard let separator = message.range(of: ": ") else {
+            return nil
+        }
+        let name = message[..<separator.lowerBound]
+        guard !name.isEmpty, name.allSatisfy({ $0.isASCII && $0.isLowercase }) else {
+            return nil
+        }
+        return VerificationLayer(rawValue: String(name))
     }
 }

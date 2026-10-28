@@ -63,12 +63,12 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
                 userCacheSecret: Self.cacheSecret
             )
             XCTFail("a rejected enclave must not produce a client")
-        } catch TinfoilError.enclaveRejected {
+        } catch let error as TinfoilError where error.isRefusal {
         } catch {
-            XCTFail("expected a rejection, got \(error)")
+            XCTFail("expected the callback's rejection, got \(error)")
         }
 
-        guard case .failure(.enclaveRejected) = reported.value else {
+        guard case .failure(let error) = reported.value, error.isRefusal else {
             return XCTFail("the rejection should be reported, got \(String(describing: reported.value))")
         }
         XCTAssertTrue(server.requestStore.requests.isEmpty, "Nothing is sent to a rejected enclave.")

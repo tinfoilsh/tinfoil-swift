@@ -27,10 +27,10 @@ final class AttestationFetcherTests: XCTestCase {
         do {
             _ = try await body()
             XCTFail("expected a fetch error mentioning \(expected)", file: file, line: line)
-        } catch TinfoilError.fetchError(let message, let urlError, let status) {
-            XCTAssertTrue(message.contains(expected), "\(message) should mention \(expected)", file: file, line: line)
-            XCTAssertEqual(urlError?.code, expectedCode, file: file, line: line)
-            XCTAssertEqual(status, expectedStatus, file: file, line: line)
+        } catch TinfoilError.networkError(let failure) {
+            XCTAssertTrue(failure.message.contains(expected), "\(failure.message) should mention \(expected)", file: file, line: line)
+            XCTAssertEqual(failure.urlError?.code, expectedCode, file: file, line: line)
+            XCTAssertEqual(failure.status, expectedStatus, file: file, line: line)
         } catch {
             XCTFail("expected a fetch error, got \(error)", file: file, line: line)
         }
@@ -53,7 +53,7 @@ final class AttestationFetcherTests: XCTestCase {
         do {
             _ = try await fetcher().fetch(URL(string: "http://enclave.example/.well-known/tinfoil-attestation")!)
             XCTFail("a plain HTTP URL must be refused")
-        } catch TinfoilError.invalidConfiguration {
+        } catch TinfoilError.configurationError {
         } catch {
             XCTFail("expected a configuration error, got \(error)")
         }

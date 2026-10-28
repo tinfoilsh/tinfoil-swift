@@ -692,8 +692,8 @@ final class EHBPTests: XCTestCase {
         do {
             _ = try await state.current()
             XCTFail("An expired refresh must not authorize a request")
-        } catch TinfoilError.attestationError(let message) {
-            XCTAssertTrue(message.contains("freshness deadline"))
+        } catch TinfoilError.attestationError(let failure) {
+            XCTAssertTrue(failure.message.contains("freshness deadline"))
         } catch {
             XCTFail("expected an attestation error, got \(error)")
         }
@@ -709,7 +709,7 @@ final class EHBPTests: XCTestCase {
         do {
             _ = try await state.current()
             XCTFail("An expired key without a refresh must not authorize a request")
-        } catch TinfoilError.invalidConfiguration {
+        } catch TinfoilError.configurationError {
         } catch {
             XCTFail("expected a configuration error, got \(error)")
         }
@@ -1933,10 +1933,10 @@ final class EHBPTests: XCTestCase {
                 XCTFail("Expected TinfoilError, got \(error)")
                 return
             }
-            if case .invalidConfiguration(let message) = tinfoilError {
-                XCTAssertTrue(message.contains("EHBP") || message.contains("HPKE"), "Error should mention EHBP or HPKE")
+            if case .attestationError(let failure) = tinfoilError {
+                XCTAssertTrue(failure.message.contains("EHBP") || failure.message.contains("HPKE"), "Error should mention EHBP or HPKE")
             } else {
-                XCTFail("Expected invalidConfiguration error")
+                XCTFail("Expected attestationError, as an attestation that endorses no HPKE key")
             }
         }
     }
@@ -1956,10 +1956,10 @@ final class EHBPTests: XCTestCase {
                 XCTFail("Expected TinfoilError, got \(error)")
                 return
             }
-            if case .invalidConfiguration = tinfoilError {
+            if case .attestationError = tinfoilError {
                 // Expected
             } else {
-                XCTFail("Expected invalidConfiguration error")
+                XCTFail("Expected attestationError, as an attestation that endorses no HPKE key")
             }
         }
     }

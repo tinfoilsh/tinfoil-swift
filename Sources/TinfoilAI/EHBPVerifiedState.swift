@@ -56,7 +56,7 @@ internal actor EHBPVerifiedState {
         }
         _ = try await refresh(afterRejectedGeneration: generation)
         guard now() < endpoint.expiresAt else {
-            throw TinfoilError.attestationError("refreshed attestation is already past its freshness deadline")
+            throw TinfoilError.attestation("refreshed attestation is already past its freshness deadline")
         }
         return (endpoint, generation)
     }
@@ -67,7 +67,7 @@ internal actor EHBPVerifiedState {
         }
 
         guard let refreshEndpoint else {
-            throw TinfoilError.invalidConfiguration(
+            throw TinfoilError.configuration(
                 "EHBP key must be re-attested, but no attestation refresh is configured"
             )
         }

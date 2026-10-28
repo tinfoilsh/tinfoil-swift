@@ -118,11 +118,11 @@ enum PinnedTLS {
         // "https:host/path" has a scheme but no host, yet URLSession would
         // still connect to host, so a host is required as well as HTTPS.
         guard let url = request.url, url.scheme?.lowercased() == "https", url.host != nil else {
-            throw TinfoilError.invalidConfiguration("pinned requests need an HTTPS URL with a host, not \(request.url?.absoluteString ?? "no URL")")
+            throw TinfoilError.configuration("pinned requests need an HTTPS URL with a host, not \(request.url?.absoluteString ?? "no URL")")
         }
         let origin = URLHelpers.origin(from: url.absoluteString)
         guard !origin.isEmpty else {
-            throw TinfoilError.invalidConfiguration("cannot pin a request to \(url.absoluteString)")
+            throw TinfoilError.configuration("cannot pin a request to \(url.absoluteString)")
         }
         let pin = PinningDelegate(fingerprint: fingerprint, origin: origin)
         let session = URLSession(configuration: configuration, delegate: pin, delegateQueue: nil)
@@ -256,7 +256,7 @@ final class PinningDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendab
         // sent, but refusing here says why, rather than reporting a key
         // rejection that would only lead to verifying again.
         guard !origin.isEmpty, URLHelpers.origin(from: target.absoluteString) == origin else {
-            fail(TinfoilError.connectionError("refusing redirect to \(target.absoluteString): requests stay on the verified enclave"))
+            fail(TinfoilError.configuration("refusing redirect to \(target.absoluteString): requests stay on the verified enclave"))
             completionHandler(nil)
             return
         }

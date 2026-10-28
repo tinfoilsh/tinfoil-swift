@@ -30,7 +30,7 @@ final class EnclaveHandleTests: XCTestCase {
     func testCustomRepoRequiresAnEnclave() {
         let network = approving()
         XCTAssertThrowsError(try handle(repo: "org/repo", network: network)) { error in
-            guard case TinfoilError.invalidConfiguration = error else {
+            guard case TinfoilError.configurationError = error else {
                 return XCTFail("expected a configuration error, got \(error)")
             }
         }
@@ -163,7 +163,7 @@ final class EnclaveHandleTests: XCTestCase {
         do {
             _ = try await handle.verify()
             XCTFail("a rejected enclave must fail the run")
-        } catch TinfoilError.enclaveRejected {
+        } catch let error as TinfoilError where error.isRefusal {
         }
 
         let latest = await handle.verification

@@ -17,17 +17,17 @@ final class GoAttestationVerifierTests: XCTestCase {
             guard let error = error as? TinfoilError, expected(error) else {
                 return XCTFail("unexpected error \(error)", file: file, line: line)
             }
-            if case .invalidConfiguration(let message) = error {
-                XCTAssertFalse(message.hasPrefix("usage error:"), "The Go prefix is dropped.", file: file, line: line)
+            if case .configurationError(let failure) = error {
+                XCTAssertFalse(failure.message.hasPrefix("usage error:"), "The Go prefix is dropped.", file: file, line: line)
             }
-            if case .attestationError(let message) = error {
-                XCTAssertFalse(message.hasPrefix("verification error:"), "The Go prefix is dropped.", file: file, line: line)
+            if case .attestationError(let failure) = error {
+                XCTAssertFalse(failure.message.hasPrefix("verification error:"), "The Go prefix is dropped.", file: file, line: line)
             }
         }
     }
 
     private func isConfiguration(_ error: TinfoilError) -> Bool {
-        if case .invalidConfiguration = error { return true }
+        if case .configurationError = error { return true }
         return false
     }
 
@@ -68,6 +68,14 @@ final class GoAttestationVerifierTests: XCTestCase {
 
         assertCategory(isAttestation) {
             try verifier.verify(document: document, nonce: nonce, repo: Self.routerRepo, enclaveHost: "enclave.example")
+        }
+        XCTAssertThrowsError(
+            try verifier.verify(document: document, nonce: nonce, repo: Self.routerRepo, enclaveHost: "enclave.example")
+        ) { error in
+            guard case TinfoilError.attestationError(let failure) = error else {
+                return XCTFail("unexpected error \(error)")
+            }
+            XCTAssertEqual(failure.layer, .envelope, "A malformed document is rejected by the envelope layer.")
         }
         assertCategory(isConfiguration) {
             try verifier.verify(document: document, nonce: nonce.dropFirst(), repo: Self.routerRepo, enclaveHost: "enclave.example")
