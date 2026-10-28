@@ -1,9 +1,10 @@
 import Foundation
 
-/// Called with the result of each `EnclaveHandle.verify()` run: for a
-/// `TinfoilAI` client, once when it is created and again whenever it
-/// re-verifies because the attestation expired or the enclave rejected its
-/// key. It only observes. A cancelled run is not reported.
+/// Called with the result of each verification an `EnclaveHTTPClient` makes:
+/// the router `discoverRouter` picks, the first verification of an enclave,
+/// and each later one, whether because the attestation expired, the enclave
+/// rejected its key, or the caller asked. It only observes. A cancelled run is
+/// not reported.
 public typealias VerificationResultCallback = @Sendable (Result<Verification, TinfoilError>) -> Void
 
 /// Called each time an enclave's evidence verifies, before the enclave is

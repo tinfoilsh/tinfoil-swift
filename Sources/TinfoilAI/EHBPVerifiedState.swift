@@ -19,11 +19,37 @@ internal struct EHBPVerifiedEndpoint: Sendable {
     }
 }
 
+extension EHBPVerifiedEndpoint {
+    /// The endpoint a verification endorses: its enclave and HPKE key, until
+    /// its freshness deadline.
+    init(verification: Verification) throws {
+        self.init(
+            enclaveURL: "https://\(verification.enclaveHost)",
+            publicKey: try Self.publicKey(hex: verification.hpkePublicKey),
+            expiresAt: verification.freshnessExpiresAt
+        )
+    }
+
+    /// The X25519 key EHBP encrypts request bodies to, from its hex form. An
+    /// attestation that endorses none can't be used with EHBP.
+    static func publicKey(hex: String?) throws -> Data {
+        guard let hex, !hex.isEmpty else {
+            throw TinfoilError.attestation("Server does not support EHBP (no HPKE public key); use TransportMode.tls")
+        }
+        guard let key = Data(hexString: hex), key.count == TinfoilConstants.hpkePublicKeyByteCount else {
+            throw TinfoilError.attestation("Invalid HPKE public key format (expected 32 bytes)")
+        }
+        return key
+    }
+}
+
 /// Shares the active attested endpoint between regular and streaming sessions.
 /// Refreshes are single-flight so concurrent stale-key responses do not trigger
 /// redundant attestation work or install competing endpoint/key pairs.
 internal actor EHBPVerifiedState {
-    typealias Refresh = @Sendable () async throws -> EHBPVerifiedEndpoint
+    /// Returns the endpoint to use instead of `stale`, the one that expired or
+    /// whose key the enclave rejected.
+    typealias Refresh = @Sendable (_ stale: EHBPVerifiedEndpoint) async throws -> EHBPVerifiedEndpoint
 
     private struct RefreshOperation {
         let id: UInt64
@@ -77,9 +103,10 @@ internal actor EHBPVerifiedState {
             operation = existing
         } else {
             nextRefreshID &+= 1
+            let stale = endpoint
             operation = RefreshOperation(
                 id: nextRefreshID,
-                task: Task { try await refreshEndpoint() }
+                task: Task { try await refreshEndpoint(stale) }
             )
             refreshOperation = operation
             Task { [weak self] in

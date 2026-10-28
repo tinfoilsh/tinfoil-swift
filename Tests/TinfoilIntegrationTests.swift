@@ -4,14 +4,6 @@ import OpenAI
 
 final class TinfoilIntegrationTests: XCTestCase {
 
-    func testHandleRequiresAnEnclaveForACustomRepo() {
-        XCTAssertThrowsError(try EnclaveHandle(repo: "org/repo"), "Only Tinfoil's routers are discovered") { error in
-            guard case TinfoilError.configurationError = error else {
-                return XCTFail("expected a configuration error, got \(error)")
-            }
-        }
-    }
-
     func testCreateVerifiesTheDefaultRouter() async throws {
         try requireLiveIntegration()
         // Attestation does not use the API key, so a placeholder is enough to
@@ -20,9 +12,10 @@ final class TinfoilIntegrationTests: XCTestCase {
 
         _ = try await TinfoilAI.create(
             apiKey: "test-key",
-            handle: EnclaveHandle(onVerificationResult: { result in
-                captured.value = result
-            })
+            client: EnclaveHTTPClient.discoverRouter(
+                userCacheSecret: "pinned so the test never touches the persisted secret",
+                onVerificationResult: { result in captured.value = result }
+            )
         )
 
         guard case .success(let verification) = captured.value else {
@@ -51,8 +44,10 @@ final class TinfoilIntegrationTests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                baseURL: "http://localhost:8080",
-                handle: EnclaveHandle(attestationRelay: "127.0.0.1:9")
+                client: EnclaveHTTPClient.discoverRouter(
+                    attestationRelay: "127.0.0.1:9",
+                    userCacheSecret: "pinned so the test never touches the persisted secret"
+                )
             )
             XCTFail("Attestation through an unreachable relay must fail")
         } catch TinfoilError.networkError {

@@ -121,9 +121,9 @@ final class AttestorTests: XCTestCase {
             }
         }
 
-        let verification = try await attestor(verifier, network).attestDefaultRouter()
+        let verification = try await attestor(verifier, network).discoverRouter()
 
-        XCTAssertEqual(verification.enclaveHost, "router-b.example")
+        XCTAssertEqual(verification?.enclaveHost, "router-b.example")
         XCTAssertEqual(
             network.urls.map(\.host),
             ["atc.tinfoil.sh", "router-a.example", "router-b.example"],
@@ -141,9 +141,9 @@ final class AttestorTests: XCTestCase {
             }
         }
 
-        let verification = try await attestor(FakeVerifier(), network).attestDefaultRouter()
+        let verification = try await attestor(FakeVerifier(), network).discoverRouter()
 
-        XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
+        XCTAssertNil(verification, "No router verified, so the caller uses the fallback.")
     }
 
     func testDiscoveryFallsBackWithoutARouterList() async throws {
@@ -152,9 +152,9 @@ final class AttestorTests: XCTestCase {
                 url == self.routerList ? try listReply() : FakeNetwork.document("ok", for: url)
             }
 
-            let verification = try await attestor(FakeVerifier(), network).attestDefaultRouter()
+            let verification = try await attestor(FakeVerifier(), network).discoverRouter()
 
-            XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
+            XCTAssertNil(verification, "No router verified, so the caller uses the fallback.")
         }
     }
 
@@ -165,12 +165,12 @@ final class AttestorTests: XCTestCase {
         let started = Date()
 
         let verification = try await attestor(FakeVerifier(), network, hanging: ["router-a.example"], discoveryTimeout: 0.2)
-            .attestDefaultRouter()
+            .discoverRouter()
 
-        XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
+        XCTAssertNil(verification, "No router verified, so the caller uses the fallback.")
         XCTAssertEqual(
             network.urls.map(\.host),
-            ["atc.tinfoil.sh", "router-a.example", TinfoilConstants.fallbackEnclave],
+            ["atc.tinfoil.sh", "router-a.example"],
             "The deadline ends the probe in flight and skips the routers left."
         )
         XCTAssertLessThan(Date().timeIntervalSince(started), 10)
@@ -182,10 +182,10 @@ final class AttestorTests: XCTestCase {
         }
 
         let verification = try await attestor(FakeVerifier(), network, hanging: ["atc.tinfoil.sh"], discoveryTimeout: 0.2)
-            .attestDefaultRouter()
+            .discoverRouter()
 
-        XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
-        XCTAssertEqual(network.urls.map(\.host), ["atc.tinfoil.sh", TinfoilConstants.fallbackEnclave])
+        XCTAssertNil(verification, "No router verified, so the caller uses the fallback.")
+        XCTAssertEqual(network.urls.map(\.host), ["atc.tinfoil.sh"])
     }
 
     func testDiscoveryStopsAtTheDeadlineBeforeTheTimerFires() async throws {
@@ -203,9 +203,9 @@ final class AttestorTests: XCTestCase {
             network.urls.contains { $0.host == "router-a.example" } ? started.advanced(by: .seconds(31)) : started
         }
 
-        let verification = try await attestor(FakeVerifier(), network, now: now).attestDefaultRouter()
+        let verification = try await attestor(FakeVerifier(), network, now: now).discoverRouter()
 
-        XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
+        XCTAssertNil(verification, "No router verified, so the caller uses the fallback.")
         XCTAssertFalse(network.urls.contains { $0.host == "router-b.example" }, "No router is tried past the deadline.")
     }
 
@@ -214,26 +214,12 @@ final class AttestorTests: XCTestCase {
             url == self.routerList ? #"["router-a.example"]"# : FakeNetwork.document("ok", for: url)
         }
         let attestor = attestor(FakeVerifier(), network, hanging: ["router-a.example"])
-        let discovery = Task { try await attestor.attestDefaultRouter() }
+        let discovery = Task { try await attestor.discoverRouter() }
         try? await Task.sleep(nanoseconds: 100_000_000)
         discovery.cancel()
 
         await assertThrows({ try await discovery.value }, { $0 is CancellationError })
         XCTAssertFalse(network.urls.contains { $0.host == TinfoilConstants.fallbackEnclave }, "A cancelled discovery does not fall back.")
-    }
-
-    func testDiscoveryRetriesTheFallback() async throws {
-        let network = FakeNetwork { url, previous in
-            switch url.host {
-            case "atc.tinfoil.sh": return "[]"
-            default: return FakeNetwork.document(previous == 0 ? "reject" : "ok", for: url)
-            }
-        }
-
-        let verification = try await attestor(FakeVerifier(), network).attestDefaultRouter()
-
-        XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
-        XCTAssertEqual(network.urls.filter { $0.host == TinfoilConstants.fallbackEnclave }.count, 2)
     }
 
     func testOnEnclaveVerifiedSeesEachVerifiedEnclaveOnce() async throws {
@@ -276,8 +262,8 @@ final class AttestorTests: XCTestCase {
             }
         }
 
-        let verification = try await attestor(FakeVerifier(), network, onEnclaveVerified: onEnclaveVerified).attestDefaultRouter()
+        let verification = try await attestor(FakeVerifier(), network, onEnclaveVerified: onEnclaveVerified).discoverRouter()
 
-        XCTAssertEqual(verification.enclaveHost, "router-b.example")
+        XCTAssertEqual(verification?.enclaveHost, "router-b.example")
     }
 }
