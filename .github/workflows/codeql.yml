@@ -35,11 +35,37 @@ jobs:
       # git-heavy resolution and the dependencies' compilation many times
       # over. Do both before tracing begins, so only the SDK's own sources
       # are compiled, and extracted, under the tracer.
+      #
+      # Build the dependencies' targets, not their products: SwiftPM refuses
+      # `--product` for an automatic product and builds the whole package
+      # instead, which would leave nothing for the traced build to compile.
       - name: Build dependencies
         run: |
           swift package resolve
-          swift build --product OpenAI
-          swift build --product EHBP
+          swift build --target OpenAI
+          swift build --target EHBP
+          if find .build -name 'TinfoilAI.swiftmodule' | grep -q .; then
+            echo "::error::TinfoilAI was built before tracing, so CodeQL would not see it compile"
+            exit 1
+          fi
+
+      # CodeQL's Swift extractor ships x86_64 only, so on Apple Silicon the
+      # tracer falls back to the x86_64 slices of the system binaries it
+      # injects into (/bin/bash, /usr/bin/xcrun), and everything they spawn
+      # inherits that. Resolve the toolchain here, before tracing, so the
+      # traced step runs nothing but the toolchain's own swift, launched
+      # natively with `arch -arm64`. A plain `swift build` would run SwiftPM
+      # under Rosetta and build for x86_64. See dfed/SafeDI#325.
+      - name: Locate the native toolchain
+        run: |
+          developer_dir=$(xcode-select -p)
+          toolchain="$developer_dir/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+          echo "$developer_dir/usr/bin" >> "$GITHUB_PATH"
+          echo "$toolchain" >> "$GITHUB_PATH"
+          {
+            echo "SWIFT=$toolchain/swift"
+            echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)"
+          } >> "$GITHUB_ENV"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
@@ -47,22 +73,8 @@ jobs:
           languages: swift
           build-mode: manual
 
-      # CodeQL's Swift extractor ships x86_64 only, so on Apple Silicon the
-      # tracer falls back to the x86_64 slices of the system binaries it
-      # injects into (/bin/bash, /usr/bin/xcrun), and everything they spawn
-      # inherits that. A plain `swift build` would run SwiftPM under Rosetta
-      # and build for x86_64, ignoring the arm64 dependencies built above.
-      # Launching the toolchain's own swift with `arch -arm64`, with Xcode's
-      # toolchain first on PATH, keeps SwiftPM and the compiler native; only
-      # the extractor runs under Rosetta. See dfed/SafeDI#325.
       - name: Build the SDK
-        run: |
-          DEVELOPER_DIR=$(xcode-select -p)
-          TOOLCHAIN="$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin"
-          export PATH="$TOOLCHAIN:$DEVELOPER_DIR/usr/bin:$PATH"
-          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-          export SDKROOT
-          arch -arm64 "$TOOLCHAIN/swift" build --target TinfoilAI
+        run: arch -arm64 "$SWIFT" build --target TinfoilAI
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
