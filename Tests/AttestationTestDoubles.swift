@@ -125,6 +125,15 @@ struct Refusal: Error, CustomStringConvertible {
     var description: String { "refused by the test" }
 }
 
+extension TinfoilError {
+    /// Whether this is the error an `onEnclaveVerified` callback's `Refusal`
+    /// becomes, rather than any other attestation failure
+    var isRefusal: Bool {
+        guard case .attestationError(let message, nil) = self else { return false }
+        return message.contains("onEnclaveVerified rejected") && message.contains(Refusal().description)
+    }
+}
+
 /// Records values from Sendable closures, in order.
 final class Recorder<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()

@@ -163,7 +163,7 @@ final class EnclaveHandleTests: XCTestCase {
         do {
             _ = try await handle.verify()
             XCTFail("a rejected enclave must fail the run")
-        } catch TinfoilError.attestationError {
+        } catch let error as TinfoilError where error.isRefusal {
         }
 
         let latest = await handle.verification
