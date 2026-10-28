@@ -18,7 +18,10 @@ final class GoAttestationVerifierTests: XCTestCase {
                 return XCTFail("unexpected error \(error)", file: file, line: line)
             }
             if case .invalidConfiguration(let message) = error {
-                XCTAssertFalse(message.hasPrefix("configuration error:"), "The Go prefix is dropped.", file: file, line: line)
+                XCTAssertFalse(message.hasPrefix("usage error:"), "The Go prefix is dropped.", file: file, line: line)
+            }
+            if case .attestationError(let message) = error {
+                XCTAssertFalse(message.hasPrefix("verification error:"), "The Go prefix is dropped.", file: file, line: line)
             }
         }
     }
