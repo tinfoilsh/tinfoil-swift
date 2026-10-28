@@ -48,7 +48,7 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         case "ok":
             return .stub(host: enclaveHost, repo: repo, expiresAt: now().addingTimeInterval(3600))
         case "config":
-            throw TinfoilError.invalidConfiguration("bad repo")
+            throw TinfoilError.configurationError("bad repo")
         default:
             throw TinfoilError.attestationError("rejected")
         }

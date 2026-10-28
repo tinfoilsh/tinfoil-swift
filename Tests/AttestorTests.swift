@@ -70,7 +70,7 @@ final class AttestorTests: XCTestCase {
 
     func testRetriesOnceWithAFreshNonce() async throws {
         let network = FakeNetwork { url, previous in
-            if previous == 0 { throw TinfoilError.fetchError("unavailable") }
+            if previous == 0 { throw TinfoilError.networkError("unavailable") }
             return FakeNetwork.document("ok", for: url)
         }
 
@@ -95,13 +95,13 @@ final class AttestorTests: XCTestCase {
 
         await assertThrows(
             { try await self.attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, repo: "org/repo") },
-            { $0 as? TinfoilError == .invalidConfiguration("bad repo") }
+            { $0 as? TinfoilError == .configurationError("bad repo") }
         )
         XCTAssertEqual(network.urls.count, 1)
     }
 
     func testCancellationDuringTheRetryDelay() async {
-        let network = FakeNetwork { _, _ in throw TinfoilError.fetchError("unavailable") }
+        let network = FakeNetwork { _, _ in throw TinfoilError.networkError("unavailable") }
         let attestor = attestor(FakeVerifier(), network, retryDelay: 60)
         let attempt = Task { try await attestor.attest(host: "enclave.example", relay: nil, repo: "org/repo") }
         try? await Task.sleep(nanoseconds: 100_000_000)
@@ -147,7 +147,7 @@ final class AttestorTests: XCTestCase {
     }
 
     func testDiscoveryFallsBackWithoutARouterList() async throws {
-        for listReply in [{ () throws -> String in throw TinfoilError.fetchError("unavailable") }, { "not json" }] {
+        for listReply in [{ () throws -> String in throw TinfoilError.networkError("unavailable") }, { "not json" }] {
             let network = FakeNetwork { url, _ in
                 url == self.routerList ? try listReply() : FakeNetwork.document("ok", for: url)
             }
@@ -257,7 +257,7 @@ final class AttestorTests: XCTestCase {
                     .attest(host: "enclave.example", relay: nil, repo: "org/repo")
             },
             { error in
-                guard case TinfoilError.enclaveRejected(let message) = error else { return false }
+                guard case TinfoilError.attestationError(let message, _) = error else { return false }
                 return message.contains("enclave.example") && message.contains("refused by the test")
             }
         )

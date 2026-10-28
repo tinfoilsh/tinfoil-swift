@@ -38,7 +38,7 @@ final class VerificationDecodingTests: XCTestCase {
         line: UInt = #line
     ) {
         XCTAssertThrowsError(try expression(), file: file, line: line) { error in
-            guard case TinfoilError.attestationError(let message) = error else {
+            guard case TinfoilError.attestationError(let message, _) = error else {
                 return XCTFail("expected an attestation error, got \(error)", file: file, line: line)
             }
             XCTAssertTrue(message.contains(expected), "\(message) should mention \(expected)", file: file, line: line)
@@ -134,8 +134,14 @@ final class VerificationDecodingTests: XCTestCase {
                 verificationPrefix: "verification error: "
             )
         }
-        XCTAssertEqual(classify("usage error: bad repo"), .invalidConfiguration("bad repo"))
-        XCTAssertEqual(classify("verification error: quote: rejected"), .attestationError("quote: rejected"))
+        XCTAssertEqual(classify("usage error: bad repo"), .configurationError("bad repo"))
+        XCTAssertEqual(classify("verification error: quote: rejected"), .attestationError("quote: rejected", layer: .quote))
+        XCTAssertEqual(
+            classify("verification error: firmware: rejected"),
+            .attestationError("firmware: rejected", layer: VerificationLayer(rawValue: "firmware")),
+            "A layer this SDK doesn't name is still carried."
+        )
+        XCTAssertEqual(classify("verification error: rejected"), .attestationError("rejected"), "No layer, no guess.")
         XCTAssertEqual(
             classify("unexpected"),
             .attestationError("unexpected"),

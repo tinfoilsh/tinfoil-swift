@@ -100,7 +100,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
         do {
             _ = try await handle.data(from: URL(string: "http://enclave.example/health")!)
             XCTFail("a request with headers must not leave over plain HTTP")
-        } catch TinfoilError.invalidConfiguration {
+        } catch TinfoilError.configurationError {
         }
         XCTAssertTrue(log.sent.isEmpty)
     }
@@ -113,7 +113,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
         do {
             _ = try await handle.data(from: URL(string: "https://elsewhere.example/health")!)
             XCTFail("credentials must not be sent to another host")
-        } catch TinfoilError.invalidConfiguration(let message) {
+        } catch TinfoilError.configurationError(let message) {
             XCTAssertTrue(message.contains("elsewhere.example"), message)
         }
         XCTAssertTrue(log.sent.isEmpty)
@@ -130,7 +130,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
         do {
             _ = try await handle.data(from: URL(string: "https:elsewhere.example/collect")!)
             XCTFail("a URL naming another host without // must be refused")
-        } catch TinfoilError.invalidConfiguration {
+        } catch TinfoilError.configurationError {
         }
         XCTAssertTrue(log.sent.isEmpty)
         XCTAssertEqual(network.urls.count, 1)
@@ -143,7 +143,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
                 configuration: stubbed()
             )
             XCTFail("the pinned send must refuse it as well")
-        } catch TinfoilError.invalidConfiguration {
+        } catch TinfoilError.configurationError {
         }
         XCTAssertTrue(StubURLProtocol.requests.isEmpty)
     }
@@ -178,7 +178,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
                 configuration: stubbed()
             )
             XCTFail("a redirect off the enclave must be refused")
-        } catch TinfoilError.connectionError(let message) {
+        } catch TinfoilError.configurationError(let message) {
             XCTAssertTrue(message.contains("elsewhere.example"), message)
         }
         XCTAssertFalse(StubURLProtocol.requests.contains { $0.url == elsewhere }, "The other host is never asked.")
@@ -238,7 +238,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
         do {
             _ = try await handle.data(from: URL(string: "/health")!)
             XCTFail("a key the attestation does not endorse must not be used")
-        } catch TinfoilError.attestationError(let message) {
+        } catch TinfoilError.attestationError(let message, _) {
             XCTAssertTrue(message.contains("does not match the attestation"), message)
         }
         XCTAssertEqual(log.sent.count, 2)
@@ -275,7 +275,7 @@ final class EnclaveHandleRequestTests: XCTestCase {
         do {
             _ = try await handle.data(from: URL(string: "/health")!)
             XCTFail("an expired verification must not authorize a request")
-        } catch TinfoilError.attestationError(let message) {
+        } catch TinfoilError.attestationError(let message, _) {
             XCTAssertTrue(message.contains("freshness deadline"), message)
         }
         XCTAssertTrue(log.sent.isEmpty)

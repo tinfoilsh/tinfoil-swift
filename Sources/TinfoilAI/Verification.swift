@@ -8,7 +8,7 @@ public typealias VerificationResultCallback = @Sendable (Result<Verification, Ti
 
 /// Called each time an enclave's evidence verifies, before the enclave is
 /// used. Throw to reject it: discovery moves to the next router; otherwise
-/// the run fails with `TinfoilError.enclaveRejected` and the enclave's key is
+/// the run fails with `TinfoilError.attestationError` and the enclave's key is
 /// never used. It runs synchronously, so keep it fast: requests waiting on a
 /// refresh wait on it too.
 public typealias EnclaveVerifiedCallback = @Sendable (Verification) throws -> Void
@@ -188,8 +188,9 @@ extension TinfoilError {
     /// message alone, led by its category's prefix, which is dropped here
     /// because the case carries the category. A verification error's message
     /// then names the layer that rejected the document, as in
-    /// "quote: <detail>". A message with neither prefix is treated as a
-    /// rejected attestation.
+    /// "quote: <detail>"; the layer is kept in the message and also lifted
+    /// out. A message with neither prefix is treated as a rejected
+    /// attestation.
     static func fromVerifier(
         _ error: Error,
         usagePrefix: String,
@@ -197,10 +198,12 @@ extension TinfoilError {
     ) -> TinfoilError {
         let message = error.localizedDescription
         if message.hasPrefix(usagePrefix) {
-            return .invalidConfiguration(String(message.dropFirst(usagePrefix.count)))
+            return .configurationError(String(message.dropFirst(usagePrefix.count)))
         }
         if message.hasPrefix(verificationPrefix) {
-            return .attestationError(String(message.dropFirst(verificationPrefix.count)))
+            let rejection = String(message.dropFirst(verificationPrefix.count))
+            let layer = rejection.range(of: ": ").map { String(rejection[..<$0.lowerBound]) }
+            return .attestationError(rejection, layer: layer.flatMap { $0.isEmpty ? nil : VerificationLayer(rawValue: $0) })
         }
         return .attestationError(message)
     }

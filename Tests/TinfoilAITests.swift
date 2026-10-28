@@ -35,7 +35,7 @@ final class TinfoilAITests: XCTestCase {
     func testErrorsDescribeThemselves() {
         let error: Error = TinfoilError.attestationError("enclave.example presented a certificate whose key does not match the attestation")
         XCTAssertEqual(error.localizedDescription, "enclave.example presented a certificate whose key does not match the attestation")
-        XCTAssertTrue(TinfoilError.missingAPIKey.localizedDescription.contains("TINFOIL_API_KEY"))
+        XCTAssertEqual(TinfoilError.configurationError("bad option").localizedDescription, "bad option")
     }
 
     func testURLHelpersAcceptHTTPAndHTTPSURLs() throws {
@@ -115,7 +115,7 @@ final class TinfoilAITests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(apiKey: "test-key", handle: EnclaveHandle(enclave: "127.0.0.1:9"))
             XCTFail("Should have failed to fetch attestation from an unreachable enclave")
-        } catch TinfoilError.fetchError {
+        } catch TinfoilError.networkError {
         } catch {
             XCTFail("expected a fetch error, got \(error)")
         }
@@ -269,7 +269,7 @@ final class TinfoilAITests: XCTestCase {
             )
             XCTFail("Should have failed to verify an unreachable enclave")
         } catch {
-            guard case .failure(.fetchError) = captured.value else {
+            guard case .failure(.networkError) = captured.value else {
                 return XCTFail("The failure should be reported, got \(String(describing: captured.value))")
             }
         }

@@ -43,12 +43,14 @@ struct Attestor: Sendable {
     /// A failed fetch or verification is retried once against fresh evidence;
     /// a configuration error is not.
     func attest(host: String, relay: String?, repo: String) async throws -> Verification {
+        let verified: Verification
         do {
-            return try await attestOnce(host: host, relay: relay, repo: repo)
+            verified = try await verifyOnce(host: host, relay: relay, repo: repo)
         } catch let error as TinfoilError where error.isRetryable {
             try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
-            return try await attestOnce(host: host, relay: relay, repo: repo)
+            verified = try await verifyOnce(host: host, relay: relay, repo: repo)
         }
+        return try accepted(verified)
     }
 
     /// Verifies the first of Tinfoil's routers that verifies against the router
@@ -93,14 +95,18 @@ struct Attestor: Sendable {
     }
 
     private func attestOnce(host: String, relay: String?, repo: String) async throws -> Verification {
+        try accepted(await verifyOnce(host: host, relay: relay, repo: repo))
+    }
+
+    private func verifyOnce(host: String, relay: String?, repo: String) async throws -> Verification {
         let nonce = verifier.newNonce()
         let url = try verifier.attestationURL(host: host, relay: relay, nonce: nonce)
         let document = try await fetch(url)
-        return try accepted(verifier.verify(document: document, nonce: nonce, repo: repo, enclaveHost: host))
+        return try verifier.verify(document: document, nonce: nonce, repo: repo, enclaveHost: host)
     }
 
-    /// A rejection is a decision about this evidence, so it is not retried;
-    /// during discovery the next router is tried instead.
+    /// A rejection is a decision about this evidence, so callers check it
+    /// outside any retry; during discovery the next router is tried instead.
     private func accepted(_ verification: Verification) throws -> Verification {
         guard let onEnclaveVerified else {
             return verification
@@ -108,7 +114,7 @@ struct Attestor: Sendable {
         do {
             try onEnclaveVerified(verification)
         } catch {
-            throw TinfoilError.enclaveRejected("onEnclaveVerified rejected \(verification.enclaveHost): \(error)")
+            throw TinfoilError.attestationError("onEnclaveVerified rejected \(verification.enclaveHost): \(error)")
         }
         return verification
     }
@@ -126,7 +132,7 @@ struct Attestor: Sendable {
 private extension TinfoilError {
     var isRetryable: Bool {
         switch self {
-        case .fetchError, .attestationError:
+        case .networkError, .attestationError:
             return true
         default:
             return false

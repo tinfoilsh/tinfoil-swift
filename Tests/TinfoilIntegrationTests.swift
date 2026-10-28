@@ -6,7 +6,7 @@ final class TinfoilIntegrationTests: XCTestCase {
 
     func testHandleRequiresAnEnclaveForACustomRepo() {
         XCTAssertThrowsError(try EnclaveHandle(repo: "org/repo"), "Only Tinfoil's routers are discovered") { error in
-            guard case TinfoilError.invalidConfiguration = error else {
+            guard case TinfoilError.configurationError = error else {
                 return XCTFail("expected a configuration error, got \(error)")
             }
         }
@@ -39,9 +39,9 @@ final class TinfoilIntegrationTests: XCTestCase {
 
         do {
             _ = try await TinfoilAI.create(apiKey: nil)
-            XCTFail("Should have thrown missingAPIKey error")
-        } catch TinfoilError.missingAPIKey {
-            XCTAssertTrue(true)
+            XCTFail("Should have thrown a configuration error")
+        } catch TinfoilError.configurationError(let message) {
+            XCTAssertTrue(message.contains("TINFOIL_API_KEY"), message)
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -55,7 +55,7 @@ final class TinfoilIntegrationTests: XCTestCase {
                 handle: EnclaveHandle(attestationRelay: "127.0.0.1:9")
             )
             XCTFail("Attestation through an unreachable relay must fail")
-        } catch TinfoilError.fetchError {
+        } catch TinfoilError.networkError {
         } catch {
             XCTFail("expected a fetch error, got \(error)")
         }

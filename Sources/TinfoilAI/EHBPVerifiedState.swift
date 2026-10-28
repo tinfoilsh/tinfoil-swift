@@ -67,7 +67,7 @@ internal actor EHBPVerifiedState {
         }
 
         guard let refreshEndpoint else {
-            throw TinfoilError.invalidConfiguration(
+            throw TinfoilError.configurationError(
                 "EHBP key must be re-attested, but no attestation refresh is configured"
             )
         }

@@ -86,7 +86,7 @@ public actor EnclaveHandle {
         now: @escaping @Sendable () -> Date = { Date() }
     ) throws {
         guard enclave != nil || repo == TinfoilConstants.defaultGithubRepo else {
-            throw TinfoilError.invalidConfiguration(
+            throw TinfoilError.configurationError(
                 "an enclave is required to verify against \(repo); only Tinfoil's routers are discovered"
             )
         }
@@ -202,10 +202,10 @@ public actor EnclaveHandle {
     /// enclave's origin.
     private static func resolve(_ url: URL?, against verification: Verification) throws -> URL {
         guard let url else {
-            throw TinfoilError.invalidConfiguration("the request has no URL")
+            throw TinfoilError.configurationError("the request has no URL")
         }
         guard let base = URL(string: "https://\(verification.enclaveHost)") else {
-            throw TinfoilError.invalidConfiguration("cannot form a URL for \(verification.enclaveHost)")
+            throw TinfoilError.configurationError("cannot form a URL for \(verification.enclaveHost)")
         }
         let target = url.host == nil ? URL(string: url.relativeString, relativeTo: base)?.absoluteURL : url
         // A URL with a scheme but no "//", such as "https:other.example/x",
@@ -217,11 +217,11 @@ public actor EnclaveHandle {
         // Requiring a host refuses it explicitly, rather than relying on the
         // origin check below failing because URLHelpers.origin cannot parse it.
         guard let target, target.host != nil, target.scheme?.lowercased() == "https" else {
-            throw TinfoilError.invalidConfiguration("requests to the enclave must be HTTPS URLs with a host, not \(url.absoluteString)")
+            throw TinfoilError.configurationError("requests to the enclave must be HTTPS URLs with a host, not \(url.absoluteString)")
         }
         let enclave = URLHelpers.origin(from: base.absoluteString)
         guard !enclave.isEmpty, URLHelpers.origin(from: target.absoluteString) == enclave else {
-            throw TinfoilError.invalidConfiguration(
+            throw TinfoilError.configurationError(
                 "requests go only to the verified enclave \(verification.enclaveHost), not \(target.host ?? target.absoluteString)"
             )
         }
