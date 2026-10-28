@@ -9,22 +9,31 @@ struct Attestor: Sendable {
     private let verifier: any AttestationVerifier
     private let fetch: Fetch
     private let retryDelay: TimeInterval
+    private let discoveryTimeout: TimeInterval
+    private let now: @Sendable () -> Date
     private let onEnclaveVerified: EnclaveVerifiedCallback?
 
     /// - Parameters:
     ///   - retryDelay: Wait before the one retry of a failed fetch or
     ///     verification, as in the Go SDK.
+    ///   - discoveryTimeout: How long fetching the router list and trying
+    ///     routers may take together before the fallback router is used, as
+    ///     in the Go SDK.
     ///   - onEnclaveVerified: The caller's check on each enclave whose evidence
     ///     verifies.
     init(
         verifier: any AttestationVerifier,
         fetch: @escaping Fetch = { try await AttestationFetcher().fetch($0) },
         retryDelay: TimeInterval = 1,
+        discoveryTimeout: TimeInterval = 30,
+        now: @escaping @Sendable () -> Date = { Date() },
         onEnclaveVerified: EnclaveVerifiedCallback? = nil
     ) {
         self.verifier = verifier
         self.fetch = fetch
         self.retryDelay = retryDelay
+        self.discoveryTimeout = discoveryTimeout
+        self.now = now
         self.onEnclaveVerified = onEnclaveVerified
     }
 
@@ -42,20 +51,43 @@ struct Attestor: Sendable {
 
     /// Verifies the first of Tinfoil's routers that verifies against the router
     /// repository, trying each once, and otherwise the fallback router. A
-    /// router list that cannot be fetched or read leaves only the fallback.
+    /// router list that cannot be fetched or read leaves only the fallback,
+    /// and so does reaching discoveryTimeout, however many routers are left.
     func attestDefaultRouter() async throws -> Verification {
         let repo = TinfoilConstants.defaultGithubRepo
-        for router in try await discoveredRouters() {
-            try Task.checkCancellation()
-            do {
-                return try await attestOnce(host: router, relay: nil, repo: repo)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                continue
-            }
+        if let verified = await firstVerifiedRouter(repo: repo) {
+            return verified
         }
+        try Task.checkCancellation()
         return try await attest(host: TinfoilConstants.fallbackEnclave, relay: nil, repo: repo)
+    }
+
+    /// The first discovered router that verifies before discoveryTimeout, or
+    /// nil. Reaching the deadline cancels the fetch in flight.
+    private func firstVerifiedRouter(repo: String) async -> Verification? {
+        let deadline = now().addingTimeInterval(discoveryTimeout)
+        return await withTaskGroup(of: Verification?.self) { group in
+            group.addTask {
+                for router in await discoveredRouters() {
+                    // The deadline can pass before the timer below cancels
+                    // this task, as when a probe's own timeout ends with it.
+                    guard !Task.isCancelled, now() < deadline else {
+                        return nil
+                    }
+                    if let verified = try? await attestOnce(host: router, relay: nil, repo: repo) {
+                        return verified
+                    }
+                }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(discoveryTimeout * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     private func attestOnce(host: String, relay: String?, repo: String) async throws -> Verification {
@@ -81,14 +113,11 @@ struct Attestor: Sendable {
 
     /// The router list is untrusted: each entry is only a host to try, and
     /// is verified like any other.
-    private func discoveredRouters() async throws -> [String] {
-        do {
-            return try JSONDecoder().decode([String].self, from: try await fetch(TinfoilConstants.routerListURL))
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
+    private func discoveredRouters() async -> [String] {
+        guard let list = try? await fetch(TinfoilConstants.routerListURL) else {
             return []
         }
+        return (try? JSONDecoder().decode([String].self, from: list)) ?? []
     }
 }
 
