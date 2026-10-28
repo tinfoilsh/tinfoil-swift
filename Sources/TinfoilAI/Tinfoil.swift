@@ -5,6 +5,9 @@ import EHBP
 /// Main entry point for the Tinfoil client library.
 /// Provides the same API as OpenAI client with EHBP encryption for secure enclave communication.
 public class TinfoilAI {
+    /// This SDK's version, as tinfoil-go's `Version()` reports its own
+    public static let version = TinfoilConstants.sdkVersion
+
     private let openAIClient: OpenAI
 
     private init(client: OpenAI) {

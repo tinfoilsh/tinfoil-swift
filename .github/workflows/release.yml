@@ -26,7 +26,7 @@ jobs:
 
       - name: Check SDK version matches tag
         run: |
-          version=$(sed -nE 's/^ *public static let sdkVersion = "([^"]+)"$/\1/p' Sources/TinfoilAI/Constants.swift)
+          version=$(sed -nE 's/^ *static let sdkVersion = "([^"]+)"$/\1/p' Sources/TinfoilAI/Constants.swift)
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "::error::TinfoilConstants.sdkVersion is '$version' but the tag is $GITHUB_REF_NAME" >&2
             exit 1

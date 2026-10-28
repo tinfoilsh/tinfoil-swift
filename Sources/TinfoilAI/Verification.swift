@@ -15,14 +15,9 @@ public typealias VerificationResultCallback = @Sendable (Result<Verification, Ti
 public typealias EnclaveVerifiedCallback = @Sendable (Verification) throws -> Void
 
 /// Identifies the software that performed verification
-public struct SoftwareIdentity: Codable, Sendable, Equatable {
+public struct SoftwareIdentity: Sendable, Equatable {
     public let name: String
     public let version: String
-
-    public init(name: String, version: String) {
-        self.name = name
-        self.version = version
-    }
 }
 
 /// Checks a verification makes beyond the defaults
