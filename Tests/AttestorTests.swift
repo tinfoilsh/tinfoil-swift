@@ -13,7 +13,7 @@ final class AttestorTests: XCTestCase {
         retryDelay: TimeInterval = 0,
         hanging: Set<String> = [],
         discoveryTimeout: TimeInterval = 30,
-        now: @escaping @Sendable () -> Date = { Date() },
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
         onEnclaveVerified: EnclaveVerifiedCallback? = nil
     ) -> Attestor {
         Attestor(
@@ -198,9 +198,9 @@ final class AttestorTests: XCTestCase {
         }
         // The clock passes the deadline once router-a has been tried, long
         // before the 30 second timer could cancel discovery.
-        let started = Date()
-        let now: @Sendable () -> Date = {
-            network.urls.contains { $0.host == "router-a.example" } ? started.addingTimeInterval(31) : started
+        let started = ContinuousClock.now
+        let now: @Sendable () -> ContinuousClock.Instant = {
+            network.urls.contains { $0.host == "router-a.example" } ? started.advanced(by: .seconds(31)) : started
         }
 
         let verification = try await attestor(FakeVerifier(), network, now: now).attestDefaultRouter()

@@ -10,7 +10,7 @@ struct Attestor: Sendable {
     private let fetch: Fetch
     private let retryDelay: TimeInterval
     private let discoveryTimeout: TimeInterval
-    private let now: @Sendable () -> Date
+    private let now: @Sendable () -> ContinuousClock.Instant
     private let onEnclaveVerified: EnclaveVerifiedCallback?
 
     /// - Parameters:
@@ -19,6 +19,8 @@ struct Attestor: Sendable {
     ///   - discoveryTimeout: How long fetching the router list and trying
     ///     routers may take together before the fallback router is used, as
     ///     in the Go SDK.
+    ///   - now: The monotonic clock the discovery deadline is measured on, so
+    ///     a change to the wall clock cannot move it.
     ///   - onEnclaveVerified: The caller's check on each enclave whose evidence
     ///     verifies.
     init(
@@ -26,7 +28,7 @@ struct Attestor: Sendable {
         fetch: @escaping Fetch = { try await AttestationFetcher().fetch($0) },
         retryDelay: TimeInterval = 1,
         discoveryTimeout: TimeInterval = 30,
-        now: @escaping @Sendable () -> Date = { Date() },
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
         onEnclaveVerified: EnclaveVerifiedCallback? = nil
     ) {
         self.verifier = verifier
@@ -65,7 +67,7 @@ struct Attestor: Sendable {
     /// The first discovered router that verifies before discoveryTimeout, or
     /// nil. Reaching the deadline cancels the fetch in flight.
     private func firstVerifiedRouter(repo: String) async -> Verification? {
-        let deadline = now().addingTimeInterval(discoveryTimeout)
+        let deadline = now().advanced(by: .seconds(discoveryTimeout))
         return await withTaskGroup(of: Verification?.self) { group in
             group.addTask {
                 for router in await discoveredRouters() {

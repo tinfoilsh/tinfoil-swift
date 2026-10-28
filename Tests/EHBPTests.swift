@@ -715,6 +715,19 @@ final class EHBPTests: XCTestCase {
         }
     }
 
+    func testSessionsKeepTheSecretTheyAreGiven() {
+        // TinfoilAI resolves the secret once, and leaves it empty for an
+        // enclave the handle names; the sessions must not resolve it again.
+        let state = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey, expiresAt: .distantFuture),
+            refresh: nil
+        )
+        for secret in ["", "client-level"] {
+            XCTAssertEqual(EHBPURLSession(baseURL: server.baseURL, verifiedState: state, userCacheSecret: secret).userCacheSecret, secret)
+            XCTAssertEqual(EHBPURLSessionFactory(baseURL: server.baseURL, verifiedState: state, userCacheSecret: secret).userCacheSecret, secret)
+        }
+    }
+
     func testExpiredAttestationIsRefreshedBeforeTheRequestIsSent() async throws {
         let clock = TestClock()
         let refreshCounter = AsyncCounter()

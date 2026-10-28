@@ -113,7 +113,7 @@ private enum EHBPReplayPolicy {
 public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
-    private let userCacheSecret: String
+    let userCacheSecret: String
     private let networkSession: URLSession
 
     /// Creates an EHBP URLSession factory
@@ -141,11 +141,12 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
                 publicKey: publicKey,
                 session: session
             ),
-            userCacheSecret: userCacheSecret,
+            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
             session: session
         )
     }
 
+    /// `userCacheSecret` is already resolved; an empty one injects nothing.
     internal init(
         baseURL: String,
         verifiedState: EHBPVerifiedState,
@@ -154,7 +155,7 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
     ) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = verifiedState
-        self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
+        self.userCacheSecret = userCacheSecret
         self.networkSession = session
     }
 
@@ -477,7 +478,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
 public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
-    private let userCacheSecret: String
+    let userCacheSecret: String
     private let session: URLSession
 
     /// Creates an EHBP URLSession with the given server public key
@@ -498,11 +499,12 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
                 publicKey: publicKey,
                 session: session
             ),
-            userCacheSecret: userCacheSecret,
+            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
             session: session
         )
     }
 
+    /// `userCacheSecret` is already resolved; an empty one injects nothing.
     internal init(
         baseURL: String,
         verifiedState: EHBPVerifiedState,
@@ -511,7 +513,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     ) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = verifiedState
-        self.userCacheSecret = UserCacheSecret.resolve(explicit: userCacheSecret)
+        self.userCacheSecret = userCacheSecret
         self.session = session
     }
 
