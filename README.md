@@ -49,7 +49,7 @@ let client = try await TinfoilAI.create(apiKey: "YOUR_API_KEY", client: enclave)
 ## Documentation
 
 - [Swift SDK documentation](https://docs.tinfoil.sh/sdk/swift-sdk) and the [proxy server guide](https://docs.tinfoil.sh/guides/proxy-server).
-- Multi-user services must scope prompt caches to each end user with an `EnclaveHTTPClient`'s `userCacheSecret` or a per-request `user_cache_secret` in `extraBody`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
+- Multi-user services must scope prompt caches to each end user by passing `userCacheSecret` when creating an `EnclaveHTTPClient`, or with a per-request `user_cache_secret` in `extraBody`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 - `audioCreateSpeechStream(query:options:)` delivers decrypted audio in chunks that can split PCM samples or frames. The stream buffers without bound, so consume it promptly.
 - All OpenAI methods and types are unchanged; see the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI).
 

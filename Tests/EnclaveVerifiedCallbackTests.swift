@@ -28,8 +28,9 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
 
     /// An EHBP client for enclave.example that sends to the local server
     private func client(
-        onEnclaveVerified: @escaping EnclaveVerifiedCallback,
-        onVerificationResult: VerificationResultCallback? = nil
+        onEnclaveVerified: @escaping EnclaveVerifiedCallback = { _ in },
+        onVerificationResult: VerificationResultCallback? = nil,
+        path: String = ""
     ) throws -> EnclaveHTTPClient {
         let network = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
         return try EnclaveHTTPClient(
@@ -46,7 +47,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
                 onVerificationResult: onVerificationResult
             ),
             transportMode: .ehbp,
-            baseURL: URL(string: server.baseURL)!,
+            baseURL: URL(string: server.baseURL + path)!,
             userCacheSecret: Self.cacheSecret,
             allowPlainHTTP: true
         )
@@ -54,6 +55,16 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
 
     private func chat(_ client: TinfoilAI) async throws {
         _ = try await client.chats(query: ChatQuery(messages: [.user(.init(content: .string("Hi")))], model: "test-model"))
+    }
+
+    func testOpenAIRequestsKeepTheBaseURLsPath() async throws {
+        for (path, expected) in [("", "/v1/chat/completions"), ("/api/", "/api/chat/completions")] {
+            let client = try await TinfoilAI.create(apiKey: "test-key", client: client(path: path))
+            // The stub server can't seal a response, so the request fails;
+            // what matters is where it was sent.
+            _ = try? await chat(client)
+            XCTAssertEqual(server.requestStore.lastRequest?.path, expected, "base URL path \"\(path)\"")
+        }
     }
 
     func testCreateFailsWhenTheEnclaveIsRejected() async {

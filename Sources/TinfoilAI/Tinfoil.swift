@@ -119,8 +119,9 @@ public class TinfoilAI {
         )
     }
 
-    /// Sets up the OpenAI client over the given EHBP sessions, sending to
-    /// `baseURL`'s origin.
+    /// Sets up the OpenAI client over the given EHBP sessions. Requests go to
+    /// `baseURL`, under its path if it has one, as tinfoil-go's OpenAI clients
+    /// use a base URL as is, and under `/v1` for a bare origin.
     private convenience init(
         apiKey: String?,
         apiKeyProvider: (@Sendable () -> String?)?,
@@ -133,6 +134,10 @@ public class TinfoilAI {
     ) throws {
         let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
         let defaultPort = urlComponents.scheme == "https" ? 443 : 80
+        var basePath = URL(string: baseURL)?.path ?? ""
+        while basePath.hasSuffix("/") {
+            basePath.removeLast()
+        }
 
         var mergedHeaders = customHeaders
         if let eventsHeader = tinfoilEventsHeaderValue(tinfoilEvents),
@@ -146,6 +151,7 @@ public class TinfoilAI {
             host: urlComponents.host,
             port: urlComponents.port ?? defaultPort,
             scheme: urlComponents.scheme,
+            basePath: basePath.isEmpty ? "/v1" : basePath,
             customHeaders: mergedHeaders,
             parsingOptions: parsingOptions
         )

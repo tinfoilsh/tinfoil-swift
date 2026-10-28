@@ -34,7 +34,7 @@ extension EHBPVerifiedEndpoint {
     /// attestation that endorses none can't be used with EHBP.
     static func publicKey(hex: String?) throws -> Data {
         guard let hex, !hex.isEmpty else {
-            throw TinfoilError.attestation("Server does not support EHBP (no HPKE public key); use TransportMode.tls")
+            throw TinfoilError.attestation("Server does not support EHBP (no HPKE public key)")
         }
         guard let key = Data(hexString: hex), key.count == TinfoilConstants.hpkePublicKeyByteCount else {
             throw TinfoilError.attestation("Invalid HPKE public key format (expected 32 bytes)")

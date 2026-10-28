@@ -170,6 +170,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
 
         let verified = try await handle.ensureVerified()
         let first = try await channel.state.current()
+        XCTAssertEqual(first.endpoint.publicKey, Data(hexString: try XCTUnwrap(verified.hpkePublicKey)), "Sealed to the verified HPKE key")
         XCTAssertEqual(first.endpoint.expiresAt, verified.freshnessExpiresAt)
         XCTAssertEqual(network.urls.count, 1, "The handle's verification is reused for the first request.")
 
