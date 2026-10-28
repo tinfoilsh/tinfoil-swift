@@ -33,7 +33,7 @@ struct AttestationFetcher: Sendable {
     /// Returns the body of a GET of url, which must be HTTPS.
     func fetch(_ url: URL) async throws -> Data {
         guard url.scheme?.lowercased() == "https" else {
-            throw TinfoilError.configurationError("attestation must be fetched over HTTPS, not \(url.absoluteString)")
+            throw TinfoilError.configuration("attestation must be fetched over HTTPS, not \(url.absoluteString)")
         }
         var request = URLRequest(url: url)
         request.setValue(TinfoilConstants.sdkName, forHTTPHeaderField: Self.sdkNameHeader)
@@ -52,13 +52,13 @@ struct AttestationFetcher: Sendable {
             let (bytes, response) = try await session.bytes(for: request)
             // A refused redirect completes with the redirect response itself.
             if let refusal = redirects.refusal {
-                throw TinfoilError.networkError(refusal)
+                throw TinfoilError.network(refusal)
             }
             guard let response = response as? HTTPURLResponse else {
-                throw TinfoilError.networkError("GET \(url.absoluteString) returned a response that is not HTTP")
+                throw TinfoilError.network("GET \(url.absoluteString) returned a response that is not HTTP")
             }
             guard (200...299).contains(response.statusCode) else {
-                throw TinfoilError.networkError(
+                throw TinfoilError.network(
                     "HTTP GET \(url.absoluteString): \(response.statusCode) \(HTTPURLResponse.localizedString(forStatusCode: response.statusCode))",
                     status: response.statusCode
                 )
@@ -82,14 +82,14 @@ struct AttestationFetcher: Sendable {
             }
             let urlError = error as? URLError
             if urlError?.code == .timedOut {
-                throw TinfoilError.networkError("GET \(url.absoluteString) timed out after \(Int(timeout)) seconds", urlError: urlError)
+                throw TinfoilError.network("GET \(url.absoluteString) timed out after \(Int(timeout)) seconds", urlError: urlError)
             }
-            throw TinfoilError.networkError("GET \(url.absoluteString): \(error.localizedDescription)", urlError: urlError)
+            throw TinfoilError.network("GET \(url.absoluteString): \(error.localizedDescription)", urlError: urlError)
         }
     }
 
     private func tooLarge(_ url: URL) -> TinfoilError {
-        .networkError("response from \(url.absoluteString) exceeds \(maximumBodyBytes) bytes")
+        .network("response from \(url.absoluteString) exceeds \(maximumBodyBytes) bytes")
     }
 }
 

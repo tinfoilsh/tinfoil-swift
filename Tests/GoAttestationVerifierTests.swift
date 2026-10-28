@@ -17,11 +17,11 @@ final class GoAttestationVerifierTests: XCTestCase {
             guard let error = error as? TinfoilError, expected(error) else {
                 return XCTFail("unexpected error \(error)", file: file, line: line)
             }
-            if case .configurationError(let message) = error {
-                XCTAssertFalse(message.hasPrefix("usage error:"), "The Go prefix is dropped.", file: file, line: line)
+            if case .configurationError(let failure) = error {
+                XCTAssertFalse(failure.message.hasPrefix("usage error:"), "The Go prefix is dropped.", file: file, line: line)
             }
-            if case .attestationError(let message, _) = error {
-                XCTAssertFalse(message.hasPrefix("verification error:"), "The Go prefix is dropped.", file: file, line: line)
+            if case .attestationError(let failure) = error {
+                XCTAssertFalse(failure.message.hasPrefix("verification error:"), "The Go prefix is dropped.", file: file, line: line)
             }
         }
     }
@@ -72,10 +72,10 @@ final class GoAttestationVerifierTests: XCTestCase {
         XCTAssertThrowsError(
             try verifier.verify(document: document, nonce: nonce, repo: Self.routerRepo, enclaveHost: "enclave.example")
         ) { error in
-            guard case TinfoilError.attestationError(_, let layer) = error else {
+            guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("unexpected error \(error)")
             }
-            XCTAssertEqual(layer, .envelope, "A malformed document is rejected by the envelope layer.")
+            XCTAssertEqual(failure.layer, .envelope, "A malformed document is rejected by the envelope layer.")
         }
         assertCategory(isConfiguration) {
             try verifier.verify(document: document, nonce: nonce.dropFirst(), repo: Self.routerRepo, enclaveHost: "enclave.example")

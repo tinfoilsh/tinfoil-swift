@@ -114,7 +114,7 @@ struct Attestor: Sendable {
         do {
             try onEnclaveVerified(verification)
         } catch {
-            throw TinfoilError.attestationError("onEnclaveVerified rejected \(verification.enclaveHost): \(error)")
+            throw TinfoilError.attestation("onEnclaveVerified rejected \(verification.enclaveHost): \(error)")
         }
         return verification
     }

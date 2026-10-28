@@ -42,15 +42,15 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         lock.unlock()
         let parts = String(decoding: document, as: UTF8.self).split(separator: ":").map(String.init)
         guard parts.count == 2, parts[1] == nonce.hexString else {
-            throw TinfoilError.attestationError("document is not bound to the nonce")
+            throw TinfoilError.attestation("document is not bound to the nonce")
         }
         switch parts[0] {
         case "ok":
             return .stub(host: enclaveHost, repo: repo, expiresAt: now().addingTimeInterval(3600))
         case "config":
-            throw TinfoilError.configurationError("bad repo")
+            throw TinfoilError.configuration("bad repo")
         default:
-            throw TinfoilError.attestationError("rejected")
+            throw TinfoilError.attestation("rejected")
         }
     }
 }
@@ -129,8 +129,8 @@ extension TinfoilError {
     /// Whether this is the error an `onEnclaveVerified` callback's `Refusal`
     /// becomes, rather than any other attestation failure
     var isRefusal: Bool {
-        guard case .attestationError(let message, nil) = self else { return false }
-        return message.contains("onEnclaveVerified rejected") && message.contains(Refusal().description)
+        guard case .attestationError(let failure) = self, failure.layer == nil else { return false }
+        return failure.message.contains("onEnclaveVerified rejected") && failure.message.contains(Refusal().description)
     }
 }
 

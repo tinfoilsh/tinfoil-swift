@@ -22,7 +22,7 @@ extension VerificationPolicy {
     /// rather than trapping in the conversion.
     private static func nanoseconds(_ seconds: TimeInterval) throws -> Int64 {
         guard seconds >= 0, let nanoseconds = Int64(exactly: (seconds * 1_000_000_000).rounded()) else {
-            throw TinfoilError.configurationError(
+            throw TinfoilError.configuration(
                 "freshness maximum age must be a non-negative, finite number of seconds, not \(seconds)"
             )
         }
@@ -59,7 +59,7 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
             throw Self.classify(error)
         }
         guard let verifier else {
-            throw TinfoilError.configurationError("tinfoil-go returned no verifier")
+            throw TinfoilError.configuration("tinfoil-go returned no verifier")
         }
         self.verifier = verifier
     }
@@ -77,7 +77,7 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
             throw Self.classify(error)
         }
         guard let parsed = URL(string: url) else {
-            throw TinfoilError.configurationError("tinfoil-go returned an invalid attestation URL: \(url)")
+            throw TinfoilError.configuration("tinfoil-go returned an invalid attestation URL: \(url)")
         }
         return parsed
     }

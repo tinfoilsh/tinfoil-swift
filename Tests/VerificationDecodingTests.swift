@@ -38,10 +38,10 @@ final class VerificationDecodingTests: XCTestCase {
         line: UInt = #line
     ) {
         XCTAssertThrowsError(try expression(), file: file, line: line) { error in
-            guard case TinfoilError.attestationError(let message, _) = error else {
+            guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("expected an attestation error, got \(error)", file: file, line: line)
             }
-            XCTAssertTrue(message.contains(expected), "\(message) should mention \(expected)", file: file, line: line)
+            XCTAssertTrue(failure.message.contains(expected), "\(failure.message) should mention \(expected)", file: file, line: line)
         }
     }
 
@@ -134,17 +134,17 @@ final class VerificationDecodingTests: XCTestCase {
                 verificationPrefix: "verification error: "
             )
         }
-        XCTAssertEqual(classify("usage error: bad repo"), .configurationError("bad repo"))
-        XCTAssertEqual(classify("verification error: quote: rejected"), .attestationError("quote: rejected", layer: .quote))
+        XCTAssertEqual(classify("usage error: bad repo"), .configuration("bad repo"))
+        XCTAssertEqual(classify("verification error: quote: rejected"), .attestation("quote: rejected", layer: .quote))
         XCTAssertEqual(
             classify("verification error: firmware: rejected"),
-            .attestationError("firmware: rejected", layer: VerificationLayer(rawValue: "firmware")),
+            .attestation("firmware: rejected", layer: VerificationLayer(rawValue: "firmware")),
             "A layer this SDK doesn't name is still carried."
         )
-        XCTAssertEqual(classify("verification error: rejected"), .attestationError("rejected"), "No layer, no guess.")
+        XCTAssertEqual(classify("verification error: rejected"), .attestation("rejected"), "No layer, no guess.")
         XCTAssertEqual(
             classify("unexpected"),
-            .attestationError("unexpected"),
+            .attestation("unexpected"),
             "An uncategorized verifier failure still fails closed."
         )
     }

@@ -40,8 +40,8 @@ final class TinfoilIntegrationTests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(apiKey: nil)
             XCTFail("Should have thrown a configuration error")
-        } catch TinfoilError.configurationError(let message) {
-            XCTAssertTrue(message.contains("TINFOIL_API_KEY"), message)
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertTrue(failure.message.contains("TINFOIL_API_KEY"), failure.message)
         } catch {
             XCTFail("Unexpected error: \(error)")
         }

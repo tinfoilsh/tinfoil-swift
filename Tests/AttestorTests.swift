@@ -70,7 +70,7 @@ final class AttestorTests: XCTestCase {
 
     func testRetriesOnceWithAFreshNonce() async throws {
         let network = FakeNetwork { url, previous in
-            if previous == 0 { throw TinfoilError.networkError("unavailable") }
+            if previous == 0 { throw TinfoilError.network("unavailable") }
             return FakeNetwork.document("ok", for: url)
         }
 
@@ -85,7 +85,7 @@ final class AttestorTests: XCTestCase {
 
         await assertThrows(
             { try await self.attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, repo: "org/repo") },
-            { $0 as? TinfoilError == .attestationError("rejected") }
+            { $0 as? TinfoilError == .attestation("rejected") }
         )
         XCTAssertEqual(network.urls.count, 2)
     }
@@ -95,13 +95,13 @@ final class AttestorTests: XCTestCase {
 
         await assertThrows(
             { try await self.attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, repo: "org/repo") },
-            { $0 as? TinfoilError == .configurationError("bad repo") }
+            { $0 as? TinfoilError == .configuration("bad repo") }
         )
         XCTAssertEqual(network.urls.count, 1)
     }
 
     func testCancellationDuringTheRetryDelay() async {
-        let network = FakeNetwork { _, _ in throw TinfoilError.networkError("unavailable") }
+        let network = FakeNetwork { _, _ in throw TinfoilError.network("unavailable") }
         let attestor = attestor(FakeVerifier(), network, retryDelay: 60)
         let attempt = Task { try await attestor.attest(host: "enclave.example", relay: nil, repo: "org/repo") }
         try? await Task.sleep(nanoseconds: 100_000_000)
@@ -147,7 +147,7 @@ final class AttestorTests: XCTestCase {
     }
 
     func testDiscoveryFallsBackWithoutARouterList() async throws {
-        for listReply in [{ () throws -> String in throw TinfoilError.networkError("unavailable") }, { "not json" }] {
+        for listReply in [{ () throws -> String in throw TinfoilError.network("unavailable") }, { "not json" }] {
             let network = FakeNetwork { url, _ in
                 url == self.routerList ? try listReply() : FakeNetwork.document("ok", for: url)
             }
@@ -257,8 +257,8 @@ final class AttestorTests: XCTestCase {
                     .attest(host: "enclave.example", relay: nil, repo: "org/repo")
             },
             { error in
-                guard case TinfoilError.attestationError(let message, _) = error else { return false }
-                return message.contains("enclave.example") && message.contains("refused by the test")
+                guard case TinfoilError.attestationError(let failure) = error else { return false }
+                return failure.message.contains("enclave.example") && failure.message.contains("refused by the test")
             }
         )
         XCTAssertEqual(network.urls.count, 1)

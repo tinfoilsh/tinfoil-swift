@@ -113,8 +113,8 @@ final class EnclaveHandleRequestTests: XCTestCase {
         do {
             _ = try await handle.data(from: URL(string: "https://elsewhere.example/health")!)
             XCTFail("credentials must not be sent to another host")
-        } catch TinfoilError.configurationError(let message) {
-            XCTAssertTrue(message.contains("elsewhere.example"), message)
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertTrue(failure.message.contains("elsewhere.example"), failure.message)
         }
         XCTAssertTrue(log.sent.isEmpty)
         XCTAssertEqual(network.urls.count, 1, "A refused host does not trigger verifying again.")
@@ -178,8 +178,8 @@ final class EnclaveHandleRequestTests: XCTestCase {
                 configuration: stubbed()
             )
             XCTFail("a redirect off the enclave must be refused")
-        } catch TinfoilError.configurationError(let message) {
-            XCTAssertTrue(message.contains("elsewhere.example"), message)
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertTrue(failure.message.contains("elsewhere.example"), failure.message)
         }
         XCTAssertFalse(StubURLProtocol.requests.contains { $0.url == elsewhere }, "The other host is never asked.")
     }
@@ -238,8 +238,8 @@ final class EnclaveHandleRequestTests: XCTestCase {
         do {
             _ = try await handle.data(from: URL(string: "/health")!)
             XCTFail("a key the attestation does not endorse must not be used")
-        } catch TinfoilError.attestationError(let message, _) {
-            XCTAssertTrue(message.contains("does not match the attestation"), message)
+        } catch TinfoilError.attestationError(let failure) {
+            XCTAssertTrue(failure.message.contains("does not match the attestation"), failure.message)
         }
         XCTAssertEqual(log.sent.count, 2)
         XCTAssertEqual(network.urls.count, 2)
@@ -275,8 +275,8 @@ final class EnclaveHandleRequestTests: XCTestCase {
         do {
             _ = try await handle.data(from: URL(string: "/health")!)
             XCTFail("an expired verification must not authorize a request")
-        } catch TinfoilError.attestationError(let message, _) {
-            XCTAssertTrue(message.contains("freshness deadline"), message)
+        } catch TinfoilError.attestationError(let failure) {
+            XCTAssertTrue(failure.message.contains("freshness deadline"), failure.message)
         }
         XCTAssertTrue(log.sent.isEmpty)
     }

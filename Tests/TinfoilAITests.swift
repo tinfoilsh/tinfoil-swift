@@ -33,9 +33,9 @@ final class TinfoilAITests: XCTestCase {
     }
 
     func testErrorsDescribeThemselves() {
-        let error: Error = TinfoilError.attestationError("enclave.example presented a certificate whose key does not match the attestation")
+        let error: Error = TinfoilError.attestation("enclave.example presented a certificate whose key does not match the attestation")
         XCTAssertEqual(error.localizedDescription, "enclave.example presented a certificate whose key does not match the attestation")
-        XCTAssertEqual(TinfoilError.configurationError("bad option").localizedDescription, "bad option")
+        XCTAssertEqual(TinfoilError.configuration("bad option").localizedDescription, "bad option")
     }
 
     func testURLHelpersAcceptHTTPAndHTTPSURLs() throws {

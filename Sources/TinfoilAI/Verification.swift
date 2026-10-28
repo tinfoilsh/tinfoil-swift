@@ -101,10 +101,10 @@ extension Verification {
         do {
             version = try decoder.decode(SchemaVersion.self, from: data)
         } catch {
-            throw TinfoilError.attestationError("unreadable verification payload: \(error.localizedDescription)")
+            throw TinfoilError.attestation("unreadable verification payload: \(error.localizedDescription)")
         }
         guard version.schemaVersion == Self.supportedSchemaVersion else {
-            throw TinfoilError.attestationError(
+            throw TinfoilError.attestation(
                 "unsupported verification schema version \(version.schemaVersion); this SDK reads version \(Self.supportedSchemaVersion)"
             )
         }
@@ -112,7 +112,7 @@ extension Verification {
         do {
             decoded = try decoder.decode(Payload.self, from: data)
         } catch {
-            throw TinfoilError.attestationError("unreadable verification payload: \(error.localizedDescription)")
+            throw TinfoilError.attestation("unreadable verification payload: \(error.localizedDescription)")
         }
 
         self.init(
@@ -179,7 +179,7 @@ extension Verification {
                 return date
             }
         }
-        throw TinfoilError.attestationError("verification payload has an invalid \(field): \(value)")
+        throw TinfoilError.attestation("verification payload has an invalid \(field): \(value)")
     }
 }
 
@@ -198,13 +198,13 @@ extension TinfoilError {
     ) -> TinfoilError {
         let message = error.localizedDescription
         if message.hasPrefix(usagePrefix) {
-            return .configurationError(String(message.dropFirst(usagePrefix.count)))
+            return .configuration(String(message.dropFirst(usagePrefix.count)))
         }
         if message.hasPrefix(verificationPrefix) {
             let rejection = String(message.dropFirst(verificationPrefix.count))
             let layer = rejection.range(of: ": ").map { String(rejection[..<$0.lowerBound]) }
-            return .attestationError(rejection, layer: layer.flatMap { $0.isEmpty ? nil : VerificationLayer(rawValue: $0) })
+            return .attestation(rejection, layer: layer.flatMap { $0.isEmpty ? nil : VerificationLayer(rawValue: $0) })
         }
-        return .attestationError(message)
+        return .attestation(message)
     }
 }
