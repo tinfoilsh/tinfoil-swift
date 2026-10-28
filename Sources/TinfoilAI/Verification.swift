@@ -202,9 +202,22 @@ extension TinfoilError {
         }
         if message.hasPrefix(verificationPrefix) {
             let rejection = String(message.dropFirst(verificationPrefix.count))
-            let layer = rejection.range(of: ": ").map { String(rejection[..<$0.lowerBound]) }
-            return .attestation(rejection, layer: layer.flatMap { $0.isEmpty ? nil : VerificationLayer(rawValue: $0) })
+            return .attestation(rejection, layer: layer(leading: rejection))
         }
         return .attestation(message)
+    }
+
+    /// The layer a verification error's message leads with, as in
+    /// "quote: <detail>". Layer names are single lowercase words, so a message
+    /// whose text before ": " is anything else names no layer.
+    private static func layer(leading message: String) -> VerificationLayer? {
+        guard let separator = message.range(of: ": ") else {
+            return nil
+        }
+        let name = message[..<separator.lowerBound]
+        guard !name.isEmpty, name.allSatisfy({ $0.isASCII && $0.isLowercase }) else {
+            return nil
+        }
+        return VerificationLayer(rawValue: String(name))
     }
 }

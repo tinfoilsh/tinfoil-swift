@@ -143,6 +143,11 @@ final class VerificationDecodingTests: XCTestCase {
         )
         XCTAssertEqual(classify("verification error: rejected"), .attestation("rejected"), "No layer, no guess.")
         XCTAssertEqual(
+            classify("verification error: could not parse: bad JSON"),
+            .attestation("could not parse: bad JSON"),
+            "Text before a colon is a layer only if it is a single lowercase word."
+        )
+        XCTAssertEqual(
             classify("unexpected"),
             .attestation("unexpected"),
             "An uncategorized verifier failure still fails closed."

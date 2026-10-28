@@ -385,6 +385,9 @@ public enum TinfoilError: Error, Equatable {
     }
 }
 
+/// Shorthand the SDK throws with, each building its case's details: for
+/// example, `.attestation("rejected")` is
+/// `.attestationError(Attestation(message: "rejected", layer: nil))`.
 extension TinfoilError {
     static func configuration(_ message: String) -> TinfoilError {
         .configurationError(Configuration(message: message))
