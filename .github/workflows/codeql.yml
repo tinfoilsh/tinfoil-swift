@@ -1,0 +1,105 @@
+name: CodeQL
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  swift:
+    name: Analyze (swift)
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: latest-stable
+
+      # CodeQL traces every process the build starts, which slows SwiftPM's
+      # git-heavy resolution and the dependencies' compilation many times
+      # over. Do both before tracing begins, so only the SDK's own sources
+      # are compiled, and extracted, under the tracer.
+      #
+      # Build the dependencies' targets, not their products: SwiftPM refuses
+      # `--product` for an automatic product and builds the whole package
+      # instead, which would leave nothing for the traced build to compile.
+      - name: Build dependencies
+        run: |
+          swift package resolve
+          swift build --target OpenAI
+          swift build --target EHBP
+          if find .build -name 'TinfoilAI.swiftmodule' | grep -q .; then
+            echo "::error::TinfoilAI was built before tracing, so CodeQL would not see it compile"
+            exit 1
+          fi
+
+      # CodeQL's Swift extractor ships x86_64 only, so on Apple Silicon the
+      # tracer falls back to the x86_64 slices of the system binaries it
+      # injects into (/bin/bash, /usr/bin/xcrun), and everything they spawn
+      # inherits that. Resolve the toolchain here, before tracing, so the
+      # traced step runs nothing but the toolchain's own swift, launched
+      # natively with `arch -arm64`. A plain `swift build` would run SwiftPM
+      # under Rosetta and build for x86_64. See dfed/SafeDI#325.
+      - name: Locate the native toolchain
+        run: |
+          developer_dir=$(xcode-select -p)
+          toolchain="$developer_dir/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+          echo "$developer_dir/usr/bin" >> "$GITHUB_PATH"
+          echo "$toolchain" >> "$GITHUB_PATH"
+          {
+            echo "SWIFT=$toolchain/swift"
+            echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)"
+          } >> "$GITHUB_ENV"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: swift
+          build-mode: manual
+
+      - name: Build the SDK
+        run: arch -arm64 "$SWIFT" build --target TinfoilAI
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:swift
+
+  actions:
+    name: Analyze (actions)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: actions
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:actions

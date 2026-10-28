@@ -5,6 +5,5 @@ verifier-*.zip
 .build/
 .DS_Store
 .swiftpm
-Package.resolved
 tuf-repo-cdn.sigstore.dev.json
 .env
