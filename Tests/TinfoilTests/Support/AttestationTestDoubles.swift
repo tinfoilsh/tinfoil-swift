@@ -36,7 +36,7 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         return URL(string: url)!
     }
 
-    func verify(document: Data, nonce: Data, repo: String, enclaveHost: String) throws -> Verification {
+    func verify(document: Data, nonce: Data, repo: String) throws -> Verification {
         lock.lock()
         _repos.append(repo)
         lock.unlock()
@@ -46,9 +46,9 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         }
         switch parts[0] {
         case "ok":
-            return .stub(host: enclaveHost, repo: repo, expiresAt: now().addingTimeInterval(3600))
+            return .stub(repo: repo, expiresAt: now().addingTimeInterval(3600))
         case "tls-only":
-            return .stub(host: enclaveHost, repo: repo, expiresAt: now().addingTimeInterval(3600), hpkePublicKey: nil)
+            return .stub(repo: repo, expiresAt: now().addingTimeInterval(3600), hpkePublicKey: nil)
         case "config":
             throw TinfoilError.configuration("bad repo")
         default:
@@ -95,16 +95,14 @@ extension Verification {
     /// A 32-byte key, so a stub verification can configure EHBP.
     static let stubHPKEKey = String(repeating: "42", count: 32)
 
-    /// A verification of host against repo, which records the repository
-    /// without its tag or digest pins, as the verifier does.
+    /// A verification against repo, which records the repository without its
+    /// tag or digest pins, as the verifier does.
     static func stub(
-        host: String,
         repo: String = TinfoilConstants.defaultGithubRepo,
         expiresAt: Date = Date().addingTimeInterval(3600),
         hpkePublicKey: String? = stubHPKEKey
     ) -> Verification {
         Verification(
-            enclaveHost: host,
             configRepo: String(repo.prefix { $0 != "@" }),
             codeDigest: "abc123",
             codeTag: nil,

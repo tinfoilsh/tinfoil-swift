@@ -21,7 +21,6 @@ final class TinfoilIntegrationTests: XCTestCase {
         guard case .success(let verification) = captured.value else {
             return XCTFail("A successful verification should be reported, got \(String(describing: captured.value))")
         }
-        XCTAssertFalse(verification.enclaveHost.isEmpty)
     }
 
     func testTheVersionIsReachableThroughTheModule() {

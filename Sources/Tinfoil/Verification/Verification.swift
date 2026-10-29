@@ -34,8 +34,9 @@ public struct VerificationPolicy: Equatable, Sendable {
     }
 }
 
-/// What a verified attestation document proved about an enclave, together with
-/// the SDK's own record of where it asked and who verified.
+/// What a verified attestation document proved about an enclave, and who
+/// verified it. It holds no host: the document verifies the same whichever
+/// host serves it, so the client's `enclave` records where it was fetched.
 public struct Verification: Sendable, Equatable {
     /// A measurement: its predicate type and register values
     public struct Measurement: Sendable, Equatable, Decodable {
@@ -55,9 +56,6 @@ public struct Verification: Sendable, Equatable {
         public let data: String
     }
 
-    /// Host the document was fetched for. Nothing attests it; it records where
-    /// the SDK asked.
-    public let enclaveHost: String
     /// Repository the code provenance was authenticated against, without a tag
     /// or digest
     public let configRepo: String
@@ -87,9 +85,8 @@ extension Verification {
     /// The verifier payload schema this SDK decodes
     static let supportedSchemaVersion = 1
 
-    /// Decodes the TinfoilGo verifier's JSON for a document fetched from
-    /// enclaveHost.
-    init(payload: String, enclaveHost: String) throws {
+    /// Decodes the TinfoilGo verifier's JSON.
+    init(payload: String) throws {
         let data = Data(payload.utf8)
         let decoder = JSONDecoder()
         // Read the version alone first, so a payload in another schema is
@@ -113,7 +110,6 @@ extension Verification {
         }
 
         self.init(
-            enclaveHost: enclaveHost,
             configRepo: decoded.configRepo,
             codeDigest: decoded.codeDigest,
             codeTag: decoded.codeTag,

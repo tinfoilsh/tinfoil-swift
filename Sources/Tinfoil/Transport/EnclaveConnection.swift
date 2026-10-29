@@ -61,18 +61,18 @@ final class EnclaveConnection: Sendable {
         }
         let discovered = attestationRelay == nil ? try await attestor.discoverRouter() : nil
         if let discovered {
-            onVerificationResult?(.success(discovered))
+            onVerificationResult?(.success(discovered.verification))
         }
         return try EnclaveConnection(
             handle: EnclaveHandle(
-                enclave: discovered?.enclaveHost ?? TinfoilConstants.fallbackEnclave,
+                enclave: discovered?.host ?? TinfoilConstants.fallbackEnclave,
                 repo: TinfoilConstants.defaultGithubRepo,
                 attestationRelay: attestationRelay,
                 attestor: attestor,
-                initial: discovered,
+                initial: discovered?.verification,
                 onVerificationResult: onVerificationResult
             ),
-            initial: discovered,
+            initial: discovered?.verification,
             transportMode: transportMode,
             baseURL: baseURL,
             userCacheSecret: UserCacheSecret.resolve(
@@ -158,7 +158,7 @@ final class EnclaveConnection: Sendable {
     func ensureUsable() async throws {
         let verified = try await handle.ensureVerified()
         if ehbp != nil {
-            _ = try EHBPVerifiedEndpoint(verification: verified)
+            _ = try EHBPVerifiedEndpoint(enclaveURL: "https://\(enclave)", verification: verified)
         }
     }
 
@@ -259,7 +259,7 @@ struct EHBPChannel: Sendable {
     init(origin: String, enclaveURL: String, handle: EnclaveHandle, initial: Verification?, userCacheSecret: String) {
         // Without a verification yet, the state starts expired, so the first
         // request takes its key from the handle.
-        let endpoint = initial.flatMap { try? EHBPVerifiedEndpoint(verification: $0) }
+        let endpoint = initial.flatMap { try? EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: $0) }
             ?? EHBPVerifiedEndpoint(enclaveURL: enclaveURL, publicKey: Data(), expiresAt: .distantPast)
         state = EHBPVerifiedState(endpoint: endpoint, refresh: { stale in
             // A newer verification than the stale endpoint's, as one made by
@@ -269,9 +269,9 @@ struct EHBPChannel: Sendable {
             let verified = try await handle.ensureVerified()
             if verified.freshnessExpiresAt == stale.expiresAt {
                 let fresh = try await handle.reverify()
-                return try EHBPVerifiedEndpoint(verification: fresh)
+                return try EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: fresh)
             }
-            return try EHBPVerifiedEndpoint(verification: verified)
+            return try EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: verified)
         })
         session = EHBPURLSession(baseURL: origin, verifiedState: state, userCacheSecret: userCacheSecret)
         streamingFactory = EHBPURLSessionFactory(baseURL: origin, verifiedState: state, userCacheSecret: userCacheSecret)

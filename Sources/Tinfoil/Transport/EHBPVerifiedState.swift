@@ -20,11 +20,11 @@ internal struct EHBPVerifiedEndpoint: Sendable {
 }
 
 extension EHBPVerifiedEndpoint {
-    /// The endpoint a verification endorses: its enclave and HPKE key, until
-    /// its freshness deadline.
-    init(verification: Verification) throws {
+    /// The endpoint a verification of the enclave at enclaveURL endorses: its
+    /// HPKE key, until its freshness deadline.
+    init(enclaveURL: String, verification: Verification) throws {
         self.init(
-            enclaveURL: "https://\(verification.enclaveHost)",
+            enclaveURL: enclaveURL,
             publicKey: try Self.publicKey(hex: verification.hpkePublicKey),
             expiresAt: verification.freshnessExpiresAt
         )

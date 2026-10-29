@@ -258,7 +258,6 @@ final class ClientTests: XCTestCase {
         guard case .success(let verification) = captured.value else {
             return XCTFail("A successful verification should be reported, got \(String(describing: captured.value))")
         }
-        XCTAssertFalse(verification.enclaveHost.isEmpty)
         XCTAssertEqual(verification.hpkePublicKey?.count, 64, "EHBP needs the enclave's HPKE key")
         XCTAssertGreaterThan(verification.freshnessExpiresAt, Date())
 
@@ -300,7 +299,7 @@ final class ClientTests: XCTestCase {
 
         let verification = try await client.reverify()
 
-        XCTAssertFalse(verification.enclaveHost.isEmpty)
+        XCTAssertFalse(client.enclave.isEmpty)
         XCTAssertEqual(verification.configRepo, TinfoilConstants.defaultGithubRepo)
         XCTAssertFalse(verification.codeDigest.isEmpty)
         XCTAssertEqual(verification.tlsPublicKeyFingerprint.count, 64)
