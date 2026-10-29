@@ -31,8 +31,10 @@ private final class SendLog: @unchecked Sendable {
     }
 }
 
-/// Requests through an EnclaveHTTPClient in TLS mode, with pinned sends
-/// recorded in place of the network.
+/// Requests through an enclave connection in TLS mode, as EnclaveHTTPClient
+/// and RouterHTTPClient send them, with pinned sends recorded in place of the
+/// network. The connection verifies lazily, so these tests also see when it
+/// verifies.
 final class EnclaveHTTPClientRequestTests: XCTestCase {
     private let rejection = PinnedTLS.Rejection(host: "enclave.example", reason: "presented a certificate whose key does not match the attestation")
 
@@ -45,8 +47,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         evidenceClock: (@Sendable () -> Date)? = nil,
         baseURL: URL? = nil,
         userCacheSecret: String = ""
-    ) throws -> EnclaveHTTPClient {
-        try EnclaveHTTPClient(
+    ) throws -> EnclaveConnection {
+        try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: "enclave.example",
                 repo: "org/repo",
@@ -74,7 +76,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         let client = try client(network: approving(), log: log)
         XCTAssertEqual(client.baseURL.absoluteString, "https://enclave.example/")
         let before = await client.current
-        XCTAssertNil(before, "Creating the client does no network I/O.")
+        XCTAssertNil(before, "Creating a connection does no network I/O.")
 
         let (data, response) = try await client.data(from: URL(string: "/health?verbose=1")!)
 
@@ -345,7 +347,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
 
     func testLivePinnedRequest() async throws {
         try requireLiveIntegration()
-        let client = try EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, repo: TinfoilConstants.defaultGithubRepo)
+        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, repo: TinfoilConstants.defaultGithubRepo)
 
         let (data, response) = try await client.data(from: URL(string: "/health")!)
 

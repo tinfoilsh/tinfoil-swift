@@ -12,7 +12,7 @@ final class TinfoilIntegrationTests: XCTestCase {
 
         _ = try await TinfoilAI.create(
             apiKey: "test-key",
-            client: EnclaveHTTPClient.discoverRouter(
+            client: RouterHTTPClient(
                 userCacheSecret: "pinned so the test never touches the persisted secret",
                 onVerificationResult: { result in captured.value = result }
             )
@@ -44,7 +44,7 @@ final class TinfoilIntegrationTests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                client: EnclaveHTTPClient.discoverRouter(
+                client: RouterHTTPClient(
                     attestationRelay: "127.0.0.1:9",
                     userCacheSecret: "pinned so the test never touches the persisted secret"
                 )

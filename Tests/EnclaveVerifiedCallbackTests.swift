@@ -31,9 +31,9 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         onEnclaveVerified: @escaping EnclaveVerifiedCallback = { _ in },
         onVerificationResult: VerificationResultCallback? = nil,
         path: String = ""
-    ) throws -> EnclaveHTTPClient {
+    ) async throws -> EnclaveHTTPClient {
         let network = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
-        return try EnclaveHTTPClient(
+        return try await EnclaveHTTPClient(verifying: EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: "enclave.example",
                 repo: "org/repo",
@@ -50,7 +50,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
             baseURL: URL(string: server.baseURL + path)!,
             userCacheSecret: Self.cacheSecret,
             allowPlainHTTP: true
-        )
+        ))
     }
 
     private func chat(_ client: TinfoilAI) async throws {
