@@ -1167,8 +1167,8 @@ final class EHBPTests: XCTestCase {
     // MARK: - Client End-to-End Tests
 
     /// Verifies that Client.chats() uses EHBP encryption end-to-end
-    func testTinfoilAIChatsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientChatsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1181,7 +1181,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.chats(query: query)
+            _ = try await client.chats(query: query)
         } catch {
             // Expected to fail since our mock response is not properly encrypted
         }
@@ -1216,8 +1216,8 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that per-request headers reach the wire alongside the client's
     /// customHeaders, and override them on collision, through the EHBP transport.
-    func testTinfoilAIChatsForwardsPerRequestHeaders() async throws {
-        let tinfoilClient = try Client(
+    func testClientChatsForwardsPerRequestHeaders() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1231,7 +1231,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.chats(
+            _ = try await client.chats(
                 query: query,
                 headers: ["X-Tinfoil-Conversation-Id": "chat-123", "X-Both": "request"]
             )
@@ -1251,8 +1251,8 @@ final class EHBPTests: XCTestCase {
         XCTAssertNotNil(capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader])
     }
 
-    func testTinfoilAIChatsStreamForwardsPerRequestHeaders() async throws {
-        let tinfoilClient = try Client(
+    func testClientChatsStreamForwardsPerRequestHeaders() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1266,7 +1266,7 @@ final class EHBPTests: XCTestCase {
             stream: true
         )
 
-        let stream = tinfoilClient.chatsStream(
+        let stream = client.chatsStream(
             query: query,
             headers: ["X-Tinfoil-Conversation-Id": "chat-123", "X-Both": "request"]
         )
@@ -1291,8 +1291,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.chatsStream() uses EHBP encryption end-to-end
-    func testTinfoilAIChatsStreamUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientChatsStreamUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1305,7 +1305,7 @@ final class EHBPTests: XCTestCase {
             stream: true
         )
 
-        let stream = tinfoilClient.chatsStream(query: query)
+        let stream = client.chatsStream(query: query)
 
         do {
             for try await _ in stream {
@@ -1339,8 +1339,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.embeddings() uses EHBP encryption end-to-end
-    func testTinfoilAIEmbeddingsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientEmbeddingsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1353,7 +1353,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.embeddings(query: query)
+            _ = try await client.embeddings(query: query)
         } catch {
             // Expected to fail since our mock response is not properly encrypted
         }
@@ -1383,8 +1383,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.images() uses EHBP encryption end-to-end
-    func testTinfoilAIImagesUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientImagesUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1397,7 +1397,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.images(query: query)
+            _ = try await client.images(query: query)
         } catch {
             // Expected to fail since our mock response is not properly encrypted
         }
@@ -1427,8 +1427,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.createResponse() (Responses API) uses EHBP encryption end-to-end
-    func testTinfoilAICreateResponseUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientCreateResponseUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1441,7 +1441,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.createResponse(query: query)
+            _ = try await client.createResponse(query: query)
         } catch {
             // Expected to fail since our mock response is not properly encrypted
         }
@@ -1471,8 +1471,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.createResponseStream() (Responses API streaming) uses EHBP encryption end-to-end
-    func testTinfoilAICreateResponseStreamUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientCreateResponseStreamUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1485,7 +1485,7 @@ final class EHBPTests: XCTestCase {
             stream: true
         )
 
-        let stream = tinfoilClient.createResponseStream(query: query)
+        let stream = client.createResponseStream(query: query)
 
         do {
             for try await _ in stream {
@@ -1518,8 +1518,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.moderations() uses EHBP encryption end-to-end
-    func testTinfoilAIModerationsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientModerationsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1529,7 +1529,7 @@ final class EHBPTests: XCTestCase {
         let query = ModerationsQuery(input: "This is a test message for content moderation")
 
         do {
-            _ = try await tinfoilClient.moderations(query: query)
+            _ = try await client.moderations(query: query)
         } catch {
             // Expected to fail since our mock response is not properly encrypted
         }
@@ -1558,8 +1558,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.imageEdits() uses EHBP encryption end-to-end
-    func testTinfoilAIImageEditsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientImageEditsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1572,7 +1572,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.imageEdits(query: query)
+            _ = try await client.imageEdits(query: query)
         } catch {
             // Expected
         }
@@ -1589,8 +1589,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.imageVariations() uses EHBP encryption end-to-end
-    func testTinfoilAIImageVariationsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientImageVariationsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1600,7 +1600,7 @@ final class EHBPTests: XCTestCase {
         let query = ImageVariationsQuery(image: Data("fake-image-data".utf8))
 
         do {
-            _ = try await tinfoilClient.imageVariations(query: query)
+            _ = try await client.imageVariations(query: query)
         } catch {
             // Expected
         }
@@ -1617,8 +1617,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.audioCreateSpeech() uses EHBP encryption end-to-end
-    func testTinfoilAIAudioCreateSpeechUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientAudioCreateSpeechUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1632,7 +1632,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.audioCreateSpeech(query: query)
+            _ = try await client.audioCreateSpeech(query: query)
         } catch {
             // Expected
         }
@@ -1659,8 +1659,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.audioTranscriptions() uses EHBP encryption end-to-end
-    func testTinfoilAIAudioTranscriptionsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientAudioTranscriptionsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1674,7 +1674,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.audioTranscriptions(query: query)
+            _ = try await client.audioTranscriptions(query: query)
         } catch {
             // Expected
         }
@@ -1691,8 +1691,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.audioTranslations() uses EHBP encryption end-to-end
-    func testTinfoilAIAudioTranslationsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientAudioTranslationsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1706,7 +1706,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.audioTranslations(query: query)
+            _ = try await client.audioTranslations(query: query)
         } catch {
             // Expected
         }
@@ -1723,8 +1723,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.assistantCreate() uses EHBP encryption end-to-end
-    func testTinfoilAIAssistantCreateUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientAssistantCreateUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1740,7 +1740,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.assistantCreate(query: query)
+            _ = try await client.assistantCreate(query: query)
         } catch {
             // Expected
         }
@@ -1767,8 +1767,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.threads() uses EHBP encryption end-to-end
-    func testTinfoilAIThreadsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientThreadsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1781,7 +1781,7 @@ final class EHBPTests: XCTestCase {
         let query = ThreadsQuery(messages: [.user(userMessage)])
 
         do {
-            _ = try await tinfoilClient.threads(query: query)
+            _ = try await client.threads(query: query)
         } catch {
             // Expected
         }
@@ -1798,8 +1798,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.threadRun() uses EHBP encryption end-to-end
-    func testTinfoilAIThreadRunUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientThreadRunUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1815,7 +1815,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.threadRun(query: query)
+            _ = try await client.threadRun(query: query)
         } catch {
             // Expected
         }
@@ -1842,8 +1842,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.runs() uses EHBP encryption end-to-end
-    func testTinfoilAIRunsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientRunsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1853,7 +1853,7 @@ final class EHBPTests: XCTestCase {
         let query = RunsQuery(assistantId: "test-assistant-id")
 
         do {
-            _ = try await tinfoilClient.runs(threadId: "test-thread-id", query: query)
+            _ = try await client.runs(threadId: "test-thread-id", query: query)
         } catch {
             // Expected
         }
@@ -1870,8 +1870,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.threadsAddMessage() uses EHBP encryption end-to-end
-    func testTinfoilAIThreadsAddMessageUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientThreadsAddMessageUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1881,7 +1881,7 @@ final class EHBPTests: XCTestCase {
         let query = MessageQuery(role: .user, content: "Secret message for the thread")
 
         do {
-            _ = try await tinfoilClient.threadsAddMessage(threadId: "test-thread-id", query: query)
+            _ = try await client.threadsAddMessage(threadId: "test-thread-id", query: query)
         } catch {
             // Expected
         }
@@ -1908,8 +1908,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.files() uses EHBP encryption end-to-end
-    func testTinfoilAIFilesUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientFilesUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1924,7 +1924,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.files(query: query)
+            _ = try await client.files(query: query)
         } catch {
             // Expected
         }
@@ -1944,7 +1944,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client CANNOT be created without an HPKE public key
     /// This ensures EHBP is mandatory - there's no way to bypass it
-    func testTinfoilAIRequiresHPKEKey() {
+    func testClientRequiresHPKEKey() {
         XCTAssertThrowsError(
             try Client(
                 apiKey: "test-api-key",
@@ -1967,7 +1967,7 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client CANNOT be created with an empty HPKE public key
-    func testTinfoilAIRejectsEmptyHPKEKey() {
+    func testClientRejectsEmptyHPKEKey() {
         XCTAssertThrowsError(
             try Client(
                 apiKey: "test-api-key",
@@ -1994,7 +1994,7 @@ final class EHBPTests: XCTestCase {
     /// `if let body = body, !body.isEmpty { ... }`
     /// An empty body would bypass EHBP encryption entirely.
     func testAllPOSTRequestsHaveNonEmptyBodies() async throws {
-        let tinfoilClient = try Client(
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2040,62 +2040,62 @@ final class EHBPTests: XCTestCase {
 
         // Test all POST endpoints
         await testEndpoint("chats") {
-            _ = try await tinfoilClient.chats(query: ChatQuery(
+            _ = try await client.chats(query: ChatQuery(
                 messages: [.user(.init(content: .string("test")))],
                 model: "gpt-oss-120b"
             ))
         }
 
-        await testStreamingEndpoint("chatsStream", stream: tinfoilClient.chatsStream(query: ChatQuery(
+        await testStreamingEndpoint("chatsStream", stream: client.chatsStream(query: ChatQuery(
             messages: [.user(.init(content: .string("test")))],
             model: "gpt-oss-120b",
             stream: true
         )))
 
         await testEndpoint("embeddings") {
-            _ = try await tinfoilClient.embeddings(query: EmbeddingsQuery(
+            _ = try await client.embeddings(query: EmbeddingsQuery(
                 input: .string("test"),
                 model: "text-embedding-ada-002"
             ))
         }
 
         await testEndpoint("images") {
-            _ = try await tinfoilClient.images(query: ImagesQuery(prompt: "test"))
+            _ = try await client.images(query: ImagesQuery(prompt: "test"))
         }
 
         await testEndpoint("imageEdits") {
-            _ = try await tinfoilClient.imageEdits(query: ImageEditsQuery(
+            _ = try await client.imageEdits(query: ImageEditsQuery(
                 image: Data("fake".utf8),
                 prompt: "test"
             ))
         }
 
         await testEndpoint("imageVariations") {
-            _ = try await tinfoilClient.imageVariations(query: ImageVariationsQuery(
+            _ = try await client.imageVariations(query: ImageVariationsQuery(
                 image: Data("fake".utf8)
             ))
         }
 
         await testEndpoint("moderations") {
-            _ = try await tinfoilClient.moderations(query: ModerationsQuery(input: "test"))
+            _ = try await client.moderations(query: ModerationsQuery(input: "test"))
         }
 
         await testEndpoint("audioCreateSpeech") {
-            _ = try await tinfoilClient.audioCreateSpeech(query: AudioSpeechQuery(
+            _ = try await client.audioCreateSpeech(query: AudioSpeechQuery(
                 model: .tts_1,
                 input: "test",
                 voice: .alloy
             ))
         }
 
-        await testStreamingEndpoint("audioCreateSpeechStream", stream: tinfoilClient.audioCreateSpeechStream(query: AudioSpeechQuery(
+        await testStreamingEndpoint("audioCreateSpeechStream", stream: client.audioCreateSpeechStream(query: AudioSpeechQuery(
             model: .tts_1,
             input: "test",
             voice: .alloy
         )))
 
         await testEndpoint("audioTranscriptions") {
-            _ = try await tinfoilClient.audioTranscriptions(query: AudioTranscriptionQuery(
+            _ = try await client.audioTranscriptions(query: AudioTranscriptionQuery(
                 file: Data("fake".utf8),
                 fileType: .mp3,
                 model: .whisper_1
@@ -2103,7 +2103,7 @@ final class EHBPTests: XCTestCase {
         }
 
         await testEndpoint("audioTranslations") {
-            _ = try await tinfoilClient.audioTranslations(query: AudioTranslationQuery(
+            _ = try await client.audioTranslations(query: AudioTranslationQuery(
                 file: Data("fake".utf8),
                 fileType: .mp3,
                 model: .whisper_1
@@ -2111,7 +2111,7 @@ final class EHBPTests: XCTestCase {
         }
 
         await testEndpoint("assistantCreate") {
-            _ = try await tinfoilClient.assistantCreate(query: AssistantsQuery(
+            _ = try await client.assistantCreate(query: AssistantsQuery(
                 model: "gpt-oss-120b",
                 name: "test",
                 description: nil,
@@ -2121,7 +2121,7 @@ final class EHBPTests: XCTestCase {
         }
 
         await testEndpoint("assistantModify") {
-            _ = try await tinfoilClient.assistantModify(
+            _ = try await client.assistantModify(
                 query: AssistantsQuery(
                     model: "gpt-oss-120b",
                     name: "test",
@@ -2134,25 +2134,25 @@ final class EHBPTests: XCTestCase {
         }
 
         await testEndpoint("threads") {
-            _ = try await tinfoilClient.threads(query: ThreadsQuery(messages: []))
+            _ = try await client.threads(query: ThreadsQuery(messages: []))
         }
 
         await testEndpoint("threadRun") {
-            _ = try await tinfoilClient.threadRun(query: ThreadRunQuery(
+            _ = try await client.threadRun(query: ThreadRunQuery(
                 assistantId: "asst_123",
                 thread: ThreadsQuery(messages: [])
             ))
         }
 
         await testEndpoint("runs") {
-            _ = try await tinfoilClient.runs(
+            _ = try await client.runs(
                 threadId: "thread_123",
                 query: RunsQuery(assistantId: "asst_123")
             )
         }
 
         await testEndpoint("runSubmitToolOutputs") {
-            _ = try await tinfoilClient.runSubmitToolOutputs(
+            _ = try await client.runSubmitToolOutputs(
                 threadId: "thread_123",
                 runId: "run_456",
                 query: RunToolOutputsQuery(toolOutputs: [
@@ -2162,14 +2162,14 @@ final class EHBPTests: XCTestCase {
         }
 
         await testEndpoint("threadsAddMessage") {
-            _ = try await tinfoilClient.threadsAddMessage(
+            _ = try await client.threadsAddMessage(
                 threadId: "thread_123",
                 query: MessageQuery(role: .user, content: "test")
             )
         }
 
         await testEndpoint("files") {
-            _ = try await tinfoilClient.files(query: FilesQuery(
+            _ = try await client.files(query: FilesQuery(
                 purpose: "assistants",
                 file: Data("test".utf8),
                 fileName: "test.txt",
@@ -2178,13 +2178,13 @@ final class EHBPTests: XCTestCase {
         }
 
         await testEndpoint("createResponse") {
-            _ = try await tinfoilClient.createResponse(query: CreateModelResponseQuery(
+            _ = try await client.createResponse(query: CreateModelResponseQuery(
                 input: .textInput("test"),
                 model: "gpt-oss-120b"
             ))
         }
 
-        await testStreamingEndpoint("createResponseStream", stream: tinfoilClient.createResponseStream(query: CreateModelResponseQuery(
+        await testStreamingEndpoint("createResponseStream", stream: client.createResponseStream(query: CreateModelResponseQuery(
             input: .textInput("test"),
             model: "gpt-oss-120b",
             stream: true
@@ -2212,9 +2212,9 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.audioCreateSpeechStream() uses EHBP encryption end-to-end
-    func testTinfoilAIAudioCreateSpeechStreamUsesEHBPEncryption() async throws {
+    func testClientAudioCreateSpeechStreamUsesEHBPEncryption() async throws {
         server.responseContentType = "audio/mpeg"
-        let tinfoilClient = try Client(
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2227,7 +2227,7 @@ final class EHBPTests: XCTestCase {
             voice: .alloy
         )
 
-        let stream = tinfoilClient.audioCreateSpeechStream(query: query)
+        let stream = client.audioCreateSpeechStream(query: query)
         do {
             for try await _ in stream {
                 XCTFail("The empty fixture must not yield audio")
@@ -2258,8 +2258,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.audioTranscriptionsVerbose() uses EHBP encryption end-to-end
-    func testTinfoilAIAudioTranscriptionsVerboseUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientAudioTranscriptionsVerboseUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2274,7 +2274,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.audioTranscriptionsVerbose(query: query)
+            _ = try await client.audioTranscriptionsVerbose(query: query)
         } catch {
             // Expected - server returns invalid response
         }
@@ -2291,8 +2291,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.audioTranscriptionStream() uses EHBP encryption end-to-end
-    func testTinfoilAIAudioTranscriptionStreamUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientAudioTranscriptionStreamUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2305,7 +2305,7 @@ final class EHBPTests: XCTestCase {
             model: .whisper_1
         )
 
-        let stream = tinfoilClient.audioTranscriptionStream(query: query)
+        let stream = client.audioTranscriptionStream(query: query)
         for try await _ in stream {
             break
         }
@@ -2322,8 +2322,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.assistantModify() uses EHBP encryption end-to-end
-    func testTinfoilAIAssistantModifyUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientAssistantModifyUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2339,7 +2339,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.assistantModify(query: query, assistantId: "asst_123")
+            _ = try await client.assistantModify(query: query, assistantId: "asst_123")
         } catch {
             // Expected - server returns invalid response
         }
@@ -2366,8 +2366,8 @@ final class EHBPTests: XCTestCase {
     }
 
     /// Verifies that Client.runSubmitToolOutputs() uses EHBP encryption end-to-end
-    func testTinfoilAIRunSubmitToolOutputsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try Client(
+    func testClientRunSubmitToolOutputsUsesEHBPEncryption() async throws {
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2381,7 +2381,7 @@ final class EHBPTests: XCTestCase {
         )
 
         do {
-            _ = try await tinfoilClient.runSubmitToolOutputs(threadId: "thread_123", runId: "run_456", query: query)
+            _ = try await client.runSubmitToolOutputs(threadId: "thread_123", runId: "run_456", query: query)
         } catch {
             // Expected - server returns invalid response
         }
