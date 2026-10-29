@@ -56,6 +56,18 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertEqual(try URLHelpers.parseURL("wss://enclave.example.com/realtime").scheme, "wss")
     }
 
+    func testOriginCanonicalizesIPv6Literals() {
+        XCTAssertEqual(URLHelpers.origin(from: "https://[0:0:0:0:0:0:0:1]/"), URLHelpers.origin(from: "https://[::1]/"))
+        XCTAssertEqual(URLHelpers.origin(from: "https://[2001:DB8::0:1]:8443/"), URLHelpers.origin(from: "https://[2001:db8::1]:8443/"))
+        XCTAssertEqual(URLHelpers.origin(from: "https://[::1]/"), "https://[::1]:443")
+        XCTAssertEqual(URLHelpers.origin(from: "https://[fe80::1%25en0]/"), URLHelpers.origin(from: "https://[fe80:0::1%25en0]/"))
+        XCTAssertNotEqual(
+            URLHelpers.origin(from: "https://[fe80::1%25en0]/"),
+            URLHelpers.origin(from: "https://[fe80::1%25EN0]/"),
+            "Zone identifiers that differ in case are distinct zones."
+        )
+    }
+
     func testOriginCanonicalizesDefaultPortsCaseAndTrailingDot() {
         XCTAssertEqual(
             URLHelpers.origin(from: "https://ENCLAVE.example.com.:443/v1"),
