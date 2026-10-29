@@ -53,7 +53,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         ))
     }
 
-    private func chat(_ client: TinfoilAI) async throws {
+    private func chat(_ client: some OpenAICompatibleClient) async throws {
         _ = try await client.chats(query: ChatQuery(messages: [.user(.init(content: .string("Hi")))], model: "test-model"))
     }
 
@@ -70,9 +70,28 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         XCTAssertEqual(server.requestStore.lastRequest?.path, "/api/v1/models")
     }
 
+    func testTheBasePathComesFromTheNormalizedBaseURL() throws {
+        // A base URL without a scheme is read as HTTPS; its path must be read
+        // from that same URL, not the raw string.
+        for (baseURL, expected) in [("proxy.example/api/", "/api"), ("https://proxy.example/api/", "/api"), ("proxy.example", "/v1")] {
+            let openAI = try OpenAI.sealed(
+                apiKey: "test-key",
+                apiKeyProvider: nil,
+                baseURL: baseURL,
+                session: EHBPURLSession(baseURL: baseURL, verifiedState: EHBPVerifiedState(endpoint: EHBPVerifiedEndpoint(enclaveURL: "https://enclave.example", publicKey: Data(repeating: 1, count: 32))), userCacheSecret: ""),
+                streamingFactory: EHBPURLSessionFactory(baseURL: baseURL, verifiedState: EHBPVerifiedState(endpoint: EHBPVerifiedEndpoint(enclaveURL: "https://enclave.example", publicKey: Data(repeating: 1, count: 32))), userCacheSecret: ""),
+                parsingOptions: .relaxed,
+                customHeaders: [:],
+                tinfoilEvents: []
+            )
+            XCTAssertEqual(openAI.configuration.host, "proxy.example", baseURL)
+            XCTAssertEqual(openAI.configuration.basePath, expected, baseURL)
+        }
+    }
+
     func testOpenAIRequestsKeepTheBaseURLsPath() async throws {
         for (path, expected) in [("", "/v1/chat/completions"), ("/api/", "/api/chat/completions")] {
-            let client = try await TinfoilAI.create(apiKey: "test-key", client: client(path: path))
+            let client = try await EnclaveOpenAIClient(httpClient: client(path: path), apiKey: "test-key")
             // The stub server can't seal a response, so the request fails;
             // what matters is where it was sent.
             _ = try? await chat(client)
@@ -84,12 +103,12 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         let reported = Box<Result<Verification, TinfoilError>?>(value: nil)
 
         do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                client: try client(
+            _ = try await EnclaveOpenAIClient(
+                httpClient: try client(
                     onEnclaveVerified: { _ in throw Refusal() },
                     onVerificationResult: { reported.value = $0 }
-                )
+                ),
+                apiKey: "test-key"
             )
             XCTFail("a rejected enclave must not produce a client")
         } catch let error as TinfoilError where error.isRefusal {
@@ -106,12 +125,12 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
     func testOnEnclaveVerifiedRunsBeforeTheResultIsReported() async throws {
         let events = Recorder<String>()
 
-        _ = try await TinfoilAI.create(
-            apiKey: "test-key",
-            client: client(
+        _ = try await EnclaveOpenAIClient(
+            httpClient: client(
                 onEnclaveVerified: { _ in events.record("enclave verified") },
                 onVerificationResult: { _ in events.record("result") }
-            )
+            ),
+            apiKey: "test-key"
         )
 
         XCTAssertEqual(events.values, ["enclave verified", "result"])
@@ -119,13 +138,13 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
 
     func testARejectedRefreshFailsTheRequestWithoutReplaying() async throws {
         let verified = Recorder<String>()
-        let client = try await TinfoilAI.create(
-            apiKey: "test-key",
-            client: client(onEnclaveVerified: { verification in
+        let client = try await EnclaveOpenAIClient(
+            httpClient: client(onEnclaveVerified: { verification in
                 if verified.record(verification.enclaveHost) > 1 {
                     throw Refusal()
                 }
-            })
+            }),
+            apiKey: "test-key"
         )
         // The enclave rejects the key, so the client re-verifies before
         // replaying; the rejected re-verification must end the request.

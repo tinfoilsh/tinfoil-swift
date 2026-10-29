@@ -74,9 +74,9 @@ final class TinfoilAITests: XCTestCase {
     func testClientSucceedsWithCacheSecretWhenVerificationSucceeds() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await TinfoilAI.create(
-            apiKey: try getAPIKey(),
-            client: RouterHTTPClient(userCacheSecret: Self.testUserCacheSecret)
+        let client = try await RouterOpenAIClient(
+            httpClient: RouterHTTPClient(userCacheSecret: Self.testUserCacheSecret),
+            apiKey: try getAPIKey()
         )
 
         let chatQuery = ChatQuery(
@@ -113,9 +113,9 @@ final class TinfoilAITests: XCTestCase {
     // never leave the machine.
     func testCreateFailsForAnUnreachableEnclave() async throws {
         do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                client: EnclaveHTTPClient(enclave: "127.0.0.1:9", repo: TinfoilConstants.defaultGithubRepo, transportMode: .ehbp)
+            _ = try await EnclaveOpenAIClient(
+                httpClient: EnclaveHTTPClient(enclave: "127.0.0.1:9", repo: TinfoilConstants.defaultGithubRepo, transportMode: .ehbp),
+                apiKey: "test-key"
             )
             XCTFail("Should have failed to fetch attestation from an unreachable enclave")
         } catch TinfoilError.networkError {
@@ -235,12 +235,12 @@ final class TinfoilAITests: XCTestCase {
 
         let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
-        let client = try await TinfoilAI.create(
-            apiKey: try getAPIKey(),
-            client: RouterHTTPClient(
+        let client = try await RouterOpenAIClient(
+            httpClient: RouterHTTPClient(
                 userCacheSecret: Self.testUserCacheSecret,
                 onVerificationResult: { result in captured.value = result }
-            )
+            ),
+            apiKey: try getAPIKey()
         )
 
         guard case .success(let verification) = captured.value else {
@@ -265,14 +265,14 @@ final class TinfoilAITests: XCTestCase {
         let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
         do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                client: EnclaveHTTPClient(
+            _ = try await EnclaveOpenAIClient(
+                httpClient: EnclaveHTTPClient(
                     enclave: "127.0.0.1:9",
                     repo: TinfoilConstants.defaultGithubRepo,
                     transportMode: .ehbp,
                     onVerificationResult: { result in captured.value = result }
-                )
+                ),
+                apiKey: "test-key"
             )
             XCTFail("Should have failed to verify an unreachable enclave")
         } catch {

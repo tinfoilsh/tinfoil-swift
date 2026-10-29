@@ -4,14 +4,14 @@ import EHBP
 
 /// Main entry point for the Tinfoil client library.
 /// Provides the same API as OpenAI client with EHBP encryption for secure enclave communication.
-public class TinfoilAI {
+public class TinfoilAI: OpenAICompatibleClient {
     /// This SDK's version, as tinfoil-go's `Version()` reports its own
     public static let version = TinfoilConstants.sdkVersion
 
-    private let openAIClient: OpenAI
+    public let openAI: OpenAI
 
     private init(client: OpenAI) {
-        self.openAIClient = client
+        self.openAI = client
     }
 
     /// Creates a TinfoilAI client on Tinfoil's default route, a router picked
@@ -43,96 +43,16 @@ public class TinfoilAI {
         tinfoilEvents: Set<TinfoilEvent> = []
     ) async throws -> TinfoilAI {
         // Checked before discovery, so a missing key costs no network I/O.
-        let staticApiKey = try resolveAPIKey(apiKey, apiKeyProvider: apiKeyProvider)
+        let staticApiKey = try OpenAI.apiKey(apiKey, provider: apiKeyProvider)
         let router = try await RouterHTTPClient()
-        return try make(
+        return TinfoilAI(client: try OpenAI.sealed(
             apiKey: staticApiKey,
             apiKeyProvider: apiKeyProvider,
             connection: router.connection,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
             tinfoilEvents: tinfoilEvents
-        )
-    }
-
-    /// Creates a TinfoilAI client that sends OpenAI requests through
-    /// `client`, which must use `TransportMode.ehbp`, as tinfoil-go's
-    /// `NewEnclaveOpenAIClient` does. See `create(apiKey:…)` for the other
-    /// parameters.
-    public static func create(
-        apiKey: String? = nil,
-        apiKeyProvider: (@Sendable () -> String?)? = nil,
-        client: EnclaveHTTPClient,
-        parsingOptions: ParsingOptions = .relaxed,
-        customHeaders: [String: String] = [:],
-        tinfoilEvents: Set<TinfoilEvent> = []
-    ) async throws -> TinfoilAI {
-        try make(
-            apiKey: resolveAPIKey(apiKey, apiKeyProvider: apiKeyProvider),
-            apiKeyProvider: apiKeyProvider,
-            connection: client.connection,
-            parsingOptions: parsingOptions,
-            customHeaders: customHeaders,
-            tinfoilEvents: tinfoilEvents
-        )
-    }
-
-    /// Creates a TinfoilAI client that sends OpenAI requests through
-    /// `client`, which must use `TransportMode.ehbp`, as tinfoil-go's
-    /// `NewRouterOpenAIClient` does. See `create(apiKey:…)` for the other
-    /// parameters.
-    public static func create(
-        apiKey: String? = nil,
-        apiKeyProvider: (@Sendable () -> String?)? = nil,
-        client: RouterHTTPClient,
-        parsingOptions: ParsingOptions = .relaxed,
-        customHeaders: [String: String] = [:],
-        tinfoilEvents: Set<TinfoilEvent> = []
-    ) async throws -> TinfoilAI {
-        try make(
-            apiKey: resolveAPIKey(apiKey, apiKeyProvider: apiKeyProvider),
-            apiKeyProvider: apiKeyProvider,
-            connection: client.connection,
-            parsingOptions: parsingOptions,
-            customHeaders: customHeaders,
-            tinfoilEvents: tinfoilEvents
-        )
-    }
-
-    /// The static API key, required unless a provider can supply one.
-    /// Attestation itself does not use the key; it only authorizes inference
-    /// requests, so a caller using a rotating token (e.g. a short-lived JWT)
-    /// is not forced to pass a placeholder key.
-    private static func resolveAPIKey(_ apiKey: String?, apiKeyProvider: (@Sendable () -> String?)?) throws -> String? {
-        let staticApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
-        guard staticApiKey != nil || apiKeyProvider != nil else {
-            throw TinfoilError.configuration("no API key was given; pass apiKey or apiKeyProvider, or set TINFOIL_API_KEY")
-        }
-        return staticApiKey
-    }
-
-    /// The client over a verified connection's EHBP sessions
-    private static func make(
-        apiKey: String?,
-        apiKeyProvider: (@Sendable () -> String?)?,
-        connection: EnclaveConnection,
-        parsingOptions: ParsingOptions,
-        customHeaders: [String: String],
-        tinfoilEvents: Set<TinfoilEvent>
-    ) throws -> TinfoilAI {
-        guard let ehbp = connection.ehbp else {
-            throw TinfoilError.configuration("TinfoilAI seals requests with EHBP, so its client must use TransportMode.ehbp")
-        }
-        return try TinfoilAI(
-            apiKey: apiKey,
-            apiKeyProvider: apiKeyProvider,
-            baseURL: connection.baseURL.absoluteString,
-            session: ehbp.session,
-            streamingFactory: ehbp.streamingFactory,
-            parsingOptions: parsingOptions,
-            customHeaders: customHeaders,
-            tinfoilEvents: tinfoilEvents
-        )
+        ))
     }
 
     /// Internal initializer that seals to a fixed enclave key, for tests.
@@ -160,7 +80,7 @@ public class TinfoilAI {
             ),
             refresh: refreshEndpoint
         )
-        try self.init(
+        self.init(client: try OpenAI.sealed(
             apiKey: apiKey,
             apiKeyProvider: apiKeyProvider,
             baseURL: baseURL,
@@ -169,205 +89,7 @@ public class TinfoilAI {
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
             tinfoilEvents: tinfoilEvents
-        )
-    }
-
-    /// Sets up the OpenAI client over the given EHBP sessions. Requests go to
-    /// `baseURL`, under its path if it has one, as tinfoil-go's OpenAI clients
-    /// use a base URL as is, and under `/v1` for a bare origin.
-    private convenience init(
-        apiKey: String?,
-        apiKeyProvider: (@Sendable () -> String?)?,
-        baseURL: String,
-        session: EHBPURLSession,
-        streamingFactory: EHBPURLSessionFactory,
-        parsingOptions: ParsingOptions,
-        customHeaders: [String: String],
-        tinfoilEvents: Set<TinfoilEvent>
-    ) throws {
-        let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
-        let defaultPort = urlComponents.scheme == "https" ? 443 : 80
-        var basePath = URL(string: baseURL)?.path ?? ""
-        while basePath.hasSuffix("/") {
-            basePath.removeLast()
-        }
-
-        var mergedHeaders = customHeaders
-        if let eventsHeader = tinfoilEventsHeaderValue(tinfoilEvents),
-           !mergedHeaders.keys.contains(where: { $0.caseInsensitiveCompare(tinfoilEventsHeader) == .orderedSame }) {
-            mergedHeaders[tinfoilEventsHeader] = eventsHeader
-        }
-
-        let configuration = OpenAI.Configuration(
-            token: apiKey,
-            tokenProvider: apiKeyProvider,
-            host: urlComponents.host,
-            port: urlComponents.port ?? defaultPort,
-            scheme: urlComponents.scheme,
-            basePath: basePath.isEmpty ? "/v1" : basePath,
-            customHeaders: mergedHeaders,
-            parsingOptions: parsingOptions
-        )
-
-        let openAIClient = OpenAI(
-            configuration: configuration,
-            customSession: session,
-            streamingURLSessionFactory: streamingFactory
-        )
-
-        self.init(client: openAIClient)
-    }
-
-    // MARK: - OpenAI API Forwarding (Async)
-
-    public func chats(query: ChatQuery) async throws -> ChatResult {
-        try await openAIClient.chats(query: query)
-    }
-
-    /// Sends a chat completion with additional headers applied to this call
-    /// only, on top of the client's `customHeaders`. Use this for values that
-    /// change per request, such as a conversation id.
-    public func chats(query: ChatQuery, headers: [String: String]) async throws -> ChatResult {
-        try await openAIClient.chats(query: query, headers: headers)
-    }
-
-    public func chatsStream(query: ChatQuery) -> AsyncThrowingStream<ChatStreamResult, Error> {
-        openAIClient.chatsStream(query: query)
-    }
-
-    /// Streams a chat completion with additional headers applied to this call
-    /// only, on top of the client's `customHeaders`. Use this for values that
-    /// change per request, such as a conversation id.
-    public func chatsStream(query: ChatQuery, headers: [String: String]) -> AsyncThrowingStream<ChatStreamResult, Error> {
-        openAIClient.chatsStream(query: query, headers: headers)
-    }
-
-    public func images(query: ImagesQuery) async throws -> ImagesResult {
-        try await openAIClient.images(query: query)
-    }
-
-    public func imageEdits(query: ImageEditsQuery) async throws -> ImagesResult {
-        try await openAIClient.imageEdits(query: query)
-    }
-
-    public func imageVariations(query: ImageVariationsQuery) async throws -> ImagesResult {
-        try await openAIClient.imageVariations(query: query)
-    }
-
-    public func embeddings(query: EmbeddingsQuery) async throws -> EmbeddingsResult {
-        try await openAIClient.embeddings(query: query)
-    }
-
-    public func model(query: ModelQuery) async throws -> ModelResult {
-        try await openAIClient.model(query: query)
-    }
-
-    public func models() async throws -> ModelsResult {
-        try await openAIClient.models()
-    }
-
-    public func moderations(query: ModerationsQuery) async throws -> ModerationsResult {
-        try await openAIClient.moderations(query: query)
-    }
-
-    public func audioCreateSpeech(query: AudioSpeechQuery) async throws -> AudioSpeechResult {
-        try await openAIClient.audioCreateSpeech(query: query)
-    }
-
-    public func audioCreateSpeechStream(query: AudioSpeechQuery) -> AsyncThrowingStream<AudioSpeechResult, Error> {
-        openAIClient.audioCreateSpeechStream(query: query)
-    }
-
-    /// Streams EHBP-encrypted speech with response validation options, such as
-    /// requiring `audio/pcm` before delivering bytes to a PCM player.
-    public func audioCreateSpeechStream(query: AudioSpeechQuery, options: AudioSpeechStreamOptions) -> AsyncThrowingStream<AudioSpeechResult, Error> {
-        openAIClient.audioCreateSpeechStream(query: query, options: options)
-    }
-
-    public func audioTranscriptions(query: AudioTranscriptionQuery) async throws -> AudioTranscriptionResult {
-        try await openAIClient.audioTranscriptions(query: query)
-    }
-
-    public func audioTranscriptionsVerbose(query: AudioTranscriptionQuery) async throws -> AudioTranscriptionVerboseResult {
-        try await openAIClient.audioTranscriptionsVerbose(query: query)
-    }
-
-    public func audioTranscriptionStream(query: AudioTranscriptionQuery) -> AsyncThrowingStream<AudioTranscriptionStreamResult, Error> {
-        openAIClient.audioTranscriptionStream(query: query)
-    }
-
-    public func audioTranslations(query: AudioTranslationQuery) async throws -> AudioTranslationResult {
-        try await openAIClient.audioTranslations(query: query)
-    }
-
-    public func assistants() async throws -> AssistantsResult {
-        try await openAIClient.assistants()
-    }
-
-    public func assistants(after: String?) async throws -> AssistantsResult {
-        try await openAIClient.assistants(after: after)
-    }
-
-    public func assistantCreate(query: AssistantsQuery) async throws -> AssistantResult {
-        try await openAIClient.assistantCreate(query: query)
-    }
-
-    public func assistantModify(query: AssistantsQuery, assistantId: String) async throws -> AssistantResult {
-        try await openAIClient.assistantModify(query: query, assistantId: assistantId)
-    }
-
-    public func threads(query: ThreadsQuery) async throws -> ThreadsResult {
-        try await openAIClient.threads(query: query)
-    }
-
-    public func threadRun(query: ThreadRunQuery) async throws -> RunResult {
-        try await openAIClient.threadRun(query: query)
-    }
-
-    public func runs(threadId: String, query: RunsQuery) async throws -> RunResult {
-        try await openAIClient.runs(threadId: threadId, query: query)
-    }
-
-    public func runRetrieve(threadId: String, runId: String) async throws -> RunResult {
-        try await openAIClient.runRetrieve(threadId: threadId, runId: runId)
-    }
-
-    public func runRetrieveSteps(threadId: String, runId: String) async throws -> RunRetrieveStepsResult {
-        try await openAIClient.runRetrieveSteps(threadId: threadId, runId: runId)
-    }
-
-    public func runRetrieveSteps(threadId: String, runId: String, before: String?) async throws -> RunRetrieveStepsResult {
-        try await openAIClient.runRetrieveSteps(threadId: threadId, runId: runId, before: before)
-    }
-
-    public func runSubmitToolOutputs(threadId: String, runId: String, query: RunToolOutputsQuery) async throws -> RunResult {
-        try await openAIClient.runSubmitToolOutputs(threadId: threadId, runId: runId, query: query)
-    }
-
-    public func threadsMessages(threadId: String) async throws -> ThreadsMessagesResult {
-        try await openAIClient.threadsMessages(threadId: threadId)
-    }
-
-    public func threadsMessages(threadId: String, before: String?) async throws -> ThreadsMessagesResult {
-        try await openAIClient.threadsMessages(threadId: threadId, before: before)
-    }
-
-    public func threadsAddMessage(threadId: String, query: MessageQuery) async throws -> ThreadAddMessageResult {
-        try await openAIClient.threadsAddMessage(threadId: threadId, query: query)
-    }
-
-    public func files(query: FilesQuery) async throws -> FilesResult {
-        try await openAIClient.files(query: query)
-    }
-
-    // MARK: - Responses API
-
-    public func createResponse(query: CreateModelResponseQuery) async throws -> ResponseObject {
-        try await openAIClient.responses.createResponse(query: query)
-    }
-
-    public func createResponseStream(query: CreateModelResponseQuery) -> AsyncThrowingStream<ResponseStreamEvent, Error> {
-        openAIClient.responses.createResponseStreaming(query: query)
+        ))
     }
 }
 

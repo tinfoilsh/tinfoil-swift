@@ -178,6 +178,31 @@ final class EnclaveHTTPClientTests: XCTestCase {
         XCTAssertTrue(network.urls.isEmpty)
     }
 
+    func testOpenAIClientsRequireEHBP() async throws {
+        let tls = try await EnclaveHTTPClient(verifying: connection(approving()))
+        XCTAssertThrowsError(try EnclaveOpenAIClient(httpClient: tls, apiKey: "test-key")) { error in
+            guard case TinfoilError.configurationError = error else {
+                return XCTFail("expected a configuration error, got \(error)")
+            }
+        }
+        let ehbp = try await EnclaveHTTPClient(verifying: connection(approving(), transportMode: .ehbp))
+        let client = try EnclaveOpenAIClient(httpClient: ehbp, apiKey: "test-key")
+        XCTAssertTrue(client.httpClient === ehbp)
+    }
+
+    func testAMissingAPIKeyFailsBeforeAnyNetworkIO() async throws {
+        guard ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] == nil else {
+            throw XCTSkip("TINFOIL_API_KEY is set in the environment")
+        }
+        do {
+            // An unreachable enclave would fail with a network error.
+            _ = try await EnclaveOpenAIClient(enclave: "127.0.0.1:9", repo: "org/repo")
+            XCTFail("a client without an API key must not be created")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertTrue(failure.message.contains("TINFOIL_API_KEY"), failure.message)
+        }
+    }
+
     func testEHBPRequestsGoOnlyToTheBaseURLsOrigin() async throws {
         let network = approving()
         let client = try connection(network, transportMode: .ehbp, baseURL: URL(string: "https://proxy.example/")!)
