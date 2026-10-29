@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// Fingerprints of certificates generated with OpenSSL, against the SHA-256
 /// of the SubjectPublicKeyInfo OpenSSL itself extracts.

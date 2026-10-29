@@ -1,7 +1,7 @@
 import XCTest
 import Foundation
 import Security
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// The pinning delegate's decision on real trust objects, built from the
 /// certificate fixtures and anchored to themselves so they evaluate as trusted.

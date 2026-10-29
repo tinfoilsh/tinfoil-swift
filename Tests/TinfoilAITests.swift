@@ -1,6 +1,6 @@
 import XCTest
 import OpenAI
-@testable import TinfoilAI
+@testable import Tinfoil
 
 final class Box<T>: @unchecked Sendable {
     var value: T

@@ -1,7 +1,7 @@
 import XCTest
 import CryptoKit
 import EHBP
-@testable import TinfoilAI
+@testable import Tinfoil
 
 final class SpeechTests: XCTestCase {
     private static let pcmContentType = "audio/pcm"

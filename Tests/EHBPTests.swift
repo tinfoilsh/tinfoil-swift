@@ -2,7 +2,7 @@ import XCTest
 import Foundation
 import OpenAI
 import EHBP
-@testable import TinfoilAI
+@testable import Tinfoil
 
 #if canImport(FoundationNetworking)
 import FoundationNetworking
