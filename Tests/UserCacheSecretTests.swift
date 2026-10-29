@@ -667,7 +667,7 @@ final class UserCacheSecretTests: XCTestCase {
 
     // MARK: - End to end through the real client machinery
 
-    /// Drives the real TinfoilAI client (OpenAI SDK -> EHBP session) against
+    /// Drives the real Client client (OpenAI SDK -> EHBP session) against
     /// a local server holding the matching HPKE private key, pinning that the
     /// client-level secret rides inside the sealed body exactly as the SDK
     /// builds it — and that a per-request field set via `ChatQuery.extraBody`
@@ -686,7 +686,7 @@ final class UserCacheSecretTests: XCTestCase {
         try server.start()
         defer { server.stop() }
 
-        let client = try TinfoilAI(
+        let client = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,

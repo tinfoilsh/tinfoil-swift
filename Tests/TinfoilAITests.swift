@@ -96,7 +96,7 @@ final class TinfoilAITests: XCTestCase {
     func testEHBPEncryptionSuccess() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
+        let client = try await Client(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -129,7 +129,7 @@ final class TinfoilAITests: XCTestCase {
     func testStreamingChatCompletion() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
+        let client = try await Client(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -165,7 +165,7 @@ final class TinfoilAITests: XCTestCase {
     func testStreamingWithEHBP() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
+        let client = try await Client(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -187,7 +187,7 @@ final class TinfoilAITests: XCTestCase {
     func testStreamingResponseStructure() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await TinfoilAI.create(apiKey: try getAPIKey())
+        let client = try await Client(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [

@@ -26,7 +26,7 @@ import Tinfoil
 
 // Reads TINFOIL_API_KEY from the environment when apiKey is omitted.
 // Enclave verification and encryption happen automatically.
-let client = try await TinfoilAI.create(apiKey: "YOUR_API_KEY")
+let client = try await Client(apiKey: "YOUR_API_KEY")
 
 let query = ChatQuery(
     messages: [.user(.init(content: .string("Hello, world!")))],
@@ -43,7 +43,7 @@ To choose the enclave, pin the repo to a tag or digest, send through a proxy, re
 let client = try await EnclaveOpenAIClient(enclave: "enclave.example.com", repo: "org/repo@v1.2.3", apiKey: "YOUR_API_KEY")
 ```
 
-`RouterOpenAIClient` does the same for one of Tinfoil's routers, as `TinfoilAI.create` does by default. Each sends through an `EnclaveHTTPClient` or `RouterHTTPClient`, which you can also create directly. Both are verified before they're returned, and send requests of their own with `data(from:)` and `data(for:)`, over TLS pinned to the attested key (the default for an enclave you name) or sealed with EHBP. Their doc comments describe the callbacks, refresh, and request rules.
+`RouterOpenAIClient` does the same for one of Tinfoil's routers, which `Client` uses today. Each sends through an `EnclaveHTTPClient` or `RouterHTTPClient`, which you can also create directly. Both are verified before they're returned, and send requests of their own with `data(from:)` and `data(for:)`, over TLS pinned to the attested key (the default for an enclave you name) or sealed with EHBP. Their doc comments describe the callbacks, refresh, and request rules.
 
 ## Documentation
 

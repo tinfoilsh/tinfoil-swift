@@ -220,8 +220,8 @@ private final class EncryptedSpeechFixture {
         try server.start()
     }
 
-    func makeClient() throws -> TinfoilAI {
-        try TinfoilAI(
+    func makeClient() throws -> Client {
+        try Client(
             apiKey: "test-speech-key", baseURL: server.baseURL, enclaveURL: Self.enclaveURL,
             hpkePublicKeyHex: privateKey.publicKey.rawRepresentation.hexString,
             userCacheSecret: "test-speech-cache-secret"

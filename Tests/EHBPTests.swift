@@ -716,7 +716,7 @@ final class EHBPTests: XCTestCase {
     }
 
     func testSessionsKeepTheSecretTheyAreGiven() {
-        // TinfoilAI resolves the secret once, and leaves it empty for an
+        // Client resolves the secret once, and leaves it empty for an
         // enclave the handle names; the sessions must not resolve it again.
         let state = EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey, expiresAt: .distantFuture),
@@ -1164,11 +1164,11 @@ final class EHBPTests: XCTestCase {
         )
     }
 
-    // MARK: - TinfoilAI End-to-End Tests
+    // MARK: - Client End-to-End Tests
 
-    /// Verifies that TinfoilAI.chats() uses EHBP encryption end-to-end
+    /// Verifies that Client.chats() uses EHBP encryption end-to-end
     func testTinfoilAIChatsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1176,7 +1176,7 @@ final class EHBPTests: XCTestCase {
         )
 
         let query = ChatQuery(
-            messages: [.user(.init(content: .string("Hello from TinfoilAI test!")))],
+            messages: [.user(.init(content: .string("Hello from Client test!")))],
             model: "gpt-oss-120b"
         )
 
@@ -1189,35 +1189,35 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.chats()")
+            XCTFail("No request was captured from Client.chats()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "TinfoilAI.chats() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "Client.chats() should use POST")
 
         // Most important assertion: EHBP header MUST be present
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.chats() request MUST have EHBP encapsulated key header - this proves EHBP is being used")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.chats() request MUST have EHBP encapsulated key header - this proves EHBP is being used")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from TinfoilAI.chats()")
+            XCTFail("No request body was captured from Client.chats()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Hello from TinfoilAI"), "TinfoilAI.chats() body MUST be encrypted - found plaintext message")
-            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "TinfoilAI.chats() body MUST be encrypted - found plaintext model")
-            XCTAssertFalse(bodyString.contains("messages"), "TinfoilAI.chats() body MUST be encrypted - found plaintext 'messages'")
+            XCTAssertFalse(bodyString.contains("Hello from Client"), "Client.chats() body MUST be encrypted - found plaintext message")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "Client.chats() body MUST be encrypted - found plaintext model")
+            XCTAssertFalse(bodyString.contains("messages"), "Client.chats() body MUST be encrypted - found plaintext 'messages'")
         }
 
-        XCTAssertNotNil(capturedRequest.headers["Authorization"], "TinfoilAI.chats() should include Authorization header")
+        XCTAssertNotNil(capturedRequest.headers["Authorization"], "Client.chats() should include Authorization header")
     }
 
     /// Verifies that per-request headers reach the wire alongside the client's
     /// customHeaders, and override them on collision, through the EHBP transport.
     func testTinfoilAIChatsForwardsPerRequestHeaders() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1242,7 +1242,7 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.chats(query:headers:)")
+            XCTFail("No request was captured from Client.chats(query:headers:)")
             return
         }
         XCTAssertEqual(capturedRequest.headers["X-Configured"], "config")
@@ -1252,7 +1252,7 @@ final class EHBPTests: XCTestCase {
     }
 
     func testTinfoilAIChatsStreamForwardsPerRequestHeaders() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1281,7 +1281,7 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.chatsStream(query:headers:)")
+            XCTFail("No request was captured from Client.chatsStream(query:headers:)")
             return
         }
         XCTAssertEqual(capturedRequest.headers["X-Configured"], "config")
@@ -1290,9 +1290,9 @@ final class EHBPTests: XCTestCase {
         XCTAssertNotNil(capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader])
     }
 
-    /// Verifies that TinfoilAI.chatsStream() uses EHBP encryption end-to-end
+    /// Verifies that Client.chatsStream() uses EHBP encryption end-to-end
     func testTinfoilAIChatsStreamUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1300,7 +1300,7 @@ final class EHBPTests: XCTestCase {
         )
 
         let query = ChatQuery(
-            messages: [.user(.init(content: .string("Hello streaming from TinfoilAI!")))],
+            messages: [.user(.init(content: .string("Hello streaming from Client!")))],
             model: "gpt-oss-120b",
             stream: true
         )
@@ -1318,29 +1318,29 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.chatsStream()")
+            XCTFail("No request was captured from Client.chatsStream()")
             return
         }
 
         // Most important assertion: EHBP header MUST be present
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.chatsStream() request MUST have EHBP encapsulated key header - this proves EHBP is being used")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.chatsStream() request MUST have EHBP encapsulated key header - this proves EHBP is being used")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from TinfoilAI.chatsStream()")
+            XCTFail("No request body was captured from Client.chatsStream()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Hello streaming from TinfoilAI"), "TinfoilAI.chatsStream() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "TinfoilAI.chatsStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Hello streaming from Client"), "Client.chatsStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "Client.chatsStream() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.embeddings() uses EHBP encryption end-to-end
+    /// Verifies that Client.embeddings() uses EHBP encryption end-to-end
     func testTinfoilAIEmbeddingsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1361,30 +1361,30 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.embeddings()")
+            XCTFail("No request was captured from Client.embeddings()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "TinfoilAI.embeddings() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "Client.embeddings() should use POST")
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.embeddings() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.embeddings() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from TinfoilAI.embeddings()")
+            XCTFail("No request body was captured from Client.embeddings()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("quick brown fox"), "TinfoilAI.embeddings() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("text-embedding"), "TinfoilAI.embeddings() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("quick brown fox"), "Client.embeddings() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("text-embedding"), "Client.embeddings() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.images() uses EHBP encryption end-to-end
+    /// Verifies that Client.images() uses EHBP encryption end-to-end
     func testTinfoilAIImagesUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1405,30 +1405,30 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.images()")
+            XCTFail("No request was captured from Client.images()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "TinfoilAI.images() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "Client.images() should use POST")
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.images() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.images() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from TinfoilAI.images()")
+            XCTFail("No request body was captured from Client.images()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("beautiful sunset"), "TinfoilAI.images() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("dall-e"), "TinfoilAI.images() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("beautiful sunset"), "Client.images() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("dall-e"), "Client.images() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.createResponse() (Responses API) uses EHBP encryption end-to-end
+    /// Verifies that Client.createResponse() (Responses API) uses EHBP encryption end-to-end
     func testTinfoilAICreateResponseUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1449,30 +1449,30 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.createResponse()")
+            XCTFail("No request was captured from Client.createResponse()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "TinfoilAI.createResponse() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "Client.createResponse() should use POST")
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.createResponse() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.createResponse() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from TinfoilAI.createResponse()")
+            XCTFail("No request body was captured from Client.createResponse()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Responses API test"), "TinfoilAI.createResponse() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "TinfoilAI.createResponse() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Responses API test"), "Client.createResponse() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "Client.createResponse() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.createResponseStream() (Responses API streaming) uses EHBP encryption end-to-end
+    /// Verifies that Client.createResponseStream() (Responses API streaming) uses EHBP encryption end-to-end
     func testTinfoilAICreateResponseStreamUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1498,28 +1498,28 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.createResponseStream()")
+            XCTFail("No request was captured from Client.createResponseStream()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.createResponseStream() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.createResponseStream() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from TinfoilAI.createResponseStream()")
+            XCTFail("No request body was captured from Client.createResponseStream()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("streaming from Responses API"), "TinfoilAI.createResponseStream() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "TinfoilAI.createResponseStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("streaming from Responses API"), "Client.createResponseStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "Client.createResponseStream() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.moderations() uses EHBP encryption end-to-end
+    /// Verifies that Client.moderations() uses EHBP encryption end-to-end
     func testTinfoilAIModerationsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1537,29 +1537,29 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.moderations()")
+            XCTFail("No request was captured from Client.moderations()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "TinfoilAI.moderations() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "Client.moderations() should use POST")
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.moderations() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.moderations() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from TinfoilAI.moderations()")
+            XCTFail("No request body was captured from Client.moderations()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("content moderation"), "TinfoilAI.moderations() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("content moderation"), "Client.moderations() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.imageEdits() uses EHBP encryption end-to-end
+    /// Verifies that Client.imageEdits() uses EHBP encryption end-to-end
     func testTinfoilAIImageEditsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1580,17 +1580,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.imageEdits()")
+            XCTFail("No request was captured from Client.imageEdits()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.imageEdits() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.imageEdits() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that TinfoilAI.imageVariations() uses EHBP encryption end-to-end
+    /// Verifies that Client.imageVariations() uses EHBP encryption end-to-end
     func testTinfoilAIImageVariationsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1608,17 +1608,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.imageVariations()")
+            XCTFail("No request was captured from Client.imageVariations()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.imageVariations() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.imageVariations() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that TinfoilAI.audioCreateSpeech() uses EHBP encryption end-to-end
+    /// Verifies that Client.audioCreateSpeech() uses EHBP encryption end-to-end
     func testTinfoilAIAudioCreateSpeechUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1640,12 +1640,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.audioCreateSpeech()")
+            XCTFail("No request was captured from Client.audioCreateSpeech()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.audioCreateSpeech() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioCreateSpeech() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -1654,13 +1654,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("text to speech"), "TinfoilAI.audioCreateSpeech() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("text to speech"), "Client.audioCreateSpeech() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.audioTranscriptions() uses EHBP encryption end-to-end
+    /// Verifies that Client.audioTranscriptions() uses EHBP encryption end-to-end
     func testTinfoilAIAudioTranscriptionsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1682,17 +1682,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.audioTranscriptions()")
+            XCTFail("No request was captured from Client.audioTranscriptions()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.audioTranscriptions() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioTranscriptions() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that TinfoilAI.audioTranslations() uses EHBP encryption end-to-end
+    /// Verifies that Client.audioTranslations() uses EHBP encryption end-to-end
     func testTinfoilAIAudioTranslationsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1714,17 +1714,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.audioTranslations()")
+            XCTFail("No request was captured from Client.audioTranslations()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.audioTranslations() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioTranslations() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that TinfoilAI.assistantCreate() uses EHBP encryption end-to-end
+    /// Verifies that Client.assistantCreate() uses EHBP encryption end-to-end
     func testTinfoilAIAssistantCreateUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1748,12 +1748,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.assistantCreate()")
+            XCTFail("No request was captured from Client.assistantCreate()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.assistantCreate() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.assistantCreate() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -1762,13 +1762,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("helpful test assistant"), "TinfoilAI.assistantCreate() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("helpful test assistant"), "Client.assistantCreate() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.threads() uses EHBP encryption end-to-end
+    /// Verifies that Client.threads() uses EHBP encryption end-to-end
     func testTinfoilAIThreadsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1789,17 +1789,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.threads()")
+            XCTFail("No request was captured from Client.threads()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.threads() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.threads() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that TinfoilAI.threadRun() uses EHBP encryption end-to-end
+    /// Verifies that Client.threadRun() uses EHBP encryption end-to-end
     func testTinfoilAIThreadRunUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1823,12 +1823,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.threadRun()")
+            XCTFail("No request was captured from Client.threadRun()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.threadRun() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.threadRun() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -1837,13 +1837,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("thread run test"), "TinfoilAI.threadRun() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("thread run test"), "Client.threadRun() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.runs() uses EHBP encryption end-to-end
+    /// Verifies that Client.runs() uses EHBP encryption end-to-end
     func testTinfoilAIRunsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1861,17 +1861,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.runs()")
+            XCTFail("No request was captured from Client.runs()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.runs() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.runs() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that TinfoilAI.threadsAddMessage() uses EHBP encryption end-to-end
+    /// Verifies that Client.threadsAddMessage() uses EHBP encryption end-to-end
     func testTinfoilAIThreadsAddMessageUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1889,12 +1889,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.threadsAddMessage()")
+            XCTFail("No request was captured from Client.threadsAddMessage()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.threadsAddMessage() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.threadsAddMessage() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -1903,13 +1903,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Secret message"), "TinfoilAI.threadsAddMessage() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Secret message"), "Client.threadsAddMessage() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.files() uses EHBP encryption end-to-end
+    /// Verifies that Client.files() uses EHBP encryption end-to-end
     func testTinfoilAIFilesUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1932,27 +1932,27 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.files()")
+            XCTFail("No request was captured from Client.files()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.files() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.files() request MUST have EHBP encapsulated key header")
     }
 
     // MARK: - Architectural Guarantee Tests
 
-    /// Verifies that TinfoilAI CANNOT be created without an HPKE public key
+    /// Verifies that Client CANNOT be created without an HPKE public key
     /// This ensures EHBP is mandatory - there's no way to bypass it
     func testTinfoilAIRequiresHPKEKey() {
         XCTAssertThrowsError(
-            try TinfoilAI(
+            try Client(
                 apiKey: "test-api-key",
                 baseURL: "https://example.com",
                 enclaveURL: "https://example.com",
                 hpkePublicKeyHex: nil
             ),
-            "TinfoilAI should throw when HPKE key is nil"
+            "Client should throw when HPKE key is nil"
         ) { error in
             guard let tinfoilError = error as? TinfoilError else {
                 XCTFail("Expected TinfoilError, got \(error)")
@@ -1966,16 +1966,16 @@ final class EHBPTests: XCTestCase {
         }
     }
 
-    /// Verifies that TinfoilAI CANNOT be created with an empty HPKE public key
+    /// Verifies that Client CANNOT be created with an empty HPKE public key
     func testTinfoilAIRejectsEmptyHPKEKey() {
         XCTAssertThrowsError(
-            try TinfoilAI(
+            try Client(
                 apiKey: "test-api-key",
                 baseURL: "https://example.com",
                 enclaveURL: "https://example.com",
                 hpkePublicKeyHex: ""
             ),
-            "TinfoilAI should throw when HPKE key is empty"
+            "Client should throw when HPKE key is empty"
         ) { error in
             guard let tinfoilError = error as? TinfoilError else {
                 XCTFail("Expected TinfoilError, got \(error)")
@@ -1989,12 +1989,12 @@ final class EHBPTests: XCTestCase {
         }
     }
 
-    /// Verifies that ALL TinfoilAI POST requests have non-empty bodies.
+    /// Verifies that ALL Client POST requests have non-empty bodies.
     /// This is critical because EHBPClient skips encryption when body is empty:
     /// `if let body = body, !body.isEmpty { ... }`
     /// An empty body would bypass EHBP encryption entirely.
     func testAllPOSTRequestsHaveNonEmptyBodies() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2211,10 +2211,10 @@ final class EHBPTests: XCTestCase {
         )
     }
 
-    /// Verifies that TinfoilAI.audioCreateSpeechStream() uses EHBP encryption end-to-end
+    /// Verifies that Client.audioCreateSpeechStream() uses EHBP encryption end-to-end
     func testTinfoilAIAudioCreateSpeechStreamUsesEHBPEncryption() async throws {
         server.responseContentType = "audio/mpeg"
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2239,12 +2239,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.audioCreateSpeechStream()")
+            XCTFail("No request was captured from Client.audioCreateSpeechStream()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.audioCreateSpeechStream() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioCreateSpeechStream() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2253,13 +2253,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Secret streaming speech input"), "TinfoilAI.audioCreateSpeechStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Secret streaming speech input"), "Client.audioCreateSpeechStream() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.audioTranscriptionsVerbose() uses EHBP encryption end-to-end
+    /// Verifies that Client.audioTranscriptionsVerbose() uses EHBP encryption end-to-end
     func testTinfoilAIAudioTranscriptionsVerboseUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2282,17 +2282,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.audioTranscriptionsVerbose()")
+            XCTFail("No request was captured from Client.audioTranscriptionsVerbose()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.audioTranscriptionsVerbose() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioTranscriptionsVerbose() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that TinfoilAI.audioTranscriptionStream() uses EHBP encryption end-to-end
+    /// Verifies that Client.audioTranscriptionStream() uses EHBP encryption end-to-end
     func testTinfoilAIAudioTranscriptionStreamUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2313,17 +2313,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.audioTranscriptionStream()")
+            XCTFail("No request was captured from Client.audioTranscriptionStream()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.audioTranscriptionStream() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioTranscriptionStream() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that TinfoilAI.assistantModify() uses EHBP encryption end-to-end
+    /// Verifies that Client.assistantModify() uses EHBP encryption end-to-end
     func testTinfoilAIAssistantModifyUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2347,12 +2347,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.assistantModify()")
+            XCTFail("No request was captured from Client.assistantModify()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.assistantModify() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.assistantModify() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2361,13 +2361,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Updated secret instructions"), "TinfoilAI.assistantModify() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Updated secret instructions"), "Client.assistantModify() body MUST be encrypted")
         }
     }
 
-    /// Verifies that TinfoilAI.runSubmitToolOutputs() uses EHBP encryption end-to-end
+    /// Verifies that Client.runSubmitToolOutputs() uses EHBP encryption end-to-end
     func testTinfoilAIRunSubmitToolOutputsUsesEHBPEncryption() async throws {
-        let tinfoilClient = try TinfoilAI(
+        let tinfoilClient = try Client(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2389,12 +2389,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from TinfoilAI.runSubmitToolOutputs()")
+            XCTFail("No request was captured from Client.runSubmitToolOutputs()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "TinfoilAI.runSubmitToolOutputs() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "Client.runSubmitToolOutputs() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2403,7 +2403,7 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Secret tool output result"), "TinfoilAI.runSubmitToolOutputs() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Secret tool output result"), "Client.runSubmitToolOutputs() body MUST be encrypted")
         }
     }
 
