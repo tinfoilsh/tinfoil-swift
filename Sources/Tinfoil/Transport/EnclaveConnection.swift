@@ -6,9 +6,8 @@ import FoundationNetworking
 
 /// One enclave's connection, shared by `EnclaveHTTPClient` and
 /// `RouterHTTPClient`: its verification handle and the transport that ties
-/// requests to the verified keys. Creating one does no network I/O, as
-/// tinfoil-go's `unverifiedEnclaveHTTPClient`; the public clients verify it
-/// with `ensureUsable()` before they return.
+/// requests to the verified keys. Creating one does no network I/O; the
+/// public clients verify it with `ensureUsable()` before they return.
 final class EnclaveConnection: Sendable {
     /// How the client protects its requests
     let transportMode: TransportMode
@@ -37,11 +36,10 @@ final class EnclaveConnection: Sendable {
     private let send: PinnedTLS.Send
 
     /// A connection to the first of Tinfoil's routers that verifies, and
-    /// otherwise to the fallback router, left unverified as tinfoil-go's
-    /// router discovery leaves it. With an attestation relay, the relay is
-    /// asked for the fallback router instead. An unset `userCacheSecret` is
-    /// resolved from the environment or the persisted secret, since this is
-    /// Tinfoil's router.
+    /// otherwise to the fallback router, which is left unverified for the
+    /// caller to verify. With an attestation relay, the relay is asked for the
+    /// fallback router instead. An unset `userCacheSecret` is resolved from the
+    /// environment or the persisted secret, since this is Tinfoil's router.
     static func router(
         attestor: Attestor,
         transportMode: TransportMode,
@@ -154,9 +152,9 @@ final class EnclaveConnection: Sendable {
         try await handle.reverify()
     }
 
-    /// Verifies the enclave, as tinfoil-go's constructors do before they
-    /// return. In EHBP mode the enclave must also endorse an HPKE key, which
-    /// every request is sealed to.
+    /// Verifies the enclave, as the public clients do before they return. In
+    /// EHBP mode the enclave must also endorse an HPKE key, which every
+    /// request is sealed to.
     func ensureUsable() async throws {
         let verified = try await handle.ensureVerified()
         if ehbp != nil {

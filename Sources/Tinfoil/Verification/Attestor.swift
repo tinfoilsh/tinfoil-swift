@@ -1,7 +1,7 @@
 import Foundation
 
 /// The SDK's half of attestation: it fetches each document with its own
-/// networking and hands the bytes to the tinfoil-go verifier, which makes every
+/// networking and hands the bytes to the TinfoilGo verifier, which makes every
 /// trust decision. It keeps no state; callers decide when to attest again.
 struct Attestor: Sendable {
     typealias Fetch = @Sendable (URL) async throws -> Data
@@ -15,10 +15,9 @@ struct Attestor: Sendable {
 
     /// - Parameters:
     ///   - retryDelay: Wait before the one retry of a failed fetch or
-    ///     verification, as in the Go SDK.
+    ///     verification
     ///   - discoveryTimeout: How long fetching the router list and trying
-    ///     routers may take together before the fallback router is used, as
-    ///     in the Go SDK.
+    ///     routers may take together before the fallback router is used
     ///   - now: The monotonic clock the discovery deadline is measured on, so
     ///     a change to the wall clock cannot move it.
     ///   - onEnclaveVerified: The caller's check on each enclave whose evidence
@@ -55,10 +54,10 @@ struct Attestor: Sendable {
 
     /// Returns the verification of the first of Tinfoil's routers that
     /// verifies against the router repository, trying each once, or nil when
-    /// none does, as tinfoil-go's router discovery does. The caller then uses
-    /// the fallback router, verified on first use. A router list that cannot
-    /// be fetched or read leaves only the fallback, and so does reaching
-    /// discoveryTimeout, however many routers are left.
+    /// none does. The caller then uses the fallback router, which it verifies
+    /// itself. A router list that cannot be fetched or read leaves only the
+    /// fallback, and so does reaching discoveryTimeout, however many routers
+    /// are left.
     func discoverRouter() async throws -> Verification? {
         let verified = await firstVerifiedRouter(repo: TinfoilConstants.defaultGithubRepo)
         try Task.checkCancellation()

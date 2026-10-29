@@ -1,9 +1,8 @@
 import Foundation
 
 /// An OpenAI client whose requests are sealed with EHBP to one of Tinfoil's
-/// routers, matching tinfoil-go's `NewRouterOpenAIClient`. It sends through
-/// a `RouterHTTPClient`, which picks and verifies a router before the client
-/// is returned.
+/// routers. It sends through a `RouterHTTPClient`, which picks and verifies a
+/// router before the client is returned.
 ///
 /// It exists only while the router is Tinfoil's default route. For inference
 /// that doesn't depend on the route, use `Client`.
@@ -13,9 +12,8 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
     public let httpClient: RouterHTTPClient
 
     /// Creates a `RouterHTTPClient`, picking and verifying a router as
-    /// `RouterHTTPClient.init(…)` does, and an OpenAI client over it, as
-    /// tinfoil-go's `NewRouterOpenAIClient` does. The API key is checked
-    /// before any network I/O.
+    /// `RouterHTTPClient.init(…)` does, and an OpenAI client over it. The API
+    /// key is checked before any network I/O.
     ///
     /// The router parameters are those of `RouterHTTPClient`, and the OpenAI
     /// parameters those of `EnclaveOpenAIClient`, which describe them;

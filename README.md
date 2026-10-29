@@ -14,6 +14,9 @@ Requires iOS 17 or macOS 14, and Swift 5.9.
 ```swift
 dependencies: [
     .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", branch: "main")
+],
+targets: [
+    .target(name: "YourApp", dependencies: [.product(name: "Tinfoil", package: "tinfoil-swift")])
 ]
 ```
 
@@ -48,7 +51,7 @@ let client = try await EnclaveOpenAIClient(enclave: "enclave.example.com", repo:
 ## Documentation
 
 - [Swift SDK documentation](https://docs.tinfoil.sh/sdk/swift-sdk) and the [proxy server guide](https://docs.tinfoil.sh/guides/proxy-server).
-- Multi-user services must scope prompt caches to each end user by passing `userCacheSecret` when creating a client, or with a per-request `user_cache_secret` in `extraBody`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
+- Multi-user services must scope prompt caches to each end user, with a per-request `user_cache_secret` in `extraBody`, or by passing `userCacheSecret` when creating a client for one of Tinfoil's routers, such as `RouterOpenAIClient`. Only the router reads it. `Client` reads its secret from `TINFOIL_USER_CACHE_SECRET` or `~/.tinfoil/user_cache_secret`. See [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 - `audioCreateSpeechStream(query:options:)` delivers decrypted audio in chunks that can split PCM samples or frames. The stream buffers without bound, so consume it promptly.
 - All OpenAI methods and types are unchanged; see the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI).
 

@@ -5,10 +5,9 @@ import FoundationNetworking
 #endif
 
 /// A client for one of Tinfoil's routers, which forwards requests to the
-/// enclaves serving each model, matching tinfoil-go's `NewRouterHTTPClient`.
-/// It picks and verifies a router before its initializer returns, then sends
-/// only to that router, verifying it again once the verification expires or
-/// the router rejects its key.
+/// enclaves serving each model. It picks and verifies a router before its
+/// initializer returns, then sends only to that router, verifying it again
+/// once the verification expires or the router rejects its key.
 ///
 /// It exists only while the router is Tinfoil's default route. For inference
 /// that doesn't depend on the route, use `Client`.
