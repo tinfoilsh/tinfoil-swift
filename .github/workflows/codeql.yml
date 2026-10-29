@@ -44,8 +44,8 @@ jobs:
           swift package resolve
           swift build --target OpenAI
           swift build --target EHBP
-          if find .build -name 'TinfoilAI.swiftmodule' | grep -q .; then
-            echo "::error::TinfoilAI was built before tracing, so CodeQL would not see it compile"
+          if find .build -name 'Tinfoil.swiftmodule' | grep -q .; then
+            echo "::error::Tinfoil was built before tracing, so CodeQL would not see it compile"
             exit 1
           fi
 
@@ -74,7 +74,7 @@ jobs:
           build-mode: manual
 
       - name: Build the SDK
-        run: arch -arm64 "$SWIFT" build --target TinfoilAI
+        run: arch -arm64 "$SWIFT" build --target Tinfoil
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1

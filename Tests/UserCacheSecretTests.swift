@@ -3,7 +3,7 @@ import Foundation
 import CryptoKit
 import EHBP
 import OpenAI
-@testable import TinfoilAI
+@testable import Tinfoil
 
 final class UserCacheSecretTests: XCTestCase {
 

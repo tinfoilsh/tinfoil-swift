@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// Pins the Swift side of the verifier payload contract. The Go side is
 /// verificationJSON in tinfoil-go's mobile/verification.go.

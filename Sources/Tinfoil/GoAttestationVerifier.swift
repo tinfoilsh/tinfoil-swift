@@ -1,5 +1,5 @@
 import Foundation
-import Tinfoil
+import TinfoilGo
 
 extension VerificationPolicy {
     /// The options JSON `MobileNewVerifier` takes; empty for the defaults.

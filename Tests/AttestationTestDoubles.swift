@@ -1,5 +1,5 @@
 import Foundation
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// Stands in for the Go verifier. A document is "<verdict>:<nonce hex>"; the
 /// stand-in refuses one whose nonce is not the one it was given, so the tests

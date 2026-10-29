@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// How EnclaveHTTPClient picks its enclave and checks its configuration,
 /// using the stand-ins from AttestationTestDoubles.swift in place of the
