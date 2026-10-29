@@ -2,8 +2,8 @@ import XCTest
 @testable import Tinfoil
 
 /// Pure-unit coverage for the TinfoilEvent header formatting helper. The
-/// integration tests in TinfoilAITests.swift exercise the full create()
-/// path, but those require live enclave verification and a network API
+/// integration tests in ClientTests.swift exercise a full client, but
+/// those require live enclave verification and a network API
 /// key; this file pins the header contract in isolation.
 final class TinfoilEventTests: XCTestCase {
 

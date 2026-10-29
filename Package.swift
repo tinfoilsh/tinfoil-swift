@@ -28,7 +28,6 @@ let package = Package(
                 .product(name: "EHBP", package: "encrypted-http-body-protocol"),
                 "TinfoilGo"
             ],
-            path: "Sources/Tinfoil",
             linkerSettings: [
                 .linkedLibrary("resolv")
             ]),
@@ -37,7 +36,6 @@ let package = Package(
             dependencies: [
                 "Tinfoil",
                 .product(name: "OpenAI", package: "openai-swift-fork")
-            ],
-            path: "Tests")
+            ])
     ]
 )
