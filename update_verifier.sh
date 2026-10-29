@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pins Package.swift to a tinfoil-go release of Tinfoil.xcframework and
+# Pins Package.swift to a tinfoil-go release of TinfoilGo.xcframework and
 # commits the change.
 #
 # Usage: ./update_verifier.sh [tag]
@@ -14,7 +14,7 @@ if [[ -z "$tag" || "$tag" == null ]]; then
     echo "no tinfoil-go release found" >&2
     exit 1
 fi
-url="https://github.com/$repo/releases/download/$tag/Tinfoil.xcframework.zip"
+url="https://github.com/$repo/releases/download/$tag/TinfoilGo.xcframework.zip"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -30,9 +30,9 @@ fi
 # Replace the Tinfoil binary target's release tag and checksum together, so
 # the pin cannot end up naming one release with another's checksum.
 TAG="$tag" CHECKSUM="$checksum" perl -0pi -e '
-    s{(\Qgithub.com/tinfoilsh/tinfoil-go/releases/download/\E)[^/"]+(/Tinfoil\.xcframework\.zip",\s*checksum:\s*")[0-9a-f]{64}"}{$1$ENV{TAG}$2$ENV{CHECKSUM}"}
+    s{(\Qgithub.com/tinfoilsh/tinfoil-go/releases/download/\E)[^/"]+(/TinfoilGo\.xcframework\.zip",\s*checksum:\s*")[0-9a-f]{64}"}{$1$ENV{TAG}$2$ENV{CHECKSUM}"}
 ' Package.swift
-if ! grep -qF "releases/download/$tag/Tinfoil.xcframework.zip" Package.swift ||
+if ! grep -qF "releases/download/$tag/TinfoilGo.xcframework.zip" Package.swift ||
     ! grep -qF "checksum: \"$checksum\"" Package.swift; then
     echo "could not update the Tinfoil binary target in Package.swift" >&2
     exit 1
