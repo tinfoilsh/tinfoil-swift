@@ -114,8 +114,7 @@ extension Verification {
             hpkePublicKey: hpkePublicKey,
             cryptoMaterial: [
                 .init(id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "deadbeef"),
-                .init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: stubHPKEKey),
-            ],
+            ] + (hpkePublicKey.map { [.init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: $0)] } ?? []),
             freshnessExpiresAt: expiresAt,
             verifiedAt: Date(),
             verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion)

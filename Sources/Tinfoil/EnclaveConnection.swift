@@ -51,10 +51,13 @@ final class EnclaveConnection: Sendable {
         onVerificationResult: VerificationResultCallback?
     ) async throws -> EnclaveConnection {
         // Checked before discovery, so a misconfiguration costs no network I/O.
-        guard baseURL == nil || transportMode == .ehbp else {
-            throw TinfoilError.configuration(
-                "a base URL requires TransportMode.ehbp when discovering the router, because the router's origin isn't known before discovery"
-            )
+        if let baseURL {
+            try validateBaseURL(baseURL)
+            guard transportMode == .ehbp else {
+                throw TinfoilError.configuration(
+                    "a base URL requires TransportMode.ehbp when discovering the router, because the router's origin isn't known before discovery"
+                )
+            }
         }
         let discovered = attestationRelay == nil ? try await attestor.discoverRouter() : nil
         if let discovered {
@@ -98,12 +101,7 @@ final class EnclaveConnection: Sendable {
             throw TinfoilError.configuration("cannot form a URL for the enclave \(handle.enclave)")
         }
         let base = baseURL ?? enclaveOrigin
-        let schemes = allowPlainHTTP ? ["https", "http"] : ["https"]
-        guard schemes.contains(base.scheme?.lowercased() ?? ""), base.host != nil, base.user == nil, base.password == nil else {
-            throw TinfoilError.configuration(
-                "invalid base URL \(base.absoluteString): it must be HTTPS, to protect request headers, and carry no credentials"
-            )
-        }
+        try Self.validateBaseURL(base, allowPlainHTTP: allowPlainHTTP)
         let origin = URLHelpers.origin(from: base.absoluteString)
         if transportMode == .tls, origin != URLHelpers.origin(from: enclaveOrigin.absoluteString) {
             throw TinfoilError.configuration(
@@ -118,6 +116,17 @@ final class EnclaveConnection: Sendable {
         self.ehbp = transportMode == .ehbp
             ? EHBPChannel(origin: origin, enclaveURL: "https://\(handle.enclave)", handle: handle, initial: initial, userCacheSecret: userCacheSecret)
             : nil
+    }
+
+    /// Refuses a base URL that isn't HTTPS, which would expose request
+    /// headers, or that has no host or carries credentials.
+    static func validateBaseURL(_ url: URL, allowPlainHTTP: Bool = false) throws {
+        let schemes = allowPlainHTTP ? ["https", "http"] : ["https"]
+        guard schemes.contains(url.scheme?.lowercased() ?? ""), url.host != nil, url.user == nil, url.password == nil else {
+            throw TinfoilError.configuration(
+                "invalid base URL \(url.absoluteString): it must be HTTPS, to protect request headers, and carry no credentials"
+            )
+        }
     }
 
     /// The last successful verification, without checking it. It may have

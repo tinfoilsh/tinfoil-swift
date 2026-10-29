@@ -145,16 +145,24 @@ final class EnclaveHTTPClientTests: XCTestCase {
         XCTAssertTrue(url.query?.contains("enclave=\(TinfoilConstants.fallbackEnclave)") ?? false)
     }
 
-    func testARouterWithABaseURLRequiresEHBP() async {
-        let network = approving()
-        do {
-            _ = try await router(network, transportMode: .tls, baseURL: URL(string: "https://proxy.example/")!)
-            XCTFail("a base URL needs EHBP when the router's origin isn't known")
-        } catch TinfoilError.configurationError {
-        } catch {
-            XCTFail("expected a configuration error, got \(error)")
+    func testARoutersBaseURLIsCheckedBeforeDiscovery() async {
+        let cases: [(TransportMode, String)] = [
+            (.tls, "https://proxy.example/"),  // needs EHBP: the router's origin isn't known
+            (.ehbp, "http://proxy.example/"),
+            (.ehbp, "https://user:secret@proxy.example/"),
+            (.ehbp, "https:proxy.example/"),
+        ]
+        for (mode, url) in cases {
+            let network = approving()
+            do {
+                _ = try await router(network, transportMode: mode, baseURL: URL(string: url)!)
+                XCTFail("\(url) must be refused")
+            } catch TinfoilError.configurationError {
+            } catch {
+                XCTFail("expected a configuration error for \(url), got \(error)")
+            }
+            XCTAssertTrue(network.urls.isEmpty, "\(url) is refused before discovery.")
         }
-        XCTAssertTrue(network.urls.isEmpty, "The configuration is checked before discovery.")
     }
 
     func testBaseURLRulesAreCheckedBeforeAnyNetworkIO() throws {
