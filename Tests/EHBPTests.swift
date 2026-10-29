@@ -57,6 +57,8 @@ final class LocalTestServer: @unchecked Sendable {
         var contentType: String
         var body: Data
         var includeNonce: Bool
+        /// Sent as the Location header, for redirects
+        var location: String? = nil
     }
 
     var responseNonce: String = Data(repeating: 0xAB, count: 32).hexString
@@ -255,6 +257,9 @@ final class LocalTestServer: @unchecked Sendable {
             : queuedResponses.removeFirst())
         var response = "HTTP/1.1 \(next.statusCode) OK\r\n"
         response += "Content-Type: \(next.contentType)\r\n"
+        if let location = next.location {
+            response += "Location: \(location)\r\n"
+        }
         if next.includeNonce {
             response += "\(EHBPProtocol.responseNonceHeader): \(responseNonce)\r\n"
         }
@@ -302,6 +307,7 @@ final class EHBPTests: XCTestCase {
                     publicKey: testPublicKey
                 )
             ),
+            networkSession: .ehbp(baseURL: server.baseURL),
             delegate: delegate
         )
     }
@@ -815,6 +821,69 @@ final class EHBPTests: XCTestCase {
         XCTAssertTrue(recorder.receivedData.isEmpty, "no bytes from the rejected 422 may leak to the delegate")
         XCTAssertEqual(recorder.completionCount, 1)
         XCTAssertNil(recorder.completionError)
+    }
+
+    /// Serves a 307 to `location`, as a server redirecting EHBP traffic
+    private func redirect(to location: String) -> LocalTestServer.Response {
+        LocalTestServer.Response(statusCode: 307, contentType: "text/plain", body: Data(), includeNonce: false, location: location)
+    }
+
+    private func chatRequest() -> URLRequest {
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.setValue("custom-value", forHTTPHeaderField: "X-Custom")
+        request.httpBody = Data("{}".utf8)
+        return request
+    }
+
+    func testARedirectToAnotherOriginIsRefused() async throws {
+        let elsewhere = LocalTestServer()
+        try elsewhere.start()
+        defer { elsewhere.stop() }
+        server.queuedResponses = [redirect(to: "\(elsewhere.baseURL)/v1/chat/completions")]
+        let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey)
+        ))
+
+        do {
+            _ = try await session.data(for: chatRequest(), delegate: nil)
+            XCTFail("a redirect off the base URL's origin must not be followed")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertTrue(failure.message.contains("refusing redirect"), failure.message)
+        }
+        XCTAssertTrue(elsewhere.requestStore.requests.isEmpty, "Nothing reaches the other origin.")
+    }
+
+    func testARedirectWithinTheOriginIsFollowed() async throws {
+        server.queuedResponses = [redirect(to: "/v1/moved")]
+        let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey)
+        ))
+
+        // The stub server can't seal a response, so the followed request
+        // fails; what matters is that it was sent where it was redirected.
+        _ = try? await session.data(for: chatRequest(), delegate: nil)
+
+        XCTAssertEqual(server.requestStore.requests.map(\.path), ["/v1/chat/completions", "/v1/moved"])
+    }
+
+    func testAStreamingRedirectToAnotherOriginIsRefused() async throws {
+        let elsewhere = LocalTestServer()
+        try elsewhere.start()
+        defer { elsewhere.stop() }
+        server.queuedResponses = [redirect(to: "\(elsewhere.baseURL)/v1/chat/completions")]
+        let recorder = StreamingRecorder()
+        let session = makeStreamingSession(delegate: recorder)
+
+        do {
+            _ = try await session.data(for: chatRequest(), delegate: nil)
+            XCTFail("a redirect off the base URL's origin must not be followed")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertTrue(failure.message.contains("refusing redirect"), failure.message)
+        }
+        await fulfillment(of: [recorder.delegateCompleted], timeout: 2)
+        XCTAssertTrue(recorder.responseStatusCodes.isEmpty, "The redirect response is not delivered.")
+        XCTAssertTrue(elsewhere.requestStore.requests.isEmpty, "Nothing reaches the other origin.")
     }
 
     func testStreamingSecondKeyMismatchIsSurfacedWithoutDeliveringResponse() async throws {

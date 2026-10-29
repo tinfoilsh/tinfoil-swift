@@ -74,6 +74,55 @@ func refuseUnsealedTraffic(_ request: URLRequest) throws {
     }
 }
 
+/// Follows a redirect only within one origin, as tinfoil-go's origin
+/// restriction does under EHBP: a redirect elsewhere would carry the request's
+/// unsealed headers and sealed body to a server the client wasn't bound to.
+/// URLSession then returns the redirect response itself, which
+/// `refusedRedirect` turns into an error.
+final class EHBPRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
+    let origin: String
+
+    init(origin: String) {
+        self.origin = origin
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        let sameOrigin = request.url.map { URLHelpers.origin(from: $0.absoluteString) == origin } ?? false
+        completionHandler(sameOrigin ? request : nil)
+    }
+}
+
+extension URLSession {
+    /// A session for EHBP requests to `baseURL`, which follows redirects
+    /// only within its origin
+    static func ehbp(baseURL: String) -> URLSession {
+        URLSession(
+            configuration: .default,
+            delegate: EHBPRedirectPolicy(origin: URLHelpers.origin(from: baseURL)),
+            delegateQueue: nil
+        )
+    }
+}
+
+/// The error for a redirect response the session didn't follow. A redirect
+/// within the origin is followed, so one that reaches the caller led
+/// elsewhere.
+func refusedRedirect(_ response: HTTPURLResponse, origin baseURL: String) -> TinfoilError? {
+    guard (300..<400).contains(response.statusCode),
+          let location = response.value(forHTTPHeaderField: "Location") else {
+        return nil
+    }
+    return .configuration(
+        "refusing redirect to \(location): EHBP requests stay on \(URLHelpers.origin(from: baseURL))"
+    )
+}
+
 /// Pins a static endpoint/key pair as the initial verified state. Building a
 /// throwaway client runs the same URL and X25519 key checks that requests rely
 /// on later, so a misconfiguration fails at construction rather than on first use.
@@ -139,13 +188,14 @@ final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
     ///   - userCacheSecret: Prompt-cache scoping secret injected into eligible
     ///     request bodies before encryption. Empty values use the default.
     ///   - session: Underlying network session, including any proxy or
-    ///     authentication-delegate configuration.
+    ///     authentication-delegate configuration. By default, one that follows
+    ///     redirects only within `baseURL`'s origin.
     convenience init(
         baseURL: String,
         enclaveURL: String? = nil,
         publicKey: Data,
         userCacheSecret: String = "",
-        session: URLSession = .shared
+        session: URLSession? = nil
     ) throws {
         self.init(
             baseURL: baseURL,
@@ -153,7 +203,7 @@ final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
                 baseURL: baseURL,
                 enclaveURL: enclaveURL,
                 publicKey: publicKey,
-                session: session
+                session: session ?? .shared
             ),
             userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
             session: session
@@ -165,12 +215,12 @@ final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
         baseURL: String,
         verifiedState: EHBPVerifiedState,
         userCacheSecret: String = "",
-        session: URLSession = .shared
+        session: URLSession? = nil
     ) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = verifiedState
         self.userCacheSecret = userCacheSecret
-        self.networkSession = session
+        self.networkSession = session ?? .ehbp(baseURL: baseURL)
     }
 
     func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
@@ -199,7 +249,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
         baseURL: String,
         verifiedState: EHBPVerifiedState,
         userCacheSecret: String = "",
-        networkSession: URLSession = .shared,
+        networkSession: URLSession,
         delegate: URLSessionDataDelegateProtocol
     ) {
         self.baseURL = baseURL
@@ -434,6 +484,9 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                     )
                     continue
                 }
+                if let refusal = refusedRedirect(response, origin: baseURL) {
+                    throw refusal
+                }
 
                 delegate?.urlSession(
                     session,
@@ -503,15 +556,16 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     ///   - publicKey: Server's X25519 public key (32 bytes)
     ///   - userCacheSecret: Prompt-cache scoping secret injected into eligible
     ///     request bodies before encryption. Empty values use the default.
-    ///   - session: Underlying URLSession to use (defaults to shared)
-    convenience init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
+    ///   - session: Underlying URLSession to use. By default, one that follows
+    ///     redirects only within `baseURL`'s origin.
+    convenience init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession? = nil) throws {
         self.init(
             baseURL: baseURL,
             verifiedState: try makePinnedVerifiedState(
                 baseURL: baseURL,
                 enclaveURL: enclaveURL,
                 publicKey: publicKey,
-                session: session
+                session: session ?? .shared
             ),
             userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
             session: session
@@ -523,12 +577,12 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         baseURL: String,
         verifiedState: EHBPVerifiedState,
         userCacheSecret: String = "",
-        session: URLSession = .shared
+        session: URLSession? = nil
     ) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = verifiedState
         self.userCacheSecret = userCacheSecret
-        self.session = session
+        self.session = session ?? .ehbp(baseURL: baseURL)
     }
 
     // MARK: - URLSessionProtocol
@@ -619,6 +673,9 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
                 continue
             }
             try Task.checkCancellation()
+            if let response = result.1 as? HTTPURLResponse, let refusal = refusedRedirect(response, origin: baseURL) {
+                throw refusal
+            }
             return result
         }
         throw EHBPReplayPolicy.attemptsExhausted
