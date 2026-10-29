@@ -24,6 +24,10 @@ final class TinfoilIntegrationTests: XCTestCase {
         XCTAssertFalse(verification.enclaveHost.isEmpty)
     }
 
+    func testTheVersionIsReachableThroughTheModule() {
+        XCTAssertEqual(Tinfoil.version, TinfoilConstants.sdkVersion)
+    }
+
     func testMissingAPIKeyError() async throws {
         let originalValue = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
         guard originalValue == nil else {
@@ -31,7 +35,7 @@ final class TinfoilIntegrationTests: XCTestCase {
         }
 
         do {
-            _ = try await TinfoilAI.create(apiKey: nil)
+            _ = try await Client(apiKey: nil)
             XCTFail("Should have thrown a configuration error")
         } catch TinfoilError.configurationError(let failure) {
             XCTAssertTrue(failure.message.contains("TINFOIL_API_KEY"), failure.message)

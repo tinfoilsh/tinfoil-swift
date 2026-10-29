@@ -6,7 +6,7 @@ import Foundation
 /// is returned.
 ///
 /// It exists only while the router is Tinfoil's default route. For inference
-/// that doesn't depend on the route, use `TinfoilAI`.
+/// that doesn't depend on the route, use `Client`.
 public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
     public let openAI: OpenAI
     /// The router client requests go through

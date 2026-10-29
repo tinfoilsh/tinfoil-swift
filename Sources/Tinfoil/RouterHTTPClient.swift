@@ -11,7 +11,7 @@ import FoundationNetworking
 /// the router rejects its key.
 ///
 /// It exists only while the router is Tinfoil's default route. For inference
-/// that doesn't depend on the route, use `TinfoilAI`.
+/// that doesn't depend on the route, use `Client`.
 public final class RouterHTTPClient: Sendable {
     let connection: EnclaveConnection
 
