@@ -4,8 +4,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// How a client protects its traffic to an enclave, as tinfoil-go's
-/// `TransportMode` selects it.
+/// How a client protects its traffic to an enclave
 public enum TransportMode: Sendable, Equatable {
     /// Pins each connection to the attested TLS key. It protects the whole
     /// request and response, and needs a direct connection to the enclave.
@@ -17,10 +16,10 @@ public enum TransportMode: Sendable, Equatable {
     case ehbp
 }
 
-/// A client whose requests reach only one attested enclave that you name,
-/// matching tinfoil-go's `EnclaveHTTPClient`. It is verified before its
-/// initializer returns, and verifies again by itself before a request once
-/// the verification expires or the enclave rejects its key.
+/// A client whose requests reach only one attested enclave that you name.
+/// It is verified before its initializer returns, and verifies again by
+/// itself before a request once the verification expires or the enclave
+/// rejects its key.
 public final class EnclaveHTTPClient: Sendable {
     let connection: EnclaveConnection
 
@@ -74,8 +73,8 @@ public final class EnclaveHTTPClient: Sendable {
     }
 
     /// The connection `init(enclave:repo:…)` verifies, built without network
-    /// I/O, as tinfoil-go's `unverifiedEnclaveHTTPClient`. Only Tinfoil's
-    /// router reads the cache secret, so an unset one stays unset.
+    /// I/O. Only Tinfoil's router reads the cache secret, so an unset one
+    /// stays unset.
     static func connection(
         enclave: String,
         repo: String,
@@ -146,11 +145,16 @@ public final class EnclaveHTTPClient: Sendable {
     /// Loads a request from the enclave, as `URLSession.data(for:)` does,
     /// protected by the client's transport mode. A URL without a host resolves
     /// against `baseURL`; an absolute URL must be HTTPS on `baseURL`'s origin,
-    /// and in TLS mode so must any redirect, so credentials never leave it.
+    /// and so must any redirect, so credentials never leave it. A redirect
+    /// elsewhere fails with `TinfoilError.configurationError`, except that over
+    /// TLS one to plain HTTP fails with
+    /// `URLError(.appTransportSecurityRequiresSecureConnection)`.
     ///
-    /// If the enclave rejects or no longer presents the verified key, the
-    /// client verifies again and retries once when that is safe; otherwise it
-    /// fails with `TinfoilError.attestationError`.
+    /// If the enclave no longer presents or accepts the verified key, the
+    /// client verifies again and retries once when that is safe. Over TLS, a
+    /// key that still doesn't match fails with `TinfoilError.attestationError`;
+    /// under EHBP, a refreshed key the enclave still rejects fails with EHBP's
+    /// key-configuration error.
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         try await connection.data(for: request)
     }

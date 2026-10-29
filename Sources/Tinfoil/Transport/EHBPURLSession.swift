@@ -63,8 +63,8 @@ private func prepareEHBPRequest(
 
 /// Refuses a request whose traffic would continue outside the bodies EHBP
 /// seals: a protocol upgrade, such as a WebSocket, or a CONNECT tunnel. Sending
-/// one would look protected while nothing after the handshake is. As in the Go
-/// SDK, other requests are allowed, with or without a body.
+/// one would look protected while nothing after the handshake is. Other
+/// requests are allowed, with or without a body.
 func refuseUnsealedTraffic(_ request: URLRequest) throws {
     let upgrade = request.value(forHTTPHeaderField: "Upgrade") ?? ""
     guard request.httpMethod?.uppercased() != "CONNECT", upgrade.isEmpty else {

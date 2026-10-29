@@ -1,10 +1,10 @@
 import Foundation
 
-/// Called with the result of each verification an `EnclaveHTTPClient` makes:
-/// the router `discoverRouter` picks, the first verification of an enclave,
-/// and each later one, whether because the attestation expired, the enclave
-/// rejected its key, or the caller asked. It only observes. A cancelled run is
-/// not reported.
+/// Called with the result of each verification a client makes: the router a
+/// `RouterHTTPClient` picks, the verification each client makes before it
+/// returns, and each later one, whether because the attestation expired, the
+/// enclave rejected its key, or the caller asked. It only observes. A
+/// cancelled run is not reported.
 public typealias VerificationResultCallback = @Sendable (Result<Verification, TinfoilError>) -> Void
 
 /// Called each time an enclave's evidence verifies, before the enclave is
@@ -87,7 +87,8 @@ extension Verification {
     /// The verifier payload schema this SDK decodes
     static let supportedSchemaVersion = 1
 
-    /// Decodes the Go verifier's JSON for a document fetched from enclaveHost.
+    /// Decodes the TinfoilGo verifier's JSON for a document fetched from
+    /// enclaveHost.
     init(payload: String, enclaveHost: String) throws {
         let data = Data(payload.utf8)
         let decoder = JSONDecoder()
@@ -135,7 +136,8 @@ extension Verification {
         }
     }
 
-    /// The payload as mobile/verification.go in tinfoil-go declares it
+    /// The payload as the TinfoilGo framework declares it, in its source's
+    /// mobile/verification.go; a change there needs a matching change here.
     private struct Payload: Decodable {
         let configRepo: String
         let codeDigest: String
@@ -162,9 +164,9 @@ extension Verification {
         }
     }
 
-    /// Go writes RFC 3339 and drops a zero fractional part, so both forms
-    /// arrive. Each style is tried in turn because older Foundation releases
-    /// parse only the form a style names.
+    /// The framework writes RFC 3339 and drops a zero fractional part, so
+    /// both forms arrive. Each style is tried in turn because older Foundation
+    /// releases parse only the form a style names.
     private static func parseDate(_ value: String, field: String) throws -> Date {
         let styles = [
             Date.ISO8601FormatStyle(includingFractionalSeconds: true),
@@ -180,12 +182,12 @@ extension Verification {
 }
 
 extension TinfoilError {
-    /// Classifies an error from the Go verifier. It crosses the FFI as a
-    /// message alone, led by its category's prefix, which is dropped here
-    /// because the case carries the category. A verification error's message
-    /// then names the layer that rejected the document, as in
-    /// "quote: <detail>"; the layer is kept in the message and also lifted
-    /// out. A message with neither prefix is treated as a rejected
+    /// Classifies an error from the TinfoilGo verifier. It crosses the
+    /// framework boundary as a message alone, led by its category's prefix,
+    /// which is dropped here because the case carries the category. A
+    /// verification error's message then names the layer that rejected the
+    /// document, as in "quote: <detail>"; the layer is kept in the message and
+    /// also lifted out. A message with neither prefix is treated as a rejected
     /// attestation.
     static func fromVerifier(
         _ error: Error,

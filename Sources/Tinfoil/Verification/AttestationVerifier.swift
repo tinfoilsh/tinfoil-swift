@@ -1,10 +1,10 @@
 import Foundation
 
-/// The tinfoil-go verifier, which owns every trust decision about an
-/// attestation document. It performs no I/O: the caller fetches each document
-/// itself, from `attestationURL` with a nonce from `newNonce`, and passes the
-/// bytes to `verify`. Code built on it depends on this protocol rather than
-/// on the framework, so it can be tested with a stand-in.
+/// The TinfoilGo framework's verifier, which owns every trust decision about
+/// an attestation document. It performs no I/O: the caller fetches each
+/// document itself, from `attestationURL` with a nonce from `newNonce`, and
+/// passes the bytes to `verify`. Code built on it depends on this protocol
+/// rather than on the framework, so it can be tested with a stand-in.
 protocol AttestationVerifier: Sendable {
     /// A fresh random challenge for one attestation fetch. The same bytes go
     /// to `attestationURL` and `verify`, and are never reused.
