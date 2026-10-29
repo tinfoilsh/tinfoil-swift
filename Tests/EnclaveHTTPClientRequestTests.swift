@@ -31,28 +31,37 @@ private final class SendLog: @unchecked Sendable {
     }
 }
 
-final class EnclaveHandleRequestTests: XCTestCase {
+/// Requests through an EnclaveHTTPClient in TLS mode, with pinned sends
+/// recorded in place of the network.
+final class EnclaveHTTPClientRequestTests: XCTestCase {
     private let rejection = PinnedTLS.Rejection(host: "enclave.example", reason: "presented a certificate whose key does not match the attestation")
 
     /// - Parameter evidenceClock: The clock new evidence's freshness counts
-    ///   from; the handle's own clock by default.
-    private func handle(
+    ///   from; the client's own clock by default.
+    private func client(
         network: FakeNetwork,
         log: SendLog,
         clock: ManualClock = ManualClock(),
-        evidenceClock: (@Sendable () -> Date)? = nil
-    ) throws -> EnclaveHandle {
-        try EnclaveHandle(
-            enclave: "enclave.example",
-            repo: "org/repo",
-            attestationRelay: nil,
-            attestor: Attestor(
-                verifier: FakeVerifier(now: evidenceClock ?? { clock.now }),
-                fetch: { try network.fetch($0) },
-                retryDelay: 0
+        evidenceClock: (@Sendable () -> Date)? = nil,
+        baseURL: URL? = nil,
+        userCacheSecret: String = ""
+    ) throws -> EnclaveHTTPClient {
+        try EnclaveHTTPClient(
+            handle: EnclaveHandle(
+                enclave: "enclave.example",
+                repo: "org/repo",
+                attestationRelay: nil,
+                attestor: Attestor(
+                    verifier: FakeVerifier(now: evidenceClock ?? { clock.now }),
+                    fetch: { try network.fetch($0) },
+                    retryDelay: 0
+                ),
+                now: { clock.now }
             ),
-            send: { try log.send($0, $1) },
-            now: { clock.now }
+            transportMode: .tls,
+            baseURL: baseURL,
+            userCacheSecret: userCacheSecret,
+            send: { try log.send($0, $1) }
         )
     }
 
@@ -60,32 +69,56 @@ final class EnclaveHandleRequestTests: XCTestCase {
         FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
     }
 
-    func testRelativeURLResolvesAgainstTheVerifiedEnclave() async throws {
+    func testRelativeURLResolvesAgainstTheBaseURL() async throws {
         let log = SendLog()
-        let handle = try handle(network: approving(), log: log)
-        let before = await handle.enclaveURL
-        XCTAssertNil(before)
+        let client = try client(network: approving(), log: log)
+        XCTAssertEqual(client.baseURL.absoluteString, "https://enclave.example/")
+        let before = await client.current
+        XCTAssertNil(before, "Creating the client does no network I/O.")
 
-        let (data, response) = try await handle.data(from: URL(string: "/health?verbose=1")!)
+        let (data, response) = try await client.data(from: URL(string: "/health?verbose=1")!)
 
         XCTAssertEqual(data, Data("ok".utf8))
         XCTAssertEqual(response.statusCode, 200)
         let sent = try XCTUnwrap(log.sent.first)
         XCTAssertEqual(sent.request.url?.absoluteString, "https://enclave.example/health?verbose=1")
         XCTAssertEqual(sent.fingerprint, "deadbeef", "Pinned to the verification's TLS key")
-        let after = await handle.enclaveURL
-        XCTAssertEqual(after?.absoluteString, "https://enclave.example")
+        let after = await client.current
+        XCTAssertEqual(after?.enclaveHost, "enclave.example")
+    }
+
+    func testRelativeURLResolvesAgainstABaseURLPath() async throws {
+        let log = SendLog()
+        let client = try client(network: approving(), log: log, baseURL: URL(string: "https://enclave.example/api/")!)
+
+        _ = try await client.data(from: URL(string: "v1/models")!)
+
+        XCTAssertEqual(log.sent.first?.request.url?.absoluteString, "https://enclave.example/api/v1/models")
+    }
+
+    func testTheCacheSecretIsInjectedOverPinnedTLS() async throws {
+        let log = SendLog()
+        let client = try client(network: approving(), log: log, userCacheSecret: "client-level")
+        var request = URLRequest(url: URL(string: "/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data(#"{"model":"m"}"#.utf8)
+
+        _ = try await client.data(for: request)
+
+        let body = try XCTUnwrap(log.sent.first?.request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["user_cache_secret"] as? String, "client-level")
     }
 
     func testRequestKeepsMethodHeadersAndBody() async throws {
         let log = SendLog()
-        let handle = try handle(network: approving(), log: log)
+        let client = try client(network: approving(), log: log)
         var request = URLRequest(url: URL(string: "/v1/thing")!)
         request.httpMethod = "POST"
         request.setValue("Bearer key", forHTTPHeaderField: "Authorization")
         request.httpBody = Data("{}".utf8)
 
-        _ = try await handle.data(for: request)
+        _ = try await client.data(for: request)
 
         let sent = try XCTUnwrap(log.sent.first).request
         XCTAssertEqual(sent.httpMethod, "POST")
@@ -95,10 +128,10 @@ final class EnclaveHandleRequestTests: XCTestCase {
 
     func testPlainHTTPIsRefused() async throws {
         let log = SendLog()
-        let handle = try handle(network: approving(), log: log)
+        let client = try client(network: approving(), log: log)
 
         do {
-            _ = try await handle.data(from: URL(string: "http://enclave.example/health")!)
+            _ = try await client.data(from: URL(string: "http://enclave.example/health")!)
             XCTFail("a request with headers must not leave over plain HTTP")
         } catch TinfoilError.configurationError {
         }
@@ -108,16 +141,16 @@ final class EnclaveHandleRequestTests: XCTestCase {
     func testOtherHostsAreRefused() async throws {
         let network = approving()
         let log = SendLog()
-        let handle = try handle(network: network, log: log)
+        let client = try client(network: network, log: log)
 
         do {
-            _ = try await handle.data(from: URL(string: "https://elsewhere.example/health")!)
+            _ = try await client.data(from: URL(string: "https://elsewhere.example/health")!)
             XCTFail("credentials must not be sent to another host")
         } catch TinfoilError.configurationError(let failure) {
             XCTAssertTrue(failure.message.contains("elsewhere.example"), failure.message)
         }
         XCTAssertTrue(log.sent.isEmpty)
-        XCTAssertEqual(network.urls.count, 1, "A refused host does not trigger verifying again.")
+        XCTAssertTrue(network.urls.isEmpty, "A refused request is refused before verifying.")
     }
 
     func testASchemeWithoutAHostIsRefused() async throws {
@@ -125,15 +158,15 @@ final class EnclaveHandleRequestTests: XCTestCase {
         // Foundation reports no host for it.
         let network = approving()
         let log = SendLog()
-        let handle = try handle(network: network, log: log)
+        let client = try client(network: network, log: log)
 
         do {
-            _ = try await handle.data(from: URL(string: "https:elsewhere.example/collect")!)
+            _ = try await client.data(from: URL(string: "https:elsewhere.example/collect")!)
             XCTFail("a URL naming another host without // must be refused")
         } catch TinfoilError.configurationError {
         }
         XCTAssertTrue(log.sent.isEmpty)
-        XCTAssertEqual(network.urls.count, 1)
+        XCTAssertTrue(network.urls.isEmpty, "A refused request is refused before verifying.")
 
         StubURLProtocol.serve { _ in .response(status: 200, body: Data()) }
         do {
@@ -150,9 +183,9 @@ final class EnclaveHandleRequestTests: XCTestCase {
 
     func testTheEnclavesOwnAbsoluteURLIsAllowed() async throws {
         let log = SendLog()
-        let handle = try handle(network: approving(), log: log)
+        let client = try client(network: approving(), log: log)
 
-        _ = try await handle.data(from: URL(string: "https://ENCLAVE.example:443/health")!)
+        _ = try await client.data(from: URL(string: "https://ENCLAVE.example:443/health")!)
 
         XCTAssertEqual(log.sent.count, 1)
     }
@@ -222,9 +255,9 @@ final class EnclaveHandleRequestTests: XCTestCase {
         let log = SendLog { previous in
             if previous == 0 { throw self.rejection }
         }
-        let handle = try handle(network: network, log: log)
+        let client = try client(network: network, log: log)
 
-        _ = try await handle.data(from: URL(string: "/health")!)
+        _ = try await client.data(from: URL(string: "/health")!)
 
         XCTAssertEqual(log.sent.count, 2)
         XCTAssertEqual(network.urls.count, 2, "The enclave was verified again before the retry.")
@@ -233,10 +266,10 @@ final class EnclaveHandleRequestTests: XCTestCase {
     func testAKeyRejectedAfterVerifyingAgainFails() async throws {
         let network = approving()
         let log = SendLog { _ in throw self.rejection }
-        let handle = try handle(network: network, log: log)
+        let client = try client(network: network, log: log)
 
         do {
-            _ = try await handle.data(from: URL(string: "/health")!)
+            _ = try await client.data(from: URL(string: "/health")!)
             XCTFail("a key the attestation does not endorse must not be used")
         } catch TinfoilError.attestationError(let failure) {
             XCTAssertTrue(failure.message.contains("does not match the attestation"), failure.message)
@@ -253,10 +286,10 @@ final class EnclaveHandleRequestTests: XCTestCase {
             requestMayHaveBeenSent: true
         )
         let log = SendLog { _ in throw afterRedirect }
-        let handle = try handle(network: network, log: log)
+        let client = try client(network: network, log: log)
 
         do {
-            _ = try await handle.data(for: URLRequest(url: URL(string: "/v1/thing")!))
+            _ = try await client.data(for: URLRequest(url: URL(string: "/v1/thing")!))
             XCTFail("a request that may have reached the enclave must not be replayed")
         } catch TinfoilError.attestationError {
         }
@@ -265,15 +298,15 @@ final class EnclaveHandleRequestTests: XCTestCase {
     }
 
     func testAVerificationAlreadyPastItsDeadlineIsRefused() async throws {
-        // The evidence is good for an hour of real time, but the handle's clock
+        // The evidence is good for an hour of real time, but the client's clock
         // is two hours ahead, so the new verification arrives already expired.
         let clock = ManualClock()
         clock.advance(by: 2 * 3600)
         let log = SendLog()
-        let handle = try handle(network: approving(), log: log, clock: clock, evidenceClock: { Date() })
+        let client = try client(network: approving(), log: log, clock: clock, evidenceClock: { Date() })
 
         do {
-            _ = try await handle.data(from: URL(string: "/health")!)
+            _ = try await client.data(from: URL(string: "/health")!)
             XCTFail("an expired verification must not authorize a request")
         } catch TinfoilError.attestationError(let failure) {
             XCTAssertTrue(failure.message.contains("freshness deadline"), failure.message)
@@ -284,10 +317,10 @@ final class EnclaveHandleRequestTests: XCTestCase {
     func testOtherErrorsAreNeitherRetriedNorWrapped() async throws {
         let network = approving()
         let log = SendLog { _ in throw URLError(.timedOut) }
-        let handle = try handle(network: network, log: log)
+        let client = try client(network: network, log: log)
 
         do {
-            _ = try await handle.data(from: URL(string: "/health")!)
+            _ = try await client.data(from: URL(string: "/health")!)
             XCTFail("the network error must surface")
         } catch let error as URLError {
             XCTAssertEqual(error.code, .timedOut)
@@ -299,22 +332,22 @@ final class EnclaveHandleRequestTests: XCTestCase {
     func testAnExpiredVerificationIsRenewedBeforeSending() async throws {
         let network = approving()
         let clock = ManualClock()
-        let handle = try handle(network: network, log: SendLog(), clock: clock)
+        let client = try client(network: network, log: SendLog(), clock: clock)
 
-        _ = try await handle.data(from: URL(string: "/health")!)
-        _ = try await handle.data(from: URL(string: "/health")!)
+        _ = try await client.data(from: URL(string: "/health")!)
+        _ = try await client.data(from: URL(string: "/health")!)
         XCTAssertEqual(network.urls.count, 1, "A current verification is reused.")
 
         clock.advance(by: 2 * 3600)
-        _ = try await handle.data(from: URL(string: "/health")!)
+        _ = try await client.data(from: URL(string: "/health")!)
         XCTAssertEqual(network.urls.count, 2, "An expired verification is renewed first.")
     }
 
     func testLivePinnedRequest() async throws {
         try requireLiveIntegration()
-        let handle = try EnclaveHandle(enclave: TinfoilConstants.fallbackEnclave)
+        let client = try EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, repo: TinfoilConstants.defaultGithubRepo)
 
-        let (data, response) = try await handle.data(from: URL(string: "/health")!)
+        let (data, response) = try await client.data(from: URL(string: "/health")!)
 
         XCTAssertEqual(response.statusCode, 200)
         XCTAssertFalse(data.isEmpty)

@@ -5,22 +5,28 @@ import EHBP
 /// Main entry point for the Tinfoil client library.
 /// Provides the same API as OpenAI client with EHBP encryption for secure enclave communication.
 public class TinfoilAI {
+    /// This SDK's version, as tinfoil-go's `Version()` reports its own
+    public static let version = TinfoilConstants.sdkVersion
+
     private let openAIClient: OpenAI
 
     private init(client: OpenAI) {
         self.openAIClient = client
     }
 
-    /// Creates a new TinfoilAI client configured for communication with a Tinfoil enclave
+    /// Creates a TinfoilAI client that sends OpenAI requests through an
+    /// `EnclaveHTTPClient`, so every request body is sealed to the verified
+    /// enclave with EHBP, as tinfoil-go's `NewClient` and
+    /// `NewEnclaveOpenAIClient` do. It verifies the enclave before returning,
+    /// so a client that cannot be used fails here.
     /// - Parameters:
     ///   - apiKey: Optional API key. If not provided, will be read from TINFOIL_API_KEY environment variable
-    ///   - baseURL: Optional URL where requests are sent (e.g., a proxy server). If not provided, requests go directly to the enclave.
-    ///   - handle: Verifies the enclave this client sends to. When nil, a
-    ///     default handle discovers and verifies one of Tinfoil's routers.
-    ///     Configure an `EnclaveHandle` to choose the enclave, pin the repo,
-    ///     relay attestation, tighten the policy, or observe and reject
-    ///     verifications. The client verifies through it on create and on
-    ///     every refresh.
+    ///   - client: The enclave client requests go through, which must use
+    ///     `TransportMode.ehbp`. When nil, `EnclaveHTTPClient.discoverRouter()`
+    ///     picks one of Tinfoil's routers. Create one to choose the enclave,
+    ///     pin the repo, send through a proxy with `baseURL`, relay
+    ///     attestation, tighten the policy, scope the prompt cache, or
+    ///     observe and reject verifications.
     ///   - parsingOptions: Parsing options for handling different providers.
     ///   - customHeaders: Additional request headers to forward verbatim on
     ///     every outbound request (merged over the headers synthesized by
@@ -32,33 +38,18 @@ public class TinfoilAI {
     ///     emits `<tinfoil-event>...</tinfoil-event>` markers inline with
     ///     the assistant text. Strict OpenAI SDKs render the markers as
     ///     text; callers parse and strip them before display.
-    ///   - userCacheSecret: Scopes the router's prompt cache. A non-empty
-    ///     string pins it (use one stable value per end user). `nil` (the
-    ///     default) or an empty string leaves it unset: a client of one of
-    ///     Tinfoil's routers then resolves the secret from
-    ///     `TINFOIL_USER_CACHE_SECRET` or a generated value persisted at
-    ///     `~/.tinfoil/user_cache_secret`, and a client of an enclave the
-    ///     handle names sends none, since only the router reads it.
-    ///     Servers holding many end users' conversations should instead set
-    ///     the `user_cache_secret` field per request (e.g. via
-    ///     `ChatQuery.extraBody`). A non-empty per-request string wins over the
-    ///     client-level secret; an empty string is replaced with it.
     /// - Returns: A TinfoilAI client configured for secure communication (use like OpenAI client)
     ///
-    /// When using a proxy, set `baseURL` to it. Request bodies stay encrypted
-    /// to the verified enclave, and the proxy receives the
-    /// `X-Tinfoil-Enclave-Url` header to know where to forward requests. To
-    /// fetch attestation through the proxy as well, give the handle an
-    /// `attestationRelay`.
+    /// Servers holding many end users' conversations should set the
+    /// `user_cache_secret` field per request (e.g. via `ChatQuery.extraBody`);
+    /// a non-empty per-request string wins over the client's secret.
     public static func create(
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
-        baseURL: String? = nil,
-        handle: EnclaveHandle? = nil,
+        client: EnclaveHTTPClient? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
-        tinfoilEvents: Set<TinfoilEvent> = [],
-        userCacheSecret: String? = nil
+        tinfoilEvents: Set<TinfoilEvent> = []
     ) async throws -> TinfoilAI {
         let staticApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
         // Attestation itself does not use the API key; it only authorizes
@@ -69,49 +60,29 @@ public class TinfoilAI {
             throw TinfoilError.configuration("no API key was given; pass apiKey or apiKeyProvider, or set TINFOIL_API_KEY")
         }
 
-        let handle = try handle ?? EnclaveHandle()
-        let verification = try await handle.verify()
-        let enclaveURL = Self.enclaveURL(for: verification)
+        let client = if let client { client } else { try await EnclaveHTTPClient.discoverRouter() }
+        guard let ehbp = client.ehbp else {
+            throw TinfoilError.configuration(
+                "TinfoilAI seals requests with EHBP, so its EnclaveHTTPClient must use TransportMode.ehbp"
+            )
+        }
+        // Fail here rather than on the first request, including for an
+        // enclave that endorses no HPKE key.
+        let verified = try await client.ensureVerified()
+        _ = try EHBPVerifiedEndpoint(verification: verified)
         return try TinfoilAI(
             apiKey: staticApiKey,
             apiKeyProvider: apiKeyProvider,
-            baseURL: baseURL ?? enclaveURL,
-            enclaveURL: enclaveURL,
-            hpkePublicKeyHex: verification.hpkePublicKey,
-            expiresAt: verification.freshnessExpiresAt,
+            baseURL: client.baseURL.absoluteString,
+            session: ehbp.session,
+            streamingFactory: ehbp.streamingFactory,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
-            tinfoilEvents: tinfoilEvents,
-            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret, for: handle),
-            refreshEndpoint: {
-                // The client stays with the enclave it verified; a refresh
-                // re-verifies that enclave for a current key and deadline.
-                let refreshed = try await handle.verify()
-                return EHBPVerifiedEndpoint(
-                    enclaveURL: Self.enclaveURL(for: refreshed),
-                    publicKey: try Self.ehbpPublicKey(hex: refreshed.hpkePublicKey),
-                    expiresAt: refreshed.freshnessExpiresAt
-                )
-            }
+            tinfoilEvents: tinfoilEvents
         )
     }
 
-    private static func enclaveURL(for verification: Verification) -> String {
-        "https://\(verification.enclaveHost)"
-    }
-
-    /// The X25519 key EHBP encrypts request bodies to, from its hex form
-    private static func ehbpPublicKey(hex: String?) throws -> Data {
-        guard let hex, !hex.isEmpty else {
-            throw TinfoilError.attestation("Server does not support EHBP (no HPKE public key)")
-        }
-        guard let key = Data(hexString: hex), key.count == TinfoilConstants.hpkePublicKeyByteCount else {
-            throw TinfoilError.attestation("Invalid HPKE public key format (expected 32 bytes)")
-        }
-        return key
-    }
-
-    /// Internal initializer that sets up the EHBP session and OpenAI client.
+    /// Internal initializer that seals to a fixed enclave key, for tests.
     /// `userCacheSecret` is the already-resolved prompt-cache scoping secret
     /// (see `UserCacheSecret.resolve`). `expiresAt` is when the key's
     /// attestation stops authorizing new requests.
@@ -128,32 +99,45 @@ public class TinfoilAI {
         userCacheSecret: String = "",
         refreshEndpoint: EHBPVerifiedState.Refresh? = nil
     ) throws {
-        let hpkePublicKey = try Self.ehbpPublicKey(hex: hpkePublicKeyHex)
-
-        let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
-
         let verifiedState = EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(
                 enclaveURL: enclaveURL,
-                publicKey: hpkePublicKey,
+                publicKey: try EHBPVerifiedEndpoint.publicKey(hex: hpkePublicKeyHex),
                 expiresAt: expiresAt
             ),
             refresh: refreshEndpoint
         )
-
-        let ehbpSession = EHBPURLSession(
+        try self.init(
+            apiKey: apiKey,
+            apiKeyProvider: apiKeyProvider,
             baseURL: baseURL,
-            verifiedState: verifiedState,
-            userCacheSecret: userCacheSecret
+            session: EHBPURLSession(baseURL: baseURL, verifiedState: verifiedState, userCacheSecret: userCacheSecret),
+            streamingFactory: EHBPURLSessionFactory(baseURL: baseURL, verifiedState: verifiedState, userCacheSecret: userCacheSecret),
+            parsingOptions: parsingOptions,
+            customHeaders: customHeaders,
+            tinfoilEvents: tinfoilEvents
         )
+    }
 
-        let ehbpStreamingFactory = EHBPURLSessionFactory(
-            baseURL: baseURL,
-            verifiedState: verifiedState,
-            userCacheSecret: userCacheSecret
-        )
-
+    /// Sets up the OpenAI client over the given EHBP sessions. Requests go to
+    /// `baseURL`, under its path if it has one, as tinfoil-go's OpenAI clients
+    /// use a base URL as is, and under `/v1` for a bare origin.
+    private convenience init(
+        apiKey: String?,
+        apiKeyProvider: (@Sendable () -> String?)?,
+        baseURL: String,
+        session: EHBPURLSession,
+        streamingFactory: EHBPURLSessionFactory,
+        parsingOptions: ParsingOptions,
+        customHeaders: [String: String],
+        tinfoilEvents: Set<TinfoilEvent>
+    ) throws {
+        let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
         let defaultPort = urlComponents.scheme == "https" ? 443 : 80
+        var basePath = URL(string: baseURL)?.path ?? ""
+        while basePath.hasSuffix("/") {
+            basePath.removeLast()
+        }
 
         var mergedHeaders = customHeaders
         if let eventsHeader = tinfoilEventsHeaderValue(tinfoilEvents),
@@ -167,14 +151,15 @@ public class TinfoilAI {
             host: urlComponents.host,
             port: urlComponents.port ?? defaultPort,
             scheme: urlComponents.scheme,
+            basePath: basePath.isEmpty ? "/v1" : basePath,
             customHeaders: mergedHeaders,
             parsingOptions: parsingOptions
         )
 
         let openAIClient = OpenAI(
             configuration: configuration,
-            customSession: ehbpSession,
-            streamingURLSessionFactory: ehbpStreamingFactory
+            customSession: session,
+            streamingURLSessionFactory: streamingFactory
         )
 
         self.init(client: openAIClient)

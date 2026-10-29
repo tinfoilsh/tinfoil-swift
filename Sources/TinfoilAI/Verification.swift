@@ -1,9 +1,10 @@
 import Foundation
 
-/// Called with the result of each `EnclaveHandle.verify()` run: for a
-/// `TinfoilAI` client, once when it is created and again whenever it
-/// re-verifies because the attestation expired or the enclave rejected its
-/// key. It only observes. A cancelled run is not reported.
+/// Called with the result of each verification an `EnclaveHTTPClient` makes:
+/// the router `discoverRouter` picks, the first verification of an enclave,
+/// and each later one, whether because the attestation expired, the enclave
+/// rejected its key, or the caller asked. It only observes. A cancelled run is
+/// not reported.
 public typealias VerificationResultCallback = @Sendable (Result<Verification, TinfoilError>) -> Void
 
 /// Called each time an enclave's evidence verifies, before the enclave is
@@ -14,14 +15,9 @@ public typealias VerificationResultCallback = @Sendable (Result<Verification, Ti
 public typealias EnclaveVerifiedCallback = @Sendable (Verification) throws -> Void
 
 /// Identifies the software that performed verification
-public struct SoftwareIdentity: Codable, Sendable, Equatable {
+public struct SoftwareIdentity: Sendable, Equatable {
     public let name: String
     public let version: String
-
-    public init(name: String, version: String) {
-        self.name = name
-        self.version = version
-    }
 }
 
 /// Checks a verification makes beyond the defaults

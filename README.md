@@ -37,19 +37,19 @@ let response = try await client.chats(query: query)
 print(response.choices.first?.message.content ?? "No response")
 ```
 
-To choose the enclave, pin the repo to a tag or digest, relay attestation, tighten the verification policy, or reject verifications, pass an `EnclaveHandle`:
+To choose the enclave, pin the repo to a tag or digest, send through a proxy, relay attestation, tighten the verification policy, or reject verifications, pass an `EnclaveHTTPClient`:
 
 ```swift
-let handle = try EnclaveHandle(enclave: "enclave.example.com", repo: "org/repo@v1.2.3")
-let client = try await TinfoilAI.create(apiKey: "YOUR_API_KEY", handle: handle)
+let enclave = try EnclaveHTTPClient(enclave: "enclave.example.com", repo: "org/repo@v1.2.3", transportMode: .ehbp)
+let client = try await TinfoilAI.create(apiKey: "YOUR_API_KEY", client: enclave)
 ```
 
-The handle also loads other enclave endpoints over TLS pinned to the attested key with `data(from:)` and `data(for:)`. Its doc comments describe the callbacks, refresh, and request rules.
+`EnclaveHTTPClient.discoverRouter()` picks one of Tinfoil's routers instead, as `TinfoilAI.create` does by default. An `EnclaveHTTPClient` also sends requests of its own to the enclave with `data(from:)` and `data(for:)`, over TLS pinned to the attested key (the default for an enclave you name) or sealed with EHBP. Its doc comments describe the callbacks, refresh, and request rules.
 
 ## Documentation
 
 - [Swift SDK documentation](https://docs.tinfoil.sh/sdk/swift-sdk) and the [proxy server guide](https://docs.tinfoil.sh/guides/proxy-server).
-- Multi-user services must scope prompt caches to each end user with `userCacheSecret` or a per-request `user_cache_secret` in `extraBody`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
+- Multi-user services must scope prompt caches to each end user by passing `userCacheSecret` when creating an `EnclaveHTTPClient`, or with a per-request `user_cache_secret` in `extraBody`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 - `audioCreateSpeechStream(query:options:)` delivers decrypted audio in chunks that can split PCM samples or frames. The stream buffers without bound, so consume it promptly.
 - All OpenAI methods and types are unchanged; see the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI).
 

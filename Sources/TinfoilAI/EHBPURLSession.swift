@@ -124,7 +124,7 @@ private enum EHBPReplayPolicy {
 
 /// Factory for creating EHBP-enabled URLSession instances for streaming requests.
 /// Implements URLSessionFactory to integrate with OpenAI SDK's streaming infrastructure.
-public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
+final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
     let userCacheSecret: String
@@ -140,7 +140,7 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
     ///     request bodies before encryption. Empty values use the default.
     ///   - session: Underlying network session, including any proxy or
     ///     authentication-delegate configuration.
-    public convenience init(
+    convenience init(
         baseURL: String,
         enclaveURL: String? = nil,
         publicKey: Data,
@@ -173,7 +173,7 @@ public final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable
         self.networkSession = session
     }
 
-    public func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
+    func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
         return EHBPStreamingSession(
             baseURL: baseURL,
             verifiedState: verifiedState,
@@ -209,14 +209,14 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
         self.delegate = delegate
     }
 
-    public func dataTask(
+    func dataTask(
         with request: URLRequest,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) -> URLSessionDataTaskProtocol {
         return makeTask(with: request, accumulatesResponse: true, completionHandler: completionHandler)
     }
 
-    public func dataTask(with request: URLRequest) -> URLSessionDataTaskProtocol {
+    func dataTask(with request: URLRequest) -> URLSessionDataTaskProtocol {
         // Delegate-driven streaming path (used by the OpenAI SDK): chunks are
         // forwarded as they arrive and nobody reads the completion data, so
         // the task skips buffering the full response.
@@ -246,7 +246,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
     }
 
     @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
-    public func data(
+    func data(
         for request: URLRequest,
         delegate: (any URLSessionTaskDelegate)?
     ) async throws -> (Data, URLResponse) {
@@ -264,7 +264,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
         }
     }
 
-    public func invalidateAndCancel() {
+    func invalidateAndCancel() {
         lock.lock()
         let tasks = activeTasks.values
         activeTasks.removeAll()
@@ -272,14 +272,14 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
         tasks.forEach { $0.cancel() }
     }
 
-    public func finishTasksAndInvalidate() {
+    func finishTasksAndInvalidate() {
         lock.lock()
         activeTasks.removeAll()
         lock.unlock()
     }
 
     #if canImport(Combine)
-    public func dataTaskPublisher(for request: URLRequest) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
+    func dataTaskPublisher(for request: URLRequest) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
         return Future<(data: Data, response: URLResponse), Error> { [self] promise in
             let task = self.dataTask(with: request) { data, response, error in
                 if let error = error {
@@ -489,7 +489,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
 /// URLSession wrapper that provides EHBP encryption/decryption for all requests.
 /// Conforms to URLSessionProtocol so it can be injected into the OpenAI client.
 /// Delegates all crypto operations to the vetted EHBPClient.
-public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
+final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
     let userCacheSecret: String
@@ -504,7 +504,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     ///   - userCacheSecret: Prompt-cache scoping secret injected into eligible
     ///     request bodies before encryption. Empty values use the default.
     ///   - session: Underlying URLSession to use (defaults to shared)
-    public convenience init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
+    convenience init(baseURL: String, enclaveURL: String? = nil, publicKey: Data, userCacheSecret: String = "", session: URLSession = .shared) throws {
         self.init(
             baseURL: baseURL,
             verifiedState: try makePinnedVerifiedState(
@@ -533,7 +533,7 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
 
     // MARK: - URLSessionProtocol
 
-    public func dataTask(
+    func dataTask(
         with request: URLRequest,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) -> URLSessionDataTaskProtocol {
@@ -545,14 +545,14 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         return task
     }
 
-    public func dataTask(with request: URLRequest) -> URLSessionDataTaskProtocol {
+    func dataTask(with request: URLRequest) -> URLSessionDataTaskProtocol {
         return AsyncDataTask(request: request) { [self] in
             try await self.performRequest(request)
         } completionHandler: { _, _, _ in }
     }
 
     @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
-    public func data(
+    func data(
         for request: URLRequest,
         delegate: (any URLSessionTaskDelegate)?
     ) async throws -> (Data, URLResponse) {
@@ -561,16 +561,16 @@ public final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
 
     // MARK: - InvalidatableSession
 
-    public func invalidateAndCancel() {
+    func invalidateAndCancel() {
     }
 
-    public func finishTasksAndInvalidate() {
+    func finishTasksAndInvalidate() {
     }
 
     // MARK: - URLSessionCombine
 
     #if canImport(Combine)
-    public func dataTaskPublisher(for request: URLRequest) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
+    func dataTaskPublisher(for request: URLRequest) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
         return Future<(data: Data, response: URLResponse), Error> { [self] promise in
             Task {
                 do {
