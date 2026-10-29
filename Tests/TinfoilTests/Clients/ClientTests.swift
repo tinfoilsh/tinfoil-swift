@@ -9,7 +9,7 @@ final class Box<T>: @unchecked Sendable {
     }
 }
 
-final class TinfoilAITests: XCTestCase {
+final class ClientTests: XCTestCase {
     private static let testUserCacheSecret = "swift-live-integration-cache-secret"
 
     // MARK: - Test Configuration
