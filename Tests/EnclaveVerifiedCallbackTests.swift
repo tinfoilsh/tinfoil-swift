@@ -70,6 +70,25 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         XCTAssertEqual(server.requestStore.lastRequest?.path, "/api/v1/models")
     }
 
+    func testTheBasePathComesFromTheNormalizedBaseURL() throws {
+        // A base URL without a scheme is read as HTTPS; its path must be read
+        // from that same URL, not the raw string.
+        for (baseURL, expected) in [("proxy.example/api/", "/api"), ("https://proxy.example/api/", "/api"), ("proxy.example", "/v1")] {
+            let openAI = try OpenAI.sealed(
+                apiKey: "test-key",
+                apiKeyProvider: nil,
+                baseURL: baseURL,
+                session: EHBPURLSession(baseURL: baseURL, verifiedState: EHBPVerifiedState(endpoint: EHBPVerifiedEndpoint(enclaveURL: "https://enclave.example", publicKey: Data(repeating: 1, count: 32))), userCacheSecret: ""),
+                streamingFactory: EHBPURLSessionFactory(baseURL: baseURL, verifiedState: EHBPVerifiedState(endpoint: EHBPVerifiedEndpoint(enclaveURL: "https://enclave.example", publicKey: Data(repeating: 1, count: 32))), userCacheSecret: ""),
+                parsingOptions: .relaxed,
+                customHeaders: [:],
+                tinfoilEvents: []
+            )
+            XCTAssertEqual(openAI.configuration.host, "proxy.example", baseURL)
+            XCTAssertEqual(openAI.configuration.basePath, expected, baseURL)
+        }
+    }
+
     func testOpenAIRequestsKeepTheBaseURLsPath() async throws {
         for (path, expected) in [("", "/v1/chat/completions"), ("/api/", "/api/chat/completions")] {
             let client = try await EnclaveOpenAIClient(httpClient: client(path: path), apiKey: "test-key")

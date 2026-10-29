@@ -217,7 +217,7 @@ extension OpenAI {
     ) throws -> OpenAI {
         let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
         let defaultPort = urlComponents.scheme == "https" ? 443 : 80
-        var basePath = URL(string: baseURL)?.path ?? ""
+        var basePath = urlComponents.url.path
         while basePath.hasSuffix("/") {
             basePath.removeLast()
         }
