@@ -76,7 +76,7 @@ final class TinfoilAITests: XCTestCase {
 
         let client = try await TinfoilAI.create(
             apiKey: try getAPIKey(),
-            userCacheSecret: Self.testUserCacheSecret
+            client: EnclaveHTTPClient.discoverRouter(userCacheSecret: Self.testUserCacheSecret)
         )
 
         let chatQuery = ChatQuery(
@@ -113,7 +113,10 @@ final class TinfoilAITests: XCTestCase {
     // never leave the machine.
     func testCreateFailsForAnUnreachableEnclave() async throws {
         do {
-            _ = try await TinfoilAI.create(apiKey: "test-key", handle: EnclaveHandle(enclave: "127.0.0.1:9"))
+            _ = try await TinfoilAI.create(
+                apiKey: "test-key",
+                client: EnclaveHTTPClient(enclave: "127.0.0.1:9", repo: TinfoilConstants.defaultGithubRepo, transportMode: .ehbp)
+            )
             XCTFail("Should have failed to fetch attestation from an unreachable enclave")
         } catch TinfoilError.networkError {
         } catch {
@@ -234,9 +237,10 @@ final class TinfoilAITests: XCTestCase {
 
         let client = try await TinfoilAI.create(
             apiKey: try getAPIKey(),
-            handle: EnclaveHandle(onVerificationResult: { result in
-                captured.value = result
-            })
+            client: EnclaveHTTPClient.discoverRouter(
+                userCacheSecret: Self.testUserCacheSecret,
+                onVerificationResult: { result in captured.value = result }
+            )
         )
 
         guard case .success(let verification) = captured.value else {
@@ -263,9 +267,12 @@ final class TinfoilAITests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                handle: EnclaveHandle(enclave: "127.0.0.1:9", onVerificationResult: { result in
-                    captured.value = result
-                })
+                client: EnclaveHTTPClient(
+                    enclave: "127.0.0.1:9",
+                    repo: TinfoilConstants.defaultGithubRepo,
+                    transportMode: .ehbp,
+                    onVerificationResult: { result in captured.value = result }
+                )
             )
             XCTFail("Should have failed to verify an unreachable enclave")
         } catch {
@@ -275,11 +282,11 @@ final class TinfoilAITests: XCTestCase {
         }
     }
 
-    func testEnclaveHandleVerifiesTheDefaultRouter() async throws {
+    func testDiscoveredRouterVerifies() async throws {
         try requireLiveIntegration()
-        let handle = try EnclaveHandle()
+        let client = try await EnclaveHTTPClient.discoverRouter(userCacheSecret: Self.testUserCacheSecret)
 
-        let verification = try await handle.verify()
+        let verification = try await client.reverify()
 
         XCTAssertFalse(verification.enclaveHost.isEmpty)
         XCTAssertEqual(verification.configRepo, TinfoilConstants.defaultGithubRepo)
@@ -287,7 +294,7 @@ final class TinfoilAITests: XCTestCase {
         XCTAssertEqual(verification.tlsPublicKeyFingerprint.count, 64)
         XCTAssertNotNil(verification.codeMeasurement)
         XCTAssertNotNil(verification.enclaveMeasurement)
-        let latest = await handle.verification
+        let latest = await client.current
         XCTAssertEqual(latest, verification)
     }
 

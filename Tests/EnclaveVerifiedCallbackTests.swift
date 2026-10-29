@@ -26,27 +26,45 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         try await super.tearDown()
     }
 
-    private func handle(
-        onEnclaveVerified: @escaping EnclaveVerifiedCallback,
-        onVerificationResult: VerificationResultCallback? = nil
-    ) throws -> EnclaveHandle {
+    /// An EHBP client for enclave.example that sends to the local server
+    private func client(
+        onEnclaveVerified: @escaping EnclaveVerifiedCallback = { _ in },
+        onVerificationResult: VerificationResultCallback? = nil,
+        path: String = ""
+    ) throws -> EnclaveHTTPClient {
         let network = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
-        return try EnclaveHandle(
-            enclave: "enclave.example",
-            repo: "org/repo",
-            attestationRelay: nil,
-            attestor: Attestor(
-                verifier: FakeVerifier(),
-                fetch: { try network.fetch($0) },
-                retryDelay: 0,
-                onEnclaveVerified: onEnclaveVerified
+        return try EnclaveHTTPClient(
+            handle: EnclaveHandle(
+                enclave: "enclave.example",
+                repo: "org/repo",
+                attestationRelay: nil,
+                attestor: Attestor(
+                    verifier: FakeVerifier(),
+                    fetch: { try network.fetch($0) },
+                    retryDelay: 0,
+                    onEnclaveVerified: onEnclaveVerified
+                ),
+                onVerificationResult: onVerificationResult
             ),
-            onVerificationResult: onVerificationResult
+            transportMode: .ehbp,
+            baseURL: URL(string: server.baseURL + path)!,
+            userCacheSecret: Self.cacheSecret,
+            allowPlainHTTP: true
         )
     }
 
     private func chat(_ client: TinfoilAI) async throws {
         _ = try await client.chats(query: ChatQuery(messages: [.user(.init(content: .string("Hi")))], model: "test-model"))
+    }
+
+    func testOpenAIRequestsKeepTheBaseURLsPath() async throws {
+        for (path, expected) in [("", "/v1/chat/completions"), ("/api/", "/api/chat/completions")] {
+            let client = try await TinfoilAI.create(apiKey: "test-key", client: client(path: path))
+            // The stub server can't seal a response, so the request fails;
+            // what matters is where it was sent.
+            _ = try? await chat(client)
+            XCTAssertEqual(server.requestStore.lastRequest?.path, expected, "base URL path \"\(path)\"")
+        }
     }
 
     func testCreateFailsWhenTheEnclaveIsRejected() async {
@@ -55,12 +73,10 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         do {
             _ = try await TinfoilAI.create(
                 apiKey: "test-key",
-                baseURL: server.baseURL,
-                handle: try handle(
+                client: try client(
                     onEnclaveVerified: { _ in throw Refusal() },
                     onVerificationResult: { reported.value = $0 }
-                ),
-                userCacheSecret: Self.cacheSecret
+                )
             )
             XCTFail("a rejected enclave must not produce a client")
         } catch let error as TinfoilError where error.isRefusal {
@@ -79,12 +95,10 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
 
         _ = try await TinfoilAI.create(
             apiKey: "test-key",
-            baseURL: server.baseURL,
-            handle: handle(
+            client: client(
                 onEnclaveVerified: { _ in events.record("enclave verified") },
                 onVerificationResult: { _ in events.record("result") }
-            ),
-            userCacheSecret: Self.cacheSecret
+            )
         )
 
         XCTAssertEqual(events.values, ["enclave verified", "result"])
@@ -94,13 +108,11 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         let verified = Recorder<String>()
         let client = try await TinfoilAI.create(
             apiKey: "test-key",
-            baseURL: server.baseURL,
-            handle: handle(onEnclaveVerified: { verification in
+            client: client(onEnclaveVerified: { verification in
                 if verified.record(verification.enclaveHost) > 1 {
                     throw Refusal()
                 }
-            }),
-            userCacheSecret: Self.cacheSecret
+            })
         )
         // The enclave rejects the key, so the client re-verifies before
         // replaying; the rejected re-verification must end the request.

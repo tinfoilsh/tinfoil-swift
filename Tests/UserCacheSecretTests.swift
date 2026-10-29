@@ -160,34 +160,38 @@ final class UserCacheSecretTests: XCTestCase {
     }
 
     func testAnEnclaveTheCallerNamesGetsOnlyAnExplicitSecret() throws {
-        let home = try makeTempHome()
-        let handle = try EnclaveHandle(enclave: "enclave.example", repo: "org/repo")
-
-        XCTAssertEqual(UserCacheSecret.resolve(explicit: "explicit", for: handle, environment: [:], homeDirectory: home), "explicit")
-        for explicit in [nil, ""] {
-            XCTAssertEqual(
-                UserCacheSecret.resolve(explicit: explicit, for: handle, environment: [envVar: "from-env"], homeDirectory: home),
-                "",
-                "Only Tinfoil's routers read the secret, so none is resolved for another enclave."
-            )
-        }
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: secretFile(in: home).deletingLastPathComponent().path),
-            "Only Tinfoil's routers provision the shared secret."
+        XCTAssertEqual(
+            try EnclaveHTTPClient(enclave: "enclave.example", repo: "org/repo").userCacheSecret,
+            "",
+            "Only Tinfoil's routers read the secret, so none is resolved for another enclave."
+        )
+        XCTAssertEqual(
+            try EnclaveHTTPClient(enclave: "enclave.example", repo: "org/repo", userCacheSecret: "explicit").userCacheSecret,
+            "explicit"
         )
     }
 
-    func testTinfoilsRoutersResolveTheSecret() throws {
-        for handle in [try EnclaveHandle(), try EnclaveHandle(attestationRelay: "relay.example")] {
-            let home = try makeTempHome()
-
-            XCTAssertEqual(
-                UserCacheSecret.resolve(explicit: nil, for: handle, environment: [envVar: "from-env"], homeDirectory: home),
-                "from-env"
+    func testDiscoveringARouterResolvesTheSecret() async throws {
+        let home = try makeTempHome()
+        // A relay skips discovery's network I/O; the route is still Tinfoil's router.
+        func discover(environment: [String: String]) async throws -> EnclaveHTTPClient {
+            try await EnclaveHTTPClient.discoverRouter(
+                attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
+                transportMode: .ehbp,
+                baseURL: nil,
+                attestationRelay: "relay.example",
+                userCacheSecret: nil,
+                environment: environment,
+                homeDirectory: home,
+                onVerificationResult: nil
             )
-            assertIsGeneratedSecret(UserCacheSecret.resolve(explicit: nil, for: handle, environment: [:], homeDirectory: home))
-            XCTAssertTrue(FileManager.default.fileExists(atPath: secretFile(in: home).path), "The router route provisions the shared secret.")
         }
+
+        let fromEnvironment = try await discover(environment: [envVar: "from-env"])
+        XCTAssertEqual(fromEnvironment.userCacheSecret, "from-env")
+        let generated = try await discover(environment: [:])
+        assertIsGeneratedSecret(generated.userCacheSecret)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secretFile(in: home).path), "The router route provisions the shared secret.")
     }
 
     // MARK: - Persistence

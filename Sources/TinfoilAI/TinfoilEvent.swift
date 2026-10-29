@@ -17,7 +17,7 @@ public enum TinfoilEvent: String, Sendable, Hashable, CaseIterable {
 
 /// Name of the request header clients set to opt into the tinfoil-event
 /// marker stream.
-public let tinfoilEventsHeader = "X-Tinfoil-Events"
+let tinfoilEventsHeader = "X-Tinfoil-Events"
 
 /// Formats a set of tinfoil events as the comma-separated value expected
 /// by the `X-Tinfoil-Events` request header. Returns `nil` when the set

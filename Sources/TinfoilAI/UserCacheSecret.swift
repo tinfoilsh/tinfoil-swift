@@ -7,14 +7,14 @@ import Security
 /// share cached prompt prefixes, requests carrying different secrets cannot
 /// observe each other's cache timing.
 ///
-/// A client of one of Tinfoil's routers resolves it in this order, mirroring
-/// the other Tinfoil clients. A client of an enclave the handle names uses
-/// only the first two, since other enclaves don't read the field, and reads
-/// nothing from the environment or the home directory:
+/// A client from `EnclaveHTTPClient.discoverRouter` resolves it in this order,
+/// mirroring the other Tinfoil clients. A client of an enclave the caller
+/// names uses only the first two, since other enclaves don't read the field,
+/// and reads nothing from the environment or the home directory:
 ///
 ///  1. a non-empty per-request `user_cache_secret` field in the body, e.g.
 ///     set via `ChatQuery.extraBody`,
-///  2. the `userCacheSecret` parameter of `TinfoilAI.create`,
+///  2. the `userCacheSecret` parameter of the `EnclaveHTTPClient`,
 ///  3. the `TINFOIL_USER_CACHE_SECRET` environment variable,
 ///  4. a generated secret persisted at `~/.tinfoil/user_cache_secret` (0600),
 ///     shared with other Tinfoil SDKs using the same home directory.
@@ -52,24 +52,8 @@ internal enum UserCacheSecret {
 
     // MARK: - Resolution
 
-    /// Resolves the client-level secret for a client of handle's enclave.
-    /// Only Tinfoil's router reads the field, so a client of an enclave the
-    /// caller named sends only a non-empty explicit secret, as in the Go SDK,
-    /// and nothing is read from the environment or persisted for it.
-    static func resolve(
-        explicit: String?,
-        for handle: EnclaveHandle,
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: URL? = defaultHomeDirectory
-    ) -> String {
-        guard handle.picksTinfoilRouter else {
-            return explicit ?? ""
-        }
-        return resolve(explicit: explicit, environment: environment, homeDirectory: homeDirectory)
-    }
-
     /// Resolves the client-level secret: a non-empty explicit
-    /// `TinfoilAI.create` parameter wins, then a non-empty environment value,
+    /// `userCacheSecret` parameter wins, then a non-empty environment value,
     /// then the persisted (or generated) secret. Never throws: persistence
     /// failures degrade to an in-memory secret.
     static func resolve(

@@ -573,7 +573,7 @@ final class EHBPTests: XCTestCase {
                 enclaveURL: "https://old-router.example",
                 publicKey: testPublicKey
             ),
-            refresh: {
+            refresh: { _ in
                 await refreshCounter.increment()
                 return EHBPVerifiedEndpoint(
                     enclaveURL: "https://new-router.example",
@@ -610,7 +610,7 @@ final class EHBPTests: XCTestCase {
                 publicKey: testPublicKey,
                 expiresAt: expiresAt
             ),
-            refresh: {
+            refresh: { _ in
                 await refreshCounter.increment()
                 await beforeRefreshing()
                 return EHBPVerifiedEndpoint(
@@ -894,7 +894,7 @@ final class EHBPTests: XCTestCase {
                 enclaveURL: "https://old-router.example",
                 publicKey: testPublicKey
             ),
-            refresh: {
+            refresh: { _ in
                 await refreshCounter.increment()
                 refreshStarted.fulfill()
                 await gate.wait()

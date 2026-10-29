@@ -53,17 +53,16 @@ struct Attestor: Sendable {
         return try accepted(verified)
     }
 
-    /// Verifies the first of Tinfoil's routers that verifies against the router
-    /// repository, trying each once, and otherwise the fallback router. A
-    /// router list that cannot be fetched or read leaves only the fallback,
-    /// and so does reaching discoveryTimeout, however many routers are left.
-    func attestDefaultRouter() async throws -> Verification {
-        let repo = TinfoilConstants.defaultGithubRepo
-        if let verified = await firstVerifiedRouter(repo: repo) {
-            return verified
-        }
+    /// Returns the verification of the first of Tinfoil's routers that
+    /// verifies against the router repository, trying each once, or nil when
+    /// none does, as tinfoil-go's router discovery does. The caller then uses
+    /// the fallback router, verified on first use. A router list that cannot
+    /// be fetched or read leaves only the fallback, and so does reaching
+    /// discoveryTimeout, however many routers are left.
+    func discoverRouter() async throws -> Verification? {
+        let verified = await firstVerifiedRouter(repo: TinfoilConstants.defaultGithubRepo)
         try Task.checkCancellation()
-        return try await attest(host: TinfoilConstants.fallbackEnclave, relay: nil, repo: repo)
+        return verified
     }
 
     /// The first discovered router that verifies before discoveryTimeout, or
