@@ -59,9 +59,6 @@ internal enum URLHelpers {
         return components
     }
 
-    /// Extracts the origin (scheme://host:port) from a URL string for comparison
-    /// - Parameter urlString: The URL string to extract origin from
-    /// - Returns: The origin string (scheme://host:port), or empty string if invalid
     /// The host lowercased, with an IPv6 literal in its canonical text form
     /// (RFC 5952), so differently written forms of one address compare
     /// equal. An IPv6 zone identifier keeps its case, since zones that differ
@@ -81,6 +78,9 @@ internal enum URLHelpers {
         return parts.count == 2 ? "\(canonical)%\(parts[1])" : canonical
     }
 
+    /// Extracts the origin (scheme://host:port) from a URL string for comparison
+    /// - Parameter urlString: The URL string to extract origin from
+    /// - Returns: The origin string (scheme://host:port), or empty string if invalid
     static func origin(from urlString: String) -> String {
         guard let components = try? parseURL(urlString) else { return "" }
         let scheme = components.scheme.lowercased()
