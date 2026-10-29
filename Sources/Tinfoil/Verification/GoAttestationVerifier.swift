@@ -84,13 +84,13 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
         return parsed
     }
 
-    func verify(document: Data, nonce: Data, repo: String, enclaveHost: String) throws -> Verification {
+    func verify(document: Data, nonce: Data, repo: String) throws -> Verification {
         var error: NSError?
         let payload = verifier.verify(document, nonce: nonce, repo: repo, error: &error)
         if let error {
             throw Self.classify(error)
         }
-        return try Verification(payload: payload, enclaveHost: enclaveHost)
+        return try Verification(payload: payload)
     }
 
     private static func classify(_ error: Error) -> TinfoilError {

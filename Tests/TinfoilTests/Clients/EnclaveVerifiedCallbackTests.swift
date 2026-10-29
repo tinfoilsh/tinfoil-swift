@@ -140,7 +140,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         let verified = Recorder<String>()
         let client = try await EnclaveOpenAIClient(
             httpClient: client(onEnclaveVerified: { verification in
-                if verified.record(verification.enclaveHost) > 1 {
+                if verified.record(verification.codeDigest) > 1 {
                     throw Refusal()
                 }
             }),

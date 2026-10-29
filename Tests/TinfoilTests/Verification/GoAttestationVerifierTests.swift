@@ -67,10 +67,10 @@ final class GoAttestationVerifierTests: XCTestCase {
         let document = Data("{}".utf8)
 
         assertCategory(isAttestation) {
-            try verifier.verify(document: document, nonce: nonce, repo: Self.routerRepo, enclaveHost: "enclave.example")
+            try verifier.verify(document: document, nonce: nonce, repo: Self.routerRepo)
         }
         XCTAssertThrowsError(
-            try verifier.verify(document: document, nonce: nonce, repo: Self.routerRepo, enclaveHost: "enclave.example")
+            try verifier.verify(document: document, nonce: nonce, repo: Self.routerRepo)
         ) { error in
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("unexpected error \(error)")
@@ -78,7 +78,7 @@ final class GoAttestationVerifierTests: XCTestCase {
             XCTAssertEqual(failure.layer, .envelope, "A malformed document is rejected by the envelope layer.")
         }
         assertCategory(isConfiguration) {
-            try verifier.verify(document: document, nonce: nonce.dropFirst(), repo: Self.routerRepo, enclaveHost: "enclave.example")
+            try verifier.verify(document: document, nonce: nonce.dropFirst(), repo: Self.routerRepo)
         }
         // A malformed repo is also a configuration error, but the verifier
         // only reads repo after parsing the document (its meaning depends on
@@ -124,7 +124,6 @@ final class GoAttestationVerifierTests: XCTestCase {
             repo: Self.routerRepo
         )
 
-        XCTAssertEqual(verification.enclaveHost, TinfoilConstants.fallbackEnclave)
         XCTAssertEqual(verification.configRepo, Self.routerRepo)
         XCTAssertEqual(verification.hpkePublicKey?.count, 64)
         XCTAssertEqual(verification.tlsPublicKeyFingerprint.count, 64)
