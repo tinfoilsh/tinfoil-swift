@@ -1,7 +1,7 @@
 import Foundation
 @testable import Tinfoil
 
-/// Stands in for the Go verifier. A document is "<verdict>:<nonce hex>"; the
+/// Stands in for the TinfoilGo verifier. A document is "<verdict>:<nonce hex>"; the
 /// stand-in refuses one whose nonce is not the one it was given, so the tests
 /// also prove the attestor carries a single nonce through each attempt.
 final class FakeVerifier: AttestationVerifier, @unchecked Sendable {

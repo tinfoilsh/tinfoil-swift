@@ -1,13 +1,13 @@
 import Foundation
 
-/// One attested enclave's verification state, as tinfoil-go's
-/// `internal/enclave.Handle` keeps it: it verifies the enclave and keeps the
-/// result until it expires or the caller asks for a fresh one. It sends no
-/// requests; `EnclaveHTTPClient` ties traffic to the keys it verifies.
+/// One attested enclave's verification state: it verifies the enclave and
+/// keeps the result until it expires or the caller asks for a fresh one. It
+/// sends no requests; `EnclaveConnection` ties traffic to the keys it
+/// verifies.
 ///
 /// Each `reverify()` is one run. A run fetches the enclave's attestation
-/// document and has tinfoil-go verify it, retrying a failed attempt once. The
-/// run's result goes to `onVerificationResult`.
+/// document and has the TinfoilGo verifier check it, retrying a failed
+/// attempt once. The run's result goes to `onVerificationResult`.
 actor EnclaveHandle {
     nonisolated let enclave: String
     nonisolated let repo: String
@@ -23,8 +23,8 @@ actor EnclaveHandle {
     /// have expired; `ensureVerified()` returns one that has not.
     private(set) var current: Verification?
 
-    /// - Parameter initial: A verification of enclave already made, as by
-    ///   router discovery, so the first request need not verify again.
+    /// - Parameter initial: A verification of `enclave` already made, as by
+    ///   router discovery, kept as the current one so it isn't repeated.
     init(
         enclave: String,
         repo: String,

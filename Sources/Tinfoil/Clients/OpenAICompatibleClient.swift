@@ -203,8 +203,8 @@ extension OpenAI {
     }
 
     /// Sets up the OpenAI client over the given EHBP sessions. Requests go to
-    /// `baseURL`, under its path if it has one, as tinfoil-go's OpenAI clients
-    /// use a base URL as is, and under `/v1` for a bare origin.
+    /// `baseURL`, under its path if it has one, and under `/v1` for a bare
+    /// origin.
     static func sealed(
         apiKey: String?,
         apiKeyProvider: (@Sendable () -> String?)?,

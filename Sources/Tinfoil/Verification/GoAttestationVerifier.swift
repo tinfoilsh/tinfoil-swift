@@ -3,7 +3,8 @@ import TinfoilGo
 
 extension VerificationPolicy {
     /// The options JSON `MobileNewVerifier` takes; empty for the defaults.
-    /// Go validates the rest, such as the shape of pinned registers.
+    /// The framework validates the rest, such as the shape of pinned
+    /// registers.
     func optionsJSON() throws -> String {
         guard pinnedRegisters != nil || freshnessMaxAge != nil else {
             return ""
@@ -15,11 +16,11 @@ extension VerificationPolicy {
         return String(decoding: try JSONEncoder().encode(options), as: UTF8.self)
     }
 
-    /// Go takes the age as an integer count of nanoseconds. A negative age
-    /// is refused before rounding, since one under half a nanosecond would
-    /// round to zero and silently select the default. A value with no such
-    /// count, such as NaN, infinity or more than about 292 years, is refused
-    /// rather than trapping in the conversion.
+    /// The framework takes the age as an integer count of nanoseconds. A
+    /// negative age is refused before rounding, since one under half a
+    /// nanosecond would round to zero and silently select the default. A value
+    /// with no such count, such as NaN, infinity or more than about 292 years,
+    /// is refused rather than trapping in the conversion.
     private static func nanoseconds(_ seconds: TimeInterval) throws -> Int64 {
         guard seconds >= 0, let nanoseconds = Int64(exactly: (seconds * 1_000_000_000).rounded()) else {
             throw TinfoilError.configuration(
@@ -45,10 +46,10 @@ extension VerificationPolicy {
     }
 }
 
-/// The tinfoil-go verifier bound through gomobile. Go makes every trust
-/// decision; this only translates types and errors across the FFI.
+/// The TinfoilGo framework's verifier. It makes every trust decision; this
+/// only translates types and errors across the framework boundary.
 final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
-    // MobileVerifier wraps an immutable Go policy that is safe to use from
+    // MobileVerifier wraps an immutable policy that is safe to use from
     // several threads at once.
     private let verifier: MobileVerifier
 
@@ -59,14 +60,15 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
             throw Self.classify(error)
         }
         guard let verifier else {
-            throw TinfoilError.configuration("tinfoil-go returned no verifier")
+            throw TinfoilError.configuration("TinfoilGo returned no verifier")
         }
         self.verifier = verifier
     }
 
     func newNonce() -> Data {
-        // Go never returns nil here. If it did, the empty nonce would be
-        // refused by attestationURL, so the attempt still fails closed.
+        // The framework never returns nil here. If it did, the empty nonce
+        // would be refused by attestationURL, so the attempt still fails
+        // closed.
         MobileNewNonce() ?? Data()
     }
 
@@ -77,7 +79,7 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
             throw Self.classify(error)
         }
         guard let parsed = URL(string: url) else {
-            throw TinfoilError.configuration("tinfoil-go returned an invalid attestation URL: \(url)")
+            throw TinfoilError.configuration("TinfoilGo returned an invalid attestation URL: \(url)")
         }
         return parsed
     }

@@ -1,9 +1,8 @@
 import Foundation
 
 /// An OpenAI client whose requests are sealed with EHBP to one attested
-/// enclave that you name, matching tinfoil-go's `EnclaveOpenAIClient`. It
-/// sends through an `EnclaveHTTPClient`, which is verified before the client
-/// is returned.
+/// enclave that you name. It sends through an `EnclaveHTTPClient`, which is
+/// verified before the client is returned.
 public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     public let openAI: OpenAI
     /// The enclave client requests go through
@@ -11,8 +10,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
 
     /// Creates an `EnclaveHTTPClient` for `enclave` using EHBP, verified as
     /// `EnclaveHTTPClient.init(enclave:repo:…)` verifies it, and an OpenAI
-    /// client over it, as tinfoil-go's `NewEnclaveOpenAIClient` does. The API
-    /// key is checked before any network I/O.
+    /// client over it. The API key is checked before any network I/O.
     ///
     /// The enclave parameters are those of `EnclaveHTTPClient`, which
     /// describes them; requests are always sealed with EHBP.

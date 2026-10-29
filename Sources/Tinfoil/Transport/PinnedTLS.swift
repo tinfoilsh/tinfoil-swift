@@ -15,8 +15,7 @@ enum CertificateFingerprint {
     private static let explicitVersionTag: UInt8 = 0xA0
 
     /// Hashes the subjectPublicKeyInfo field's DER exactly as it appears in the
-    /// certificate, as Go's RawSubjectPublicKeyInfo does, so any key type works
-    /// without re-encoding the key.
+    /// certificate, so any key type works without re-encoding the key.
     static func spkiSHA256(certificateDER: Data) throws -> String {
         let bytes = ArraySlice(Array(certificateDER))
         guard let certificate = try elements(of: bytes).first, certificate.tag == sequenceTag,
@@ -83,7 +82,7 @@ enum CertificateFingerprint {
 
 /// Sends requests whose every TLS connection, redirects included, must present
 /// the attested key: the system's usual certificate validation, then the
-/// certificate's key fingerprint against the attestation's, as the Go SDK pins.
+/// certificate's key fingerprint against the attestation's.
 /// Each send has a session of its own, so no connection outlives the key it
 /// was checked against.
 enum PinnedTLS {

@@ -5,10 +5,11 @@ import FoundationNetworking
 #endif
 
 /// Fetches attestation material with the app's own networking, so system
-/// proxies and task cancellation apply. Its limits match the Go SDK's fetch:
-/// HTTPS only, every redirect included; a 30 second timeout; a 32 MiB cap on
-/// the body; and a session of its own for every fetch, because a pooled
-/// connection may still reach a replica that is draining after a cutover.
+/// proxies and task cancellation apply. Its limits are those the other Tinfoil
+/// SDKs use: HTTPS only, every redirect included; a 30 second timeout; a
+/// 32 MiB cap on the body; and a session of its own for every fetch, because a
+/// pooled connection may still reach a replica that is draining after a
+/// cutover.
 struct AttestationFetcher: Sendable {
     static let sdkNameHeader = "Tinfoil-SDK"
     static let sdkVersionHeader = "Tinfoil-SDK-Version"

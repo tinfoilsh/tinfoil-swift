@@ -61,7 +61,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
 
         XCTAssertEqual(client.enclave, "enclave.example")
         XCTAssertEqual(client.repo, "org/repo")
-        XCTAssertEqual(client.transportMode, .tls, "A named enclave uses pinned TLS by default, as in Go.")
+        XCTAssertEqual(client.transportMode, .tls, "A named enclave uses pinned TLS by default.")
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"])
         let current = await client.current
         XCTAssertEqual(current?.enclaveHost, "enclave.example")
@@ -98,7 +98,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
 
         XCTAssertEqual(client.enclave, "router-a.example")
         XCTAssertEqual(client.repo, TinfoilConstants.defaultGithubRepo)
-        XCTAssertEqual(client.transportMode, .ehbp, "A router uses EHBP by default, as in Go.")
+        XCTAssertEqual(client.transportMode, .ehbp, "A router uses EHBP by default.")
         let discovered = await client.current
         XCTAssertEqual(discovered?.enclaveHost, "router-a.example", "Discovery's verification is kept.")
         guard results.values.count == 1, case .success(let reported) = results.values[0] else {

@@ -2,7 +2,7 @@ import XCTest
 import Foundation
 @testable import Tinfoil
 
-/// Exercises the real tinfoil-go verifier through the framework: the FFI
+/// Exercises the real TinfoilGo verifier through the framework: the FFI
 /// types, the options JSON, and how each Go error category reaches Swift.
 final class GoAttestationVerifierTests: XCTestCase {
     private static let routerRepo = TinfoilConstants.defaultGithubRepo

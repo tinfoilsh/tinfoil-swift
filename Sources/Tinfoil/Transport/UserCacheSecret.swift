@@ -7,10 +7,11 @@ import Security
 /// share cached prompt prefixes, requests carrying different secrets cannot
 /// observe each other's cache timing.
 ///
-/// A client from `EnclaveHTTPClient.discoverRouter` resolves it in this order,
-/// mirroring the other Tinfoil clients. A client of an enclave the caller
-/// names uses only the first two, since other enclaves don't read the field,
-/// and reads nothing from the environment or the home directory:
+/// A client of one of Tinfoil's routers, such as `RouterHTTPClient` or
+/// `Client`, resolves it in this order, mirroring the other Tinfoil SDKs. A
+/// client of an enclave the caller names uses only the first two, since other
+/// enclaves don't read the field, and reads nothing from the environment or
+/// the home directory:
 ///
 ///  1. a non-empty per-request `user_cache_secret` field in the body, e.g.
 ///     set via `ChatQuery.extraBody`,

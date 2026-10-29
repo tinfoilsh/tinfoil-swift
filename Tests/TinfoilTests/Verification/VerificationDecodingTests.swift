@@ -2,8 +2,8 @@ import XCTest
 import Foundation
 @testable import Tinfoil
 
-/// Pins the Swift side of the verifier payload contract. The Go side is
-/// verificationJSON in tinfoil-go's mobile/verification.go.
+/// Pins the Swift side of the verifier payload contract. The other side is
+/// verificationJSON in the TinfoilGo framework's mobile/verification.go.
 final class VerificationDecodingTests: XCTestCase {
     private static let host = "router.inference.tinfoil.sh"
 
