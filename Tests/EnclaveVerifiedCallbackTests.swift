@@ -57,6 +57,19 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         _ = try await client.chats(query: ChatQuery(messages: [.user(.init(content: .string("Hi")))], model: "test-model"))
     }
 
+    func testRawRequestsReachTheLocalServerOverEHBP() async throws {
+        let client = try await client(path: "/api/")
+        var request = URLRequest(url: URL(string: "v1/models")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+
+        // The stub server can't seal a response, so the request fails;
+        // what matters is that it was sent, sealed, where it resolves.
+        _ = try? await client.data(for: request)
+
+        XCTAssertEqual(server.requestStore.lastRequest?.path, "/api/v1/models")
+    }
+
     func testOpenAIRequestsKeepTheBaseURLsPath() async throws {
         for (path, expected) in [("", "/v1/chat/completions"), ("/api/", "/api/chat/completions")] {
             let client = try await TinfoilAI.create(apiKey: "test-key", client: client(path: path))

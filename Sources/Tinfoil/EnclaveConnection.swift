@@ -30,6 +30,8 @@ final class EnclaveConnection: Sendable {
     /// The prompt-cache secret injected into eligible request bodies, already
     /// resolved; empty injects none.
     let userCacheSecret: String
+    /// Whether `http` URLs are accepted, for tests against a local server
+    private let allowsPlainHTTP: Bool
     /// The EHBP sessions, sealing to one shared verified key; nil in TLS mode.
     let ehbp: EHBPChannel?
     private let send: PinnedTLS.Send
@@ -86,8 +88,9 @@ final class EnclaveConnection: Sendable {
     /// - Parameters:
     ///   - initial: The handle's initial verification, if it has one, so EHBP
     ///     need not wait on the handle to seal the first request.
-    ///   - allowPlainHTTP: Accepts an `http` base URL, for tests that send
-    ///     EHBP requests to a local server. Nothing else sets it.
+    ///   - allowPlainHTTP: Accepts an `http` base URL and request URLs, for
+    ///     tests that send EHBP requests to a local server. Nothing else sets
+    ///     it.
     init(
         handle: EnclaveHandle,
         initial: Verification? = nil,
@@ -112,6 +115,7 @@ final class EnclaveConnection: Sendable {
         self.transportMode = transportMode
         self.baseURL = base
         self.userCacheSecret = userCacheSecret
+        self.allowsPlainHTTP = allowPlainHTTP
         self.send = send
         self.ehbp = transportMode == .ehbp
             ? EHBPChannel(origin: origin, enclaveURL: "https://\(handle.enclave)", handle: handle, initial: initial, userCacheSecret: userCacheSecret)
@@ -228,8 +232,14 @@ final class EnclaveConnection: Sendable {
         // as "https://other.example/x", connecting to other.example.
         // Requiring a host refuses it explicitly, rather than relying on the
         // origin check below failing because URLHelpers.origin cannot parse it.
-        guard let target, target.host != nil, target.scheme?.lowercased() == "https" else {
+        let schemes = allowsPlainHTTP ? ["https", "http"] : ["https"]
+        guard let target, target.host != nil, schemes.contains(target.scheme?.lowercased() ?? "") else {
             throw TinfoilError.configuration("requests to the enclave must be HTTPS URLs with a host, not \(url.absoluteString)")
+        }
+        // URLSession would send them as an Authorization header. The message
+        // names only the host, so the credentials aren't echoed into logs.
+        guard target.user == nil, target.password == nil else {
+            throw TinfoilError.configuration("request URLs must not carry credentials, as one for \(target.host ?? "the enclave") does")
         }
         let origin = URLHelpers.origin(from: baseURL.absoluteString)
         guard !origin.isEmpty, URLHelpers.origin(from: target.absoluteString) == origin else {

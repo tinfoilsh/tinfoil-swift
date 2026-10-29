@@ -155,6 +155,21 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         XCTAssertTrue(network.urls.isEmpty, "A refused request is refused before verifying.")
     }
 
+    func testCredentialsInARequestURLAreRefused() async throws {
+        let network = approving()
+        let log = SendLog()
+        let client = try client(network: network, log: log)
+
+        do {
+            _ = try await client.data(from: URL(string: "https://user:secret@enclave.example/health")!)
+            XCTFail("credentials in a request URL must not reach the enclave")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertFalse(failure.message.contains("secret"), "The credentials aren't echoed: \(failure.message)")
+        }
+        XCTAssertTrue(log.sent.isEmpty)
+        XCTAssertTrue(network.urls.isEmpty, "A refused request is refused before verifying.")
+    }
+
     func testASchemeWithoutAHostIsRefused() async throws {
         // URLSession would connect to elsewhere.example for this URL, though
         // Foundation reports no host for it.
