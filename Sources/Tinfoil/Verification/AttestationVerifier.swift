@@ -15,9 +15,9 @@ protocol AttestationVerifier: Sendable {
     /// port, not a URL.
     func attestationURL(host: String, relay: String?, nonce: Data) throws -> URL
 
-    /// Appraises document, fetched from enclaveHost with nonce, against repo,
-    /// a trusted owner/name[@tag][@sha256:digest] reference. Fails with a
+    /// Appraises document, fetched with nonce, against repo, a trusted
+    /// owner/name[@tag][@sha256:digest] reference. Fails with a
     /// `TinfoilError`, including for a result already past its freshness
     /// deadline.
-    func verify(document: Data, nonce: Data, repo: String, enclaveHost: String) throws -> Verification
+    func verify(document: Data, nonce: Data, repo: String) throws -> Verification
 }

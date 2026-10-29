@@ -64,7 +64,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         XCTAssertEqual(client.transportMode, .tls, "A named enclave uses pinned TLS by default.")
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"])
         let current = await client.current
-        XCTAssertEqual(current?.enclaveHost, "enclave.example")
+        XCTAssertNotNil(current)
         _ = try await client.ensureVerified()
         XCTAssertEqual(network.urls.count, 1, "The verification made at creation is reused.")
     }
@@ -100,17 +100,20 @@ final class EnclaveHTTPClientTests: XCTestCase {
         XCTAssertEqual(client.repo, TinfoilConstants.defaultGithubRepo)
         XCTAssertEqual(client.transportMode, .ehbp, "A router uses EHBP by default.")
         let discovered = await client.current
-        XCTAssertEqual(discovered?.enclaveHost, "router-a.example", "Discovery's verification is kept.")
         guard results.values.count == 1, case .success(let reported) = results.values[0] else {
             return XCTFail("expected discovery's verification to be reported once, got \(results.values)")
         }
         XCTAssertEqual(reported, discovered)
 
+        XCTAssertNotNil(discovered, "Discovery's verification is kept.")
         let verified = try await client.ensureVerified()
         XCTAssertEqual(verified, discovered, "A fresh discovered verification is reused.")
-        let reverified = try await client.reverify()
-        XCTAssertEqual(reverified.enclaveHost, "router-a.example", "Later verifications stay with the router.")
-        XCTAssertEqual(network.urls.map(\.host), ["atc.tinfoil.sh", "router-a.example", "router-a.example"])
+        _ = try await client.reverify()
+        XCTAssertEqual(
+            network.urls.map(\.host),
+            ["atc.tinfoil.sh", "router-a.example", "router-a.example"],
+            "Later verifications stay with the router."
+        )
     }
 
     func testTheFallbackRouterIsVerifiedBeforeItIsReturned() async throws {
@@ -125,7 +128,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
 
         XCTAssertEqual(client.enclave, TinfoilConstants.fallbackEnclave)
         let current = await client.current
-        XCTAssertEqual(current?.enclaveHost, TinfoilConstants.fallbackEnclave)
+        XCTAssertNotNil(current)
         XCTAssertEqual(
             network.urls.filter { $0.host == TinfoilConstants.fallbackEnclave }.count,
             2,

@@ -46,9 +46,8 @@ final class VerificationDecodingTests: XCTestCase {
     }
 
     func testDecodesPayload() throws {
-        let verification = try Verification(payload: payload(), enclaveHost: Self.host)
+        let verification = try Verification(payload: payload())
 
-        XCTAssertEqual(verification.enclaveHost, Self.host)
         XCTAssertEqual(verification.configRepo, "tinfoilsh/confidential-model-router")
         XCTAssertEqual(verification.codeDigest, "abc123")
         XCTAssertEqual(verification.codeTag, "v1.2.3")
@@ -73,8 +72,7 @@ final class VerificationDecodingTests: XCTestCase {
                 "code_measurement": nil,
                 "enclave_measurement": nil,
                 "hpke_public_key": nil,
-            ]),
-            enclaveHost: Self.host
+            ])
         )
         XCTAssertNil(verification.codeTag)
         XCTAssertNil(verification.codeMeasurement)
@@ -85,12 +83,9 @@ final class VerificationDecodingTests: XCTestCase {
     func testIgnoresFieldsTheSDKRecordsItself() throws {
         let verification = try Verification(
             payload: payload([
-                "enclave_host": "elsewhere.example",
                 "verifier": ["name": "tinfoil-go", "version": "devel"],
-            ]),
-            enclaveHost: Self.host
+            ])
         )
-        XCTAssertEqual(verification.enclaveHost, Self.host)
         XCTAssertEqual(verification.verifier.name, TinfoilConstants.sdkName)
     }
 
@@ -100,28 +95,28 @@ final class VerificationDecodingTests: XCTestCase {
             ("2026-10-03T12:00:00.5Z", 1_791_028_800.5),
             ("2026-10-03T12:00:00.123456789Z", 1_791_028_800.123),
         ] {
-            let verification = try Verification(payload: payload(["freshness_expires_at": value]), enclaveHost: Self.host)
+            let verification = try Verification(payload: payload(["freshness_expires_at": value]))
             XCTAssertEqual(verification.freshnessExpiresAt.timeIntervalSince1970, seconds, accuracy: 0.001, value)
         }
     }
 
     func testRejectsAnotherSchemaVersion() {
         assertAttestationError(
-            try Verification(payload: #"{"schema_version":2}"#, enclaveHost: Self.host),
+            try Verification(payload: #"{"schema_version":2}"#),
             containing: "unsupported verification schema version 2"
         )
     }
 
     func testRejectsMissingField() throws {
         assertAttestationError(
-            try Verification(payload: payload(["code_digest": nil]), enclaveHost: Self.host),
+            try Verification(payload: payload(["code_digest": nil])),
             containing: "unreadable verification payload"
         )
     }
 
     func testRejectsInvalidDate() throws {
         assertAttestationError(
-            try Verification(payload: payload(["freshness_expires_at": "next week"]), enclaveHost: Self.host),
+            try Verification(payload: payload(["freshness_expires_at": "next week"])),
             containing: "freshness_expires_at"
         )
     }

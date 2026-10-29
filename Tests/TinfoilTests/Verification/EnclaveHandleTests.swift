@@ -33,7 +33,6 @@ final class EnclaveHandleTests: XCTestCase {
 
         let verification = try await handle.reverify()
 
-        XCTAssertEqual(verification.enclaveHost, "enclave.example")
         XCTAssertEqual(verification.configRepo, "org/repo")
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"])
         let latest = await handle.current
@@ -46,7 +45,6 @@ final class EnclaveHandleTests: XCTestCase {
 
         let current = try await handle.ensureVerified()
 
-        XCTAssertEqual(current.enclaveHost, "enclave.example")
         XCTAssertEqual(network.urls.count, 1)
     }
 
@@ -116,7 +114,7 @@ final class EnclaveHandleTests: XCTestCase {
                 fetch: { try network.fetch($0) },
                 retryDelay: 0,
                 onEnclaveVerified: { verification in
-                    if verified.record(verification.enclaveHost) > 1 {
+                    if verified.record(verification.codeDigest) > 1 {
                         throw Refusal()
                     }
                 }
@@ -198,11 +196,11 @@ final class EnclaveHandleTests: XCTestCase {
         await fulfillment(of: [verifications.more], timeout: 0.2)
         await gate.open()
 
-        var hosts: Set<String> = []
+        var returned: [Verification] = []
         for call in calls {
-            hosts.insert(try await call.value.enclaveHost)
+            returned.append(try await call.value)
         }
-        XCTAssertEqual(hosts, ["enclave.example"])
+        XCTAssertTrue(returned.allSatisfy { $0 == returned[0] }, "Every call gets the shared verification.")
         XCTAssertEqual(verifications.count, 1)
         XCTAssertEqual(results.values.count, 1, "A shared run reports its result once.")
     }
@@ -234,7 +232,6 @@ final class EnclaveHandleTests: XCTestCase {
         }
 
         let verification = try await waiting.value
-        XCTAssertEqual(verification.enclaveHost, "enclave.example")
         let latest = await handle.current
         XCTAssertEqual(latest, verification)
         await fulfillment(of: [verifications.more], timeout: 0.1)

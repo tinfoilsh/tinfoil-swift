@@ -81,7 +81,7 @@ actor EnclaveHandle {
         }
         let verified = try await reverify()
         guard now() < verified.freshnessExpiresAt else {
-            throw TinfoilError.attestation("verification of \(verified.enclaveHost) is already past its freshness deadline")
+            throw TinfoilError.attestation("verification of \(enclave) is already past its freshness deadline")
         }
         return verified
     }

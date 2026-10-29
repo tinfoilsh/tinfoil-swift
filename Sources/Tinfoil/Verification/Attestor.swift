@@ -6,6 +6,12 @@ import Foundation
 struct Attestor: Sendable {
     typealias Fetch = @Sendable (URL) async throws -> Data
 
+    /// A router discovery verified, and the host it was fetched from
+    struct DiscoveredRouter: Sendable {
+        let host: String
+        let verification: Verification
+    }
+
     private let verifier: any AttestationVerifier
     private let fetch: Fetch
     private let retryDelay: TimeInterval
@@ -49,26 +55,26 @@ struct Attestor: Sendable {
             try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
             verified = try await verifyOnce(host: host, relay: relay, repo: repo)
         }
-        return try accepted(verified)
+        return try accepted(verified, host: host)
     }
 
-    /// Returns the verification of the first of Tinfoil's routers that
+    /// Returns the host and verification of the first of Tinfoil's routers that
     /// verifies against the router repository, trying each once, or nil when
     /// none does. The caller then uses the fallback router, which it verifies
     /// itself. A router list that cannot be fetched or read leaves only the
     /// fallback, and so does reaching discoveryTimeout, however many routers
     /// are left.
-    func discoverRouter() async throws -> Verification? {
-        let verified = await firstVerifiedRouter(repo: TinfoilConstants.defaultGithubRepo)
+    func discoverRouter() async throws -> DiscoveredRouter? {
+        let discovered = await firstVerifiedRouter(repo: TinfoilConstants.defaultGithubRepo)
         try Task.checkCancellation()
-        return verified
+        return discovered
     }
 
     /// The first discovered router that verifies before discoveryTimeout, or
     /// nil. Reaching the deadline cancels the fetch in flight.
-    private func firstVerifiedRouter(repo: String) async -> Verification? {
+    private func firstVerifiedRouter(repo: String) async -> DiscoveredRouter? {
         let deadline = now().advanced(by: .seconds(discoveryTimeout))
-        return await withTaskGroup(of: Verification?.self) { group in
+        return await withTaskGroup(of: DiscoveredRouter?.self) { group in
             group.addTask {
                 for router in await discoveredRouters() {
                     // The deadline can pass before the timer below cancels
@@ -77,7 +83,7 @@ struct Attestor: Sendable {
                         return nil
                     }
                     if let verified = try? await attestOnce(host: router, relay: nil, repo: repo) {
-                        return verified
+                        return DiscoveredRouter(host: router, verification: verified)
                     }
                 }
                 return nil
@@ -93,26 +99,26 @@ struct Attestor: Sendable {
     }
 
     private func attestOnce(host: String, relay: String?, repo: String) async throws -> Verification {
-        try accepted(await verifyOnce(host: host, relay: relay, repo: repo))
+        try accepted(await verifyOnce(host: host, relay: relay, repo: repo), host: host)
     }
 
     private func verifyOnce(host: String, relay: String?, repo: String) async throws -> Verification {
         let nonce = verifier.newNonce()
         let url = try verifier.attestationURL(host: host, relay: relay, nonce: nonce)
         let document = try await fetch(url)
-        return try verifier.verify(document: document, nonce: nonce, repo: repo, enclaveHost: host)
+        return try verifier.verify(document: document, nonce: nonce, repo: repo)
     }
 
     /// A rejection is a decision about this evidence, so callers check it
     /// outside any retry; during discovery the next router is tried instead.
-    private func accepted(_ verification: Verification) throws -> Verification {
+    private func accepted(_ verification: Verification, host: String) throws -> Verification {
         guard let onEnclaveVerified else {
             return verification
         }
         do {
             try onEnclaveVerified(verification)
         } catch {
-            throw TinfoilError.attestation("onEnclaveVerified rejected \(verification.enclaveHost): \(error)")
+            throw TinfoilError.attestation("onEnclaveVerified rejected \(host): \(error)")
         }
         return verification
     }
