@@ -76,7 +76,7 @@ final class TinfoilAITests: XCTestCase {
 
         let client = try await TinfoilAI.create(
             apiKey: try getAPIKey(),
-            client: EnclaveHTTPClient.discoverRouter(userCacheSecret: Self.testUserCacheSecret)
+            client: RouterHTTPClient(userCacheSecret: Self.testUserCacheSecret)
         )
 
         let chatQuery = ChatQuery(
@@ -237,7 +237,7 @@ final class TinfoilAITests: XCTestCase {
 
         let client = try await TinfoilAI.create(
             apiKey: try getAPIKey(),
-            client: EnclaveHTTPClient.discoverRouter(
+            client: RouterHTTPClient(
                 userCacheSecret: Self.testUserCacheSecret,
                 onVerificationResult: { result in captured.value = result }
             )
@@ -284,7 +284,7 @@ final class TinfoilAITests: XCTestCase {
 
     func testDiscoveredRouterVerifies() async throws {
         try requireLiveIntegration()
-        let client = try await EnclaveHTTPClient.discoverRouter(userCacheSecret: Self.testUserCacheSecret)
+        let client = try await RouterHTTPClient(userCacheSecret: Self.testUserCacheSecret)
 
         let verification = try await client.reverify()
 

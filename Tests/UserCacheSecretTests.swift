@@ -160,22 +160,31 @@ final class UserCacheSecretTests: XCTestCase {
     }
 
     func testAnEnclaveTheCallerNamesGetsOnlyAnExplicitSecret() throws {
+        func connection(secret: String?) throws -> EnclaveConnection {
+            try EnclaveHTTPClient.connection(
+                enclave: "enclave.example",
+                repo: "org/repo",
+                transportMode: .tls,
+                baseURL: nil,
+                attestationRelay: nil,
+                userCacheSecret: secret,
+                attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
+                onVerificationResult: nil
+            )
+        }
         XCTAssertEqual(
-            try EnclaveHTTPClient(enclave: "enclave.example", repo: "org/repo").userCacheSecret,
+            try connection(secret: nil).userCacheSecret,
             "",
             "Only Tinfoil's routers read the secret, so none is resolved for another enclave."
         )
-        XCTAssertEqual(
-            try EnclaveHTTPClient(enclave: "enclave.example", repo: "org/repo", userCacheSecret: "explicit").userCacheSecret,
-            "explicit"
-        )
+        XCTAssertEqual(try connection(secret: "explicit").userCacheSecret, "explicit")
     }
 
     func testDiscoveringARouterResolvesTheSecret() async throws {
         let home = try makeTempHome()
         // A relay skips discovery's network I/O; the route is still Tinfoil's router.
-        func discover(environment: [String: String]) async throws -> EnclaveHTTPClient {
-            try await EnclaveHTTPClient.discoverRouter(
+        func discover(environment: [String: String]) async throws -> EnclaveConnection {
+            try await EnclaveConnection.router(
                 attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
                 transportMode: .ehbp,
                 baseURL: nil,

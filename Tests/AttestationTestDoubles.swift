@@ -47,6 +47,8 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         switch parts[0] {
         case "ok":
             return .stub(host: enclaveHost, repo: repo, expiresAt: now().addingTimeInterval(3600))
+        case "tls-only":
+            return .stub(host: enclaveHost, repo: repo, expiresAt: now().addingTimeInterval(3600), hpkePublicKey: nil)
         case "config":
             throw TinfoilError.configuration("bad repo")
         default:
@@ -98,7 +100,8 @@ extension Verification {
     static func stub(
         host: String,
         repo: String = TinfoilConstants.defaultGithubRepo,
-        expiresAt: Date = Date().addingTimeInterval(3600)
+        expiresAt: Date = Date().addingTimeInterval(3600),
+        hpkePublicKey: String? = stubHPKEKey
     ) -> Verification {
         Verification(
             enclaveHost: host,
@@ -108,11 +111,10 @@ extension Verification {
             codeMeasurement: nil,
             enclaveMeasurement: nil,
             tlsPublicKeyFingerprint: "deadbeef",
-            hpkePublicKey: stubHPKEKey,
+            hpkePublicKey: hpkePublicKey,
             cryptoMaterial: [
                 .init(id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "deadbeef"),
-                .init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: stubHPKEKey),
-            ],
+            ] + (hpkePublicKey.map { [.init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: $0)] } ?? []),
             freshnessExpiresAt: expiresAt,
             verifiedAt: Date(),
             verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion)
