@@ -854,6 +854,12 @@ final class EHBPTests: XCTestCase {
         XCTAssertTrue(elsewhere.requestStore.requests.isEmpty, "Nothing reaches the other origin.")
     }
 
+    func testEHBPSessionsAreSharedPerOrigin() {
+        let session = URLSession.ehbp(baseURL: "https://enclave.example")
+        XCTAssertTrue(URLSession.ehbp(baseURL: "https://ENCLAVE.example:443/v1") === session, "One origin shares one session.")
+        XCTAssertFalse(URLSession.ehbp(baseURL: "https://enclave.example:8443") === session)
+    }
+
     func testARedirectWithinTheOriginIsFollowed() async throws {
         server.queuedResponses = [redirect(to: "/v1/moved")]
         let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: EHBPVerifiedState(

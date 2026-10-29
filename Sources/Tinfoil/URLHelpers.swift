@@ -62,10 +62,29 @@ internal enum URLHelpers {
     /// Extracts the origin (scheme://host:port) from a URL string for comparison
     /// - Parameter urlString: The URL string to extract origin from
     /// - Returns: The origin string (scheme://host:port), or empty string if invalid
+    /// The host lowercased, with an IPv6 literal in its canonical text form
+    /// (RFC 5952), so differently written forms of one address compare
+    /// equal. An IPv6 zone identifier keeps its case, since zones that differ
+    /// only in case are distinct.
+    static func canonicalHost(_ host: String) -> String {
+        let bare = host.hasPrefix("[") && host.hasSuffix("]") ? String(host.dropFirst().dropLast()) : host
+        let parts = bare.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false)
+        var address = in6_addr()
+        guard bare.contains(":"), inet_pton(AF_INET6, String(parts[0]), &address) == 1 else {
+            return host.lowercased()
+        }
+        var text = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+        guard inet_ntop(AF_INET6, &address, &text, socklen_t(text.count)) != nil else {
+            return host.lowercased()
+        }
+        let canonical = String(cString: text)
+        return parts.count == 2 ? "\(canonical)%\(parts[1])" : canonical
+    }
+
     static func origin(from urlString: String) -> String {
         guard let components = try? parseURL(urlString) else { return "" }
         let scheme = components.scheme.lowercased()
-        var host = components.host.lowercased()
+        var host = canonicalHost(components.host)
         // DNS permits an absolute name to end in a dot. Remove only that
         // suffix; a leading dot is not an equivalent host identity.
         while host.hasSuffix(".") {

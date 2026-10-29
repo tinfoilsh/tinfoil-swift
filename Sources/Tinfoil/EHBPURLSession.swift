@@ -74,9 +74,9 @@ func refuseUnsealedTraffic(_ request: URLRequest) throws {
     }
 }
 
-/// Follows a redirect only within one origin, as tinfoil-go's origin
-/// restriction does under EHBP: a redirect elsewhere would carry the request's
-/// unsealed headers and sealed body to a server the client wasn't bound to.
+/// Follows a redirect only within one origin: a redirect elsewhere would
+/// carry the request's unsealed headers and sealed body to a server the
+/// client isn't bound to.
 /// URLSession then returns the redirect response itself, which
 /// `refusedRedirect` turns into an error.
 final class EHBPRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
@@ -100,13 +100,31 @@ final class EHBPRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
 
 extension URLSession {
     /// A session for EHBP requests to `baseURL`, which follows redirects
-    /// only within its origin
+    /// only within its origin. A session keeps its delegate until it is
+    /// invalidated, so sessions are shared per origin for the life of the
+    /// process rather than created per client: a process talks to few
+    /// origins, while it may create many clients.
     static func ehbp(baseURL: String) -> URLSession {
-        URLSession(
-            configuration: .default,
-            delegate: EHBPRedirectPolicy(origin: URLHelpers.origin(from: baseURL)),
-            delegateQueue: nil
-        )
+        EHBPSessions.shared.session(for: URLHelpers.origin(from: baseURL))
+    }
+}
+
+/// The redirect-restricted EHBP sessions, one per origin
+private final class EHBPSessions: @unchecked Sendable {
+    static let shared = EHBPSessions()
+
+    private let lock = NSLock()
+    private var sessions: [String: URLSession] = [:]
+
+    func session(for origin: String) -> URLSession {
+        lock.lock()
+        defer { lock.unlock() }
+        if let session = sessions[origin] {
+            return session
+        }
+        let session = URLSession(configuration: .default, delegate: EHBPRedirectPolicy(origin: origin), delegateQueue: nil)
+        sessions[origin] = session
+        return session
     }
 }
 
