@@ -146,7 +146,9 @@ public final class EnclaveHTTPClient: Sendable {
     /// protected by the client's transport mode. A URL without a host resolves
     /// against `baseURL`; an absolute URL must be HTTPS on `baseURL`'s origin,
     /// and so must any redirect, so credentials never leave it. A redirect
-    /// elsewhere fails with `TinfoilError.configurationError`.
+    /// elsewhere fails with `TinfoilError.configurationError`, except that over
+    /// TLS one to plain HTTP fails with
+    /// `URLError(.appTransportSecurityRequiresSecureConnection)`.
     ///
     /// If the enclave no longer presents or accepts the verified key, the
     /// client verifies again and retries once when that is safe. Over TLS, a
