@@ -1,7 +1,7 @@
 import Foundation
 
 /// An OpenAI-compatible client whose requests are sealed to a verified
-/// enclave. `TinfoilAI`, `EnclaveOpenAIClient` and `RouterOpenAIClient` share
+/// enclave. `Client`, `EnclaveOpenAIClient` and `RouterOpenAIClient` share
 /// its OpenAI methods, which pass through to `openAI`.
 public protocol OpenAICompatibleClient {
     /// The OpenAI client every request goes through, built so its requests

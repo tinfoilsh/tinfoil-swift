@@ -217,7 +217,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
     }
 
     /// The EHBP key starts unknown and is taken from the handle: a
-    /// verification made first, as TinfoilAI.create makes one, is reused
+    /// verification made first, as a client's initializer makes one, is reused
     /// rather than attesting again, while a rejected key verifies again.
     func testTheEHBPKeyComesFromTheHandle() async throws {
         let network = approving()
