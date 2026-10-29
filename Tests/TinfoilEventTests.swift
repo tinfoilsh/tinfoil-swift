@@ -1,5 +1,5 @@
 import XCTest
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// Pure-unit coverage for the TinfoilEvent header formatting helper. The
 /// integration tests in TinfoilAITests.swift exercise the full create()

@@ -22,7 +22,7 @@ Or in Xcode, File > Add Packages and enter `https://github.com/tinfoilsh/tinfoil
 ## Quick Start
 
 ```swift
-import TinfoilAI
+import Tinfoil
 
 // Reads TINFOIL_API_KEY from the environment when apiKey is omitted.
 // Enclave verification and encryption happen automatically.

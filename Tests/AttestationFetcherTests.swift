@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import TinfoilAI
+@testable import Tinfoil
 
 final class AttestationFetcherTests: XCTestCase {
     private let documentURL = URL(string: "https://enclave.example/.well-known/tinfoil-attestation?nonce=00")!

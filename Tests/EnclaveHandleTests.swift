@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// How EnclaveHandle verifies its enclave and keeps the result, using the
 /// stand-ins from AttestationTestDoubles.swift in place of the network and Go.

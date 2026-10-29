@@ -1,7 +1,7 @@
 import XCTest
 import Foundation
 import OpenAI
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// The handle's callbacks end to end: a stand-in attests, and requests go
 /// through a real EHBP session to a local server.

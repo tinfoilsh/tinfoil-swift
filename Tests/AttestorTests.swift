@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import TinfoilAI
+@testable import Tinfoil
 
 final class AttestorTests: XCTestCase {
     private let routerList = TinfoilConstants.routerListURL

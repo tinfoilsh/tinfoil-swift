@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// Exercises the real tinfoil-go verifier through the framework: the FFI
 /// types, the options JSON, and how each Go error category reaches Swift.

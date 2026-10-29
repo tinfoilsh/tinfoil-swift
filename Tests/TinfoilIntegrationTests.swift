@@ -1,5 +1,5 @@
 import XCTest
-@testable import TinfoilAI
+@testable import Tinfoil
 import OpenAI
 
 final class TinfoilIntegrationTests: XCTestCase {

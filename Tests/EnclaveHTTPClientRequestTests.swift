@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import TinfoilAI
+@testable import Tinfoil
 
 /// Records each pinned send and answers from a script, in place of the network.
 private final class SendLog: @unchecked Sendable {
