@@ -10,12 +10,12 @@ final class TinfoilIntegrationTests: XCTestCase {
         // exercise discovery and verification end to end.
         let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
-        _ = try await TinfoilAI.create(
-            apiKey: "test-key",
-            client: RouterHTTPClient(
+        _ = try await RouterOpenAIClient(
+            httpClient: RouterHTTPClient(
                 userCacheSecret: "pinned so the test never touches the persisted secret",
                 onVerificationResult: { result in captured.value = result }
-            )
+            ),
+            apiKey: "test-key"
         )
 
         guard case .success(let verification) = captured.value else {
@@ -42,12 +42,12 @@ final class TinfoilIntegrationTests: XCTestCase {
 
     func testCreateFailsWhenTheAttestationRelayIsUnreachable() async {
         do {
-            _ = try await TinfoilAI.create(
-                apiKey: "test-key",
-                client: RouterHTTPClient(
+            _ = try await RouterOpenAIClient(
+                httpClient: RouterHTTPClient(
                     attestationRelay: "127.0.0.1:9",
                     userCacheSecret: "pinned so the test never touches the persisted secret"
-                )
+                ),
+                apiKey: "test-key"
             )
             XCTFail("Attestation through an unreachable relay must fail")
         } catch TinfoilError.networkError {

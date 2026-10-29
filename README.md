@@ -37,14 +37,13 @@ let response = try await client.chats(query: query)
 print(response.choices.first?.message.content ?? "No response")
 ```
 
-To choose the enclave, pin the repo to a tag or digest, send through a proxy, relay attestation, tighten the verification policy, or reject verifications, pass an `EnclaveHTTPClient`:
+To choose the enclave, pin the repo to a tag or digest, send through a proxy, relay attestation, tighten the verification policy, or reject verifications, use an `EnclaveOpenAIClient`, which has the same OpenAI methods:
 
 ```swift
-let enclave = try await EnclaveHTTPClient(enclave: "enclave.example.com", repo: "org/repo@v1.2.3", transportMode: .ehbp)
-let client = try await TinfoilAI.create(apiKey: "YOUR_API_KEY", client: enclave)
+let client = try await EnclaveOpenAIClient(enclave: "enclave.example.com", repo: "org/repo@v1.2.3", apiKey: "YOUR_API_KEY")
 ```
 
-A `RouterHTTPClient` picks one of Tinfoil's routers instead, as `TinfoilAI.create` does by default. Both clients are verified before they're returned, and also send requests of their own with `data(from:)` and `data(for:)`, over TLS pinned to the attested key (the default for an enclave you name) or sealed with EHBP. Their doc comments describe the callbacks, refresh, and request rules.
+`RouterOpenAIClient` does the same for one of Tinfoil's routers, as `TinfoilAI.create` does by default. Each sends through an `EnclaveHTTPClient` or `RouterHTTPClient`, which you can also create directly. Both are verified before they're returned, and send requests of their own with `data(from:)` and `data(for:)`, over TLS pinned to the attested key (the default for an enclave you name) or sealed with EHBP. Their doc comments describe the callbacks, refresh, and request rules.
 
 ## Documentation
 
