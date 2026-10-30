@@ -216,6 +216,39 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         return configuration
     }
 
+    /// A stubbed configuration with its own timeout. URLSession applies a
+    /// timeout set on the request over the session's, longer or shorter,
+    /// which is what lets a caller raise it for a pinned request.
+    private func stubbed(timeout: TimeInterval) -> URLSessionConfiguration {
+        let configuration = stubbed()
+        configuration.timeoutIntervalForRequest = timeout
+        return configuration
+    }
+
+    func testAPinnedRequestWaitsAsLongAsItsTimeout() async throws {
+        StubURLProtocol.serve { _ in .delayed(0.6, body: Data("ok".utf8)) }
+        var request = URLRequest(url: URL(string: "https://enclave.example/v1/convert/file")!)
+        request.timeoutInterval = 3
+
+        let (data, response) = try await PinnedTLS.send(request, expecting: "unused", configuration: stubbed(timeout: 0.3))
+
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(data, Data("ok".utf8))
+    }
+
+    func testAPinnedRequestTimesOutAtItsTimeout() async throws {
+        StubURLProtocol.serve { _ in .hang }
+        var request = URLRequest(url: URL(string: "https://enclave.example/health")!)
+        request.timeoutInterval = 0.3
+
+        do {
+            _ = try await PinnedTLS.send(request, expecting: "unused", configuration: stubbed(timeout: 60))
+            XCTFail("a request with no data before its timeout must time out")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .timedOut)
+        }
+    }
+
     // The stub answers without TLS, so these exercise the redirect policy and
     // not the certificate pin, which the live tests cover.
     func testARedirectToAnotherHostIsRefused() async throws {
