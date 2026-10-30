@@ -10,9 +10,10 @@ import FoundationNetworking
 public struct RecoverableResponse: Sendable {
     /// The response's status and headers
     public let response: HTTPURLResponse
-    /// With the `Ehbp-Response-Nonce` header of a stored copy of this
-    /// response, decrypts it through `SessionRecoveryToken.makeResponseDecryptor`.
-    /// Nil when the response isn't sealed: the request had no body, or an
+    /// The token that decrypts a stored copy of this response later: pass that
+    /// copy's `Ehbp-Response-Nonce` header to
+    /// `SessionRecoveryToken.makeResponseDecryptor`. Nil when the response
+    /// isn't sealed: the request had no body, or an
     /// intermediary answered with an unencrypted error.
     ///
     /// It is key material for this one response: store it protected, and
