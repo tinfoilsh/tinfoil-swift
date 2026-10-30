@@ -34,9 +34,12 @@ public final class EnclaveHTTPClient: Sendable {
     ///     code must come from
     ///   - transportMode: How requests are protected; pinned TLS by default
     ///   - baseURL: Where requests are sent: a path on the enclave's own
-    ///     origin, or an HTTPS proxy on another origin, which requires
-    ///     `.ehbp`. Requests to a proxy carry `X-Tinfoil-Enclave-Url` so it can
-    ///     forward them to the enclave.
+    ///     origin, or a proxy on another origin, which requires `.ehbp`.
+    ///     Requests to a proxy carry `X-Tinfoil-Enclave-Url` so it can
+    ///     forward them to the enclave. It must be HTTPS, since EHBP doesn't
+    ///     seal headers such as the API key; under `.ehbp`, `http` is also
+    ///     accepted when the host is `localhost` or a loopback IP address,
+    ///     as for a local development proxy or a sidecar.
     ///   - attestationRelay: Host, with an optional port, that forwards
     ///     attestation requests to the enclave
     ///   - policy: Checks beyond the defaults
@@ -144,7 +147,7 @@ public final class EnclaveHTTPClient: Sendable {
 
     /// Loads a request from the enclave, as `URLSession.data(for:)` does,
     /// protected by the client's transport mode. A URL without a host resolves
-    /// against `baseURL`; an absolute URL must be HTTPS on `baseURL`'s origin,
+    /// against `baseURL`; an absolute URL must be on `baseURL`'s exact origin,
     /// and so must any redirect, so credentials never leave it. A redirect
     /// elsewhere fails with `TinfoilError.configurationError`, except that over
     /// TLS one to plain HTTP fails with
