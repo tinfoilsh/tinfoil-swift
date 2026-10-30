@@ -29,8 +29,6 @@ final class EnclaveConnection: Sendable {
     /// The prompt-cache secret injected into eligible request bodies, already
     /// resolved; empty injects none.
     let userCacheSecret: String
-    /// Whether `http` URLs are accepted, for tests against a local server
-    private let allowsPlainHTTP: Bool
     /// The EHBP sessions, sealing to one shared verified key; nil in TLS mode.
     let ehbp: EHBPChannel?
     private let send: PinnedTLS.Send
@@ -52,7 +50,7 @@ final class EnclaveConnection: Sendable {
     ) async throws -> EnclaveConnection {
         // Checked before discovery, so a misconfiguration costs no network I/O.
         if let baseURL {
-            try validateBaseURL(baseURL)
+            try validateBaseURL(baseURL, transportMode: transportMode)
             guard transportMode == .ehbp else {
                 throw TinfoilError.configuration(
                     "a base URL requires TransportMode.ehbp when discovering the router, because the router's origin isn't known before discovery"
@@ -86,23 +84,19 @@ final class EnclaveConnection: Sendable {
     /// - Parameters:
     ///   - initial: The handle's initial verification, if it has one, so EHBP
     ///     need not wait on the handle to seal the first request.
-    ///   - allowPlainHTTP: Accepts an `http` base URL and request URLs, for
-    ///     tests that send EHBP requests to a local server. Nothing else sets
-    ///     it.
     init(
         handle: EnclaveHandle,
         initial: Verification? = nil,
         transportMode: TransportMode,
         baseURL: URL?,
         userCacheSecret: String,
-        allowPlainHTTP: Bool = false,
         send: @escaping PinnedTLS.Send = { try await PinnedTLS.send($0, expecting: $1) }
     ) throws {
         guard let enclaveOrigin = URL(string: "https://\(handle.enclave)/"), enclaveOrigin.host != nil else {
             throw TinfoilError.configuration("cannot form a URL for the enclave \(handle.enclave)")
         }
         let base = baseURL ?? enclaveOrigin
-        try Self.validateBaseURL(base, allowPlainHTTP: allowPlainHTTP)
+        try Self.validateBaseURL(base, transportMode: transportMode)
         let origin = URLHelpers.origin(from: base.absoluteString)
         if transportMode == .tls, origin != URLHelpers.origin(from: enclaveOrigin.absoluteString) {
             throw TinfoilError.configuration(
@@ -113,7 +107,6 @@ final class EnclaveConnection: Sendable {
         self.transportMode = transportMode
         self.baseURL = base
         self.userCacheSecret = userCacheSecret
-        self.allowsPlainHTTP = allowPlainHTTP
         self.send = send
         self.ehbp = transportMode == .ehbp
             ? EHBPChannel(origin: origin, enclaveURL: "https://\(handle.enclave)", handle: handle, initial: initial, userCacheSecret: userCacheSecret)
@@ -121,12 +114,22 @@ final class EnclaveConnection: Sendable {
     }
 
     /// Refuses a base URL that isn't HTTPS, which would expose request
-    /// headers, or that has no host or carries credentials.
-    static func validateBaseURL(_ url: URL, allowPlainHTTP: Bool = false) throws {
-        let schemes = allowPlainHTTP ? ["https", "http"] : ["https"]
-        guard schemes.contains(url.scheme?.lowercased() ?? ""), url.host != nil, url.user == nil, url.password == nil else {
+    /// headers, or that has no host or carries credentials. Under EHBP, HTTP
+    /// is accepted when the host as written is localhost or a loopback IP
+    /// address, whose traffic never leaves the machine, as for a local
+    /// development proxy or a sidecar.
+    static func validateBaseURL(_ url: URL, transportMode: TransportMode) throws {
+        let scheme = url.scheme?.lowercased()
+        guard scheme == "https" || scheme == "http", url.host != nil, url.user == nil, url.password == nil else {
             throw TinfoilError.configuration(
                 "invalid base URL \(url.absoluteString): it must be HTTPS, to protect request headers, and carry no credentials"
+            )
+        }
+        guard scheme == "https" || (transportMode == .ehbp && URLHelpers.hasLoopbackHost(url)) else {
+            throw TinfoilError.configuration(
+                transportMode == .ehbp
+                    ? "invalid base URL \(url.absoluteString): HTTPS is required to protect request headers; HTTP is allowed only for localhost or a loopback IP address"
+                    : "invalid base URL \(url.absoluteString): TransportMode.tls requires HTTPS"
             )
         }
     }
@@ -164,8 +167,9 @@ final class EnclaveConnection: Sendable {
 
     /// Loads a request from the enclave, as `URLSession.data(for:)` does,
     /// protected by the client's transport mode. A URL without a host resolves
-    /// against `baseURL`; an absolute URL must be HTTPS on `baseURL`'s origin,
-    /// and in TLS mode so must any redirect, so credentials never leave it.
+    /// against `baseURL`; an absolute URL must be on `baseURL`'s origin, and
+    /// in TLS mode so must any redirect, so credentials never leave it. That
+    /// origin is HTTPS unless an EHBP base URL is HTTP on a loopback host.
     /// The request uses a valid verification, verifying first if needed.
     ///
     /// In TLS mode, if the enclave presents a key the attestation does not
@@ -235,7 +239,8 @@ final class EnclaveConnection: Sendable {
     }
 
     /// The URL to request: a URL without a host resolves against `baseURL`,
-    /// and the result, however it was written, must be HTTPS on its origin.
+    /// and the result, however it was written, must be on its origin: HTTPS,
+    /// or HTTP only when `baseURL` is.
     private func resolve(_ url: URL?) throws -> URL {
         guard let url else {
             throw TinfoilError.configuration("the request has no URL")
@@ -249,7 +254,8 @@ final class EnclaveConnection: Sendable {
         // as "https://other.example/x", connecting to other.example.
         // Requiring a host refuses it explicitly, rather than relying on the
         // origin check below failing because URLHelpers.origin cannot parse it.
-        let schemes = allowsPlainHTTP ? ["https", "http"] : ["https"]
+        // An HTTP base URL was accepted only on a loopback host under EHBP.
+        let schemes = baseURL.scheme?.lowercased() == "http" ? ["https", "http"] : ["https"]
         guard let target, target.host != nil, schemes.contains(target.scheme?.lowercased() ?? "") else {
             throw TinfoilError.configuration("requests to the enclave must be HTTPS URLs with a host, not \(url.absoluteString)")
         }

@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 import OpenAI
+import EHBP
 @testable import Tinfoil
 
 /// The handle's callbacks end to end: a stand-in attests, and requests go
@@ -48,8 +49,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
             ),
             transportMode: .ehbp,
             baseURL: URL(string: server.baseURL + path)!,
-            userCacheSecret: Self.cacheSecret,
-            allowPlainHTTP: true
+            userCacheSecret: Self.cacheSecret
         ))
     }
 
@@ -68,6 +68,43 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         _ = try? await client.data(for: request)
 
         XCTAssertEqual(server.requestStore.lastRequest?.path, "/api/v1/models")
+    }
+
+    /// The local server's base URL is plain HTTP on 127.0.0.1, which EHBP
+    /// accepts on loopback. It authorizes only that exact origin.
+    func testALoopbackHTTPBaseURLSendsOnlyToItsOrigin() async throws {
+        let client = try await client(path: "/v1/")
+        let port = try XCTUnwrap(URLComponents(string: server.baseURL)?.port)
+        func post(_ url: String) -> URLRequest {
+            var request = URLRequest(url: URL(string: url)!)
+            request.httpMethod = "POST"
+            request.httpBody = Data("{}".utf8)
+            return request
+        }
+
+        // The stub server can't seal a response, so the request fails; what
+        // matters is that it was sent, sealed, where it resolves.
+        _ = try? await client.data(for: post("models"))
+        let sent = try XCTUnwrap(server.requestStore.lastRequest)
+        XCTAssertEqual(sent.path, "/v1/models")
+        XCTAssertNotNil(sent.headers[EHBPProtocol.encapsulatedKeyHeader], "The body is sealed.")
+        XCTAssertEqual(sent.headers[URLHelpers.enclaveURLHeaderName], "https://enclave.example")
+
+        for target in [
+            "https://127.0.0.1:\(port)/v1/models",
+            "http://127.0.0.1:\(port == 65535 ? port - 1 : port + 1)/v1/models",
+            "http://localhost:\(port)/v1/models",
+            "http://enclave.example/v1/models",
+        ] {
+            do {
+                _ = try await client.data(for: post(target))
+                XCTFail("\(target) must be refused")
+            } catch TinfoilError.configurationError {
+            } catch {
+                XCTFail("expected a configuration error for \(target), got \(error)")
+            }
+        }
+        XCTAssertEqual(server.requestStore.requests.count, 1, "Refused requests are not sent.")
     }
 
     func testTheBasePathComesFromTheNormalizedBaseURL() throws {

@@ -78,6 +78,60 @@ internal enum URLHelpers {
         return parts.count == 2 ? "\(canonical)%\(parts[1])" : canonical
     }
 
+    /// Whether the URL's host, as written, is `localhost` or a loopback IP
+    /// address: an IPv4 address in 127.0.0.0/8, `::1`, or an IPv4-mapped
+    /// IPv6 address in 127.0.0.0/8. No name is resolved, so DNS can't make a
+    /// remote host pass. The host is read percent-encoded, so an encoded name
+    /// such as `%6cocalhost` doesn't count, and IPv4 must be four decimal
+    /// octets without leading zeros, since a resolver may read `0127.0.0.1`
+    /// as octal and `127.1` as shorthand. A trailing dot is not stripped, so
+    /// `localhost.` and `127.0.0.1.` don't count either.
+    static func hasLoopbackHost(_ url: URL) -> Bool {
+        guard let host = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedHost else {
+            return false
+        }
+        if host.hasPrefix("["), host.hasSuffix("]") {
+            // A zone identifier follows its percent-encoded "%" as "%25".
+            let parts = host.dropFirst().dropLast().split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 1 || (parts[1].hasPrefix("25") && parts[1].count > 2) else { return false }
+            return isLoopbackIPv6(String(parts[0]))
+        }
+        return host.lowercased() == "localhost" || ipv4Octets(host)?.first == 127
+    }
+
+    /// The octets of an IPv4 address written as four decimal octets without
+    /// leading zeros, or nil for any other form.
+    private static func ipv4Octets(_ text: some StringProtocol) -> [UInt8]? {
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return nil }
+        var octets: [UInt8] = []
+        for part in parts {
+            guard (1...3).contains(part.count),
+                  part.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  part.count == 1 || part.first != "0",
+                  let octet = UInt8(part) else {
+                return nil
+            }
+            octets.append(octet)
+        }
+        return octets
+    }
+
+    /// Whether an IPv6 address, without brackets or zone, is `::1` or an
+    /// IPv4-mapped address in 127.0.0.0/8.
+    private static func isLoopbackIPv6(_ text: String) -> Bool {
+        // inet_pton accepts leading zeros in an embedded IPv4 address.
+        if text.contains("."), let tail = text.split(separator: ":").last, ipv4Octets(tail) == nil {
+            return false
+        }
+        var address = in6_addr()
+        guard inet_pton(AF_INET6, text, &address) == 1 else { return false }
+        let bytes = withUnsafeBytes(of: &address) { Array($0) }
+        let loopback = bytes[..<15].allSatisfy { $0 == 0 } && bytes[15] == 1
+        let mapped = bytes[..<10].allSatisfy { $0 == 0 } && bytes[10] == 0xff && bytes[11] == 0xff && bytes[12] == 127
+        return loopback || mapped
+    }
+
     /// Extracts the origin (scheme://host:port) from a URL string for comparison
     /// - Parameter urlString: The URL string to extract origin from
     /// - Returns: The origin string (scheme://host:port), or empty string if invalid
