@@ -26,7 +26,8 @@ public struct VerificationPolicy: Equatable, Sendable {
     /// register keeps its default check.
     public var pinnedRegisters: Verification.Measurement?
     /// Oldest freshness witness accepted, in seconds. Nil keeps the seven-day
-    /// default; a value must be positive.
+    /// default; a value must be at least one nanosecond once rounded to whole
+    /// nanoseconds.
     public var freshnessMaxAge: TimeInterval?
 
     public init(pinnedRegisters: Verification.Measurement? = nil, freshnessMaxAge: TimeInterval? = nil) {
