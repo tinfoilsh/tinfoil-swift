@@ -10,7 +10,8 @@ public enum TinfoilError: Error, Equatable {
     /// request the client refuses to send, such as one leaving the verified
     /// enclave. Retrying will not help.
     case configurationError(Configuration)
-    /// The client could not fetch the attestation material it needed.
+    /// A request failed on the network: the attestation material couldn't be
+    /// fetched, or a response wasn't HTTP.
     case networkError(Network)
     /// The enclave's evidence, the policy or the channel binding was rejected,
     /// including by an `onEnclaveVerified` callback.
