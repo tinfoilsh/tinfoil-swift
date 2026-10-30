@@ -569,6 +569,86 @@ final class EHBPTests: XCTestCase {
         XCTAssertEqual(enclaveRoutes(), ["https://old-router.example", "https://new-router.example"])
     }
 
+    func testCancellingDuringTheRefreshPreventsTheReplay() async throws {
+        server.responseStatusCode = 422
+        server.responseContentType = "application/problem+json"
+        server.includeResponseNonce = false
+        server.responseBody = Self.keyConfigProblemBody
+
+        let (state, refreshing, gate) = makeGatedRotatingState()
+        let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: state)
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+
+        let task = Task { try await session.data(for: request, delegate: nil) }
+        await fulfillment(of: [refreshing], timeout: 2)
+        // As when the user signs out while the request waits to be replayed
+        task.cancel()
+        await gate.open()
+
+        do {
+            _ = try await task.value
+            XCTFail("a cancelled request must not be replayed")
+        } catch is CancellationError {
+        }
+        XCTAssertEqual(server.requestStore.requests.count, 1, "The request was not replayed.")
+    }
+
+    func testCancellingAStreamingRequestDuringTheRefreshPreventsTheReplay() async throws {
+        server.responseStatusCode = 422
+        server.responseContentType = "application/problem+json"
+        server.includeResponseNonce = false
+        server.responseBody = Self.keyConfigProblemBody
+
+        let (state, refreshing, gate) = makeGatedRotatingState()
+        let completionCalled = expectation(description: "completion handler")
+        let delegateCompleted = expectation(description: "delegate completion")
+        let recorder = CancellationRecorder(
+            completionCalled: completionCalled,
+            delegateCompleted: delegateCompleted
+        )
+        let session = makeStreamingSession(delegate: recorder, verifiedState: state)
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+        let task = session.dataTask(with: request) { data, response, error in
+            recorder.recordCompletion(data: data, response: response, error: error)
+        }
+
+        task.resume()
+        await fulfillment(of: [refreshing], timeout: 2)
+        task.cancel()
+        await gate.open()
+        await fulfillment(of: [completionCalled, delegateCompleted], timeout: 2)
+
+        XCTAssertEqual(server.requestStore.requests.count, 1, "The request was not replayed.")
+        XCTAssertEqual((recorder.completionError as? URLError)?.code, .cancelled)
+        XCTAssertEqual(recorder.completionCount, 1)
+    }
+
+    /// A state whose refresh waits on the returned gate, fulfilling the
+    /// returned expectation once it starts.
+    private func makeGatedRotatingState() -> (EHBPVerifiedState, XCTestExpectation, AsyncGate) {
+        let refreshing = expectation(description: "refreshing the rejected key")
+        let gate = AsyncGate()
+        let state = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(
+                enclaveURL: "https://old-router.example",
+                publicKey: testPublicKey
+            ),
+            refresh: { _ in
+                refreshing.fulfill()
+                await gate.wait()
+                return EHBPVerifiedEndpoint(
+                    enclaveURL: "https://new-router.example",
+                    publicKey: Data(repeating: 0x43, count: 32)
+                )
+            }
+        )
+        return (state, refreshing, gate)
+    }
+
     private static let keyConfigProblemBody = Data(
         "{\"type\":\"urn:ietf:params:ehbp:error:key-config\",\"title\":\"stale key\"}".utf8
     )

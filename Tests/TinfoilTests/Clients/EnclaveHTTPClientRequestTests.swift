@@ -38,11 +38,14 @@ private final class SendLog: @unchecked Sendable {
 final class EnclaveHTTPClientRequestTests: XCTestCase {
     private let rejection = PinnedTLS.Rejection(host: "enclave.example", reason: "presented a certificate whose key does not match the attestation")
 
-    /// - Parameter evidenceClock: The clock new evidence's freshness counts
-    ///   from; the client's own clock by default.
+    /// - Parameters:
+    ///   - evidenceClock: The clock new evidence's freshness counts from; the
+    ///     client's own clock by default.
+    ///   - fetch: Fetches attestation documents; network's by default.
     private func client(
         network: FakeNetwork,
         log: SendLog,
+        fetch: Attestor.Fetch? = nil,
         clock: ManualClock = ManualClock(),
         evidenceClock: (@Sendable () -> Date)? = nil,
         baseURL: URL? = nil,
@@ -55,7 +58,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
                 attestationRelay: nil,
                 attestor: Attestor(
                     verifier: FakeVerifier(now: evidenceClock ?? { clock.now }),
-                    fetch: { try network.fetch($0) },
+                    fetch: fetch ?? { try network.fetch($0) },
                     retryDelay: 0
                 ),
                 now: { clock.now }
@@ -278,6 +281,35 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
 
         XCTAssertEqual(log.sent.count, 2)
         XCTAssertEqual(network.urls.count, 2, "The enclave was verified again before the retry.")
+    }
+
+    func testCancellingDuringTheNewVerificationPreventsTheRetry() async throws {
+        let network = approving()
+        let log = SendLog { previous in
+            if previous == 0 { throw self.rejection }
+        }
+        let gate = AsyncGate()
+        let verifyingAgain = expectation(description: "verifying again after the rejection")
+        let client = try client(network: network, log: log, fetch: { url in
+            if network.urls.count == 1 {
+                verifyingAgain.fulfill()
+                await gate.wait()
+            }
+            return try network.fetch(url)
+        })
+
+        let request = Task { try await client.data(from: URL(string: "/health")!) }
+        await fulfillment(of: [verifyingAgain], timeout: 1)
+        // As when the user signs out while the request waits to be retried
+        request.cancel()
+        await gate.open()
+
+        do {
+            _ = try await request.value
+            XCTFail("a cancelled request must not be retried")
+        } catch is CancellationError {
+        }
+        XCTAssertEqual(log.sent.count, 1, "The request was not sent again.")
     }
 
     func testAKeyRejectedAfterVerifyingAgainFails() async throws {

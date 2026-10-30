@@ -154,7 +154,11 @@ public final class EnclaveHTTPClient: Sendable {
     /// client verifies again and retries once when that is safe. Over TLS, a
     /// key that still doesn't match fails with `TinfoilError.attestationError`;
     /// under EHBP, a refreshed key the enclave still rejects fails with EHBP's
-    /// key-configuration error.
+    /// key-configuration error. The retry sends the same request again,
+    /// headers such as `Authorization` included. To stop it, for example when
+    /// the user signs out while it is pending, cancel the task awaiting this
+    /// call: a request cancelled before the retry is not sent again and fails
+    /// with `CancellationError`.
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         try await connection.data(for: request)
     }
