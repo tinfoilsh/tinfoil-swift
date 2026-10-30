@@ -179,6 +179,8 @@ final class StubURLProtocol: URLProtocol {
     enum Reply {
         case response(status: Int, body: Data)
         case redirect(to: URL)
+        /// Answers with a 200 and body only after delay seconds.
+        case delayed(TimeInterval, body: Data)
         /// Never answers, so the request ends only by timeout or cancellation.
         case hang
         /// Fails in transit, as when offline.
@@ -228,6 +230,17 @@ final class StubURLProtocol: URLProtocol {
             client?.urlProtocol(self, wasRedirectedTo: next, redirectResponse: response)
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocolDidFinishLoading(self)
+        case .delayed(let delay, let body):
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+                Self.lock.lock()
+                let stopped = self.isStopped
+                Self.lock.unlock()
+                guard !stopped else { return }
+                let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                self.client?.urlProtocol(self, didLoad: body)
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
         case .hang:
             break
         case .failure(let error):
@@ -235,5 +248,13 @@ final class StubURLProtocol: URLProtocol {
         }
     }
 
-    override func stopLoading() {}
+    /// Set once the session stops loading, as on a timeout, after which a
+    /// delayed reply is dropped.
+    nonisolated(unsafe) private var isStopped = false
+
+    override func stopLoading() {
+        Self.lock.lock()
+        isStopped = true
+        Self.lock.unlock()
+    }
 }
