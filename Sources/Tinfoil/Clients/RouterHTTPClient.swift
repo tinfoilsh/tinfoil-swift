@@ -111,4 +111,11 @@ public final class RouterHTTPClient: Sendable {
     public func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         try await connection.data(from: url)
     }
+
+    /// Sends a request to the router and returns its response with the body
+    /// still streaming and its session recovery token. See
+    /// `EnclaveHTTPClient.recoverableBytes(for:)`; the same rules apply.
+    public func recoverableBytes(for request: URLRequest) async throws -> RecoverableResponse {
+        try await connection.recoverableBytes(for: request)
+    }
 }
