@@ -22,9 +22,12 @@ public final class RouterHTTPClient: Sendable {
     ///
     /// - Parameters:
     ///   - transportMode: How requests are protected; EHBP by default
-    ///   - baseURL: An HTTPS proxy requests are sent to, which requires
-    ///     `.ehbp` because the router's origin isn't known before discovery.
-    ///     Requests carry `X-Tinfoil-Enclave-Url` so it can forward them.
+    ///   - baseURL: A proxy requests are sent to, which requires `.ehbp`
+    ///     because the router's origin isn't known before discovery.
+    ///     Requests carry `X-Tinfoil-Enclave-Url` so it can forward them. It
+    ///     must be HTTPS, since EHBP doesn't seal headers such as the API
+    ///     key, or `http` when the host is `localhost` or a loopback IP
+    ///     address, as for a local development proxy or a sidecar.
     ///   - attestationRelay: Host, with an optional port, that forwards
     ///     attestation requests to the fallback router
     ///   - policy: Checks beyond the defaults

@@ -181,6 +181,118 @@ final class EnclaveHTTPClientTests: XCTestCase {
         XCTAssertTrue(network.urls.isEmpty)
     }
 
+    /// HTTP base URLs that EHBP accepts: the host as written is localhost or
+    /// a loopback IP address.
+    private static let loopbackHTTPBaseURLs = [
+        "http://localhost:8080/v1",
+        "http://LOCALHOST/v1",
+        "HTTP://localhost/v1",
+        "http://127.0.0.1:8080/v1",
+        "http://127.1.2.3/v1",
+        "http://127.255.255.254/v1",
+        "http://[::1]:8080/v1",
+        "http://[0:0:0:0:0:0:0:1]/v1",
+        "http://[::ffff:127.0.0.1]/v1",
+        "http://[::ffff:7f00:1]/v1",
+        "http://[::1%25lo0]/v1",
+    ]
+
+    /// Base URLs every mode refuses, most of them HTTP off loopback. Names
+    /// aren't resolved, and IPv4 must be four decimal octets without leading
+    /// zeros, since a resolver may read other forms differently.
+    private static let refusedBaseURLs = [
+        "http://proxy.example/v1",
+        "http://app.localhost/v1",
+        "http://localhost.example/v1",
+        "http://localhost./v1",
+        "http://%6cocalhost/v1",
+        "http://0.0.0.0:8080/v1",
+        "http://10.0.0.1/v1",
+        "http://128.0.0.1/v1",
+        "http://127.0.0.1./v1",
+        "http://127.1/v1",
+        "http://0127.0.0.1/v1",
+        "http://127.0.0.01/v1",
+        "http://0x7f.0.0.1/v1",
+        "http://2130706433/v1",
+        "http://[::]/v1",
+        "http://[::2]/v1",
+        "http://[::127.0.0.1]/v1",
+        "http://[::ffff:10.0.0.1]/v1",
+        "http://[::ffff:127.0.0.01]/v1",
+        "http://user:secret@localhost/v1",
+        "ftp://localhost/v1",
+        "/v1",
+    ]
+
+    func testEHBPAcceptsAnHTTPBaseURLOnlyOnALoopbackHost() throws {
+        let network = approving()
+        for url in Self.loopbackHTTPBaseURLs + ["https://proxy.example/v1"] {
+            let connection = try connection(network, transportMode: .ehbp, baseURL: URL(string: url)!)
+            XCTAssertEqual(connection.baseURL.absoluteString, url)
+        }
+        for url in Self.refusedBaseURLs {
+            assertConfigurationError({ try self.connection(network, transportMode: .ehbp, baseURL: URL(string: url)!) })
+        }
+        XCTAssertTrue(network.urls.isEmpty)
+    }
+
+    func testTLSRefusesAnHTTPBaseURLOnLoopback() throws {
+        let network = approving()
+        for url in Self.loopbackHTTPBaseURLs {
+            assertConfigurationError({ try self.connection(network, baseURL: URL(string: url)!) })
+        }
+        // Not even on the enclave's own host, which TLS reaches over HTTPS.
+        assertConfigurationError({
+            try EnclaveConnection(
+                handle: EnclaveHandle(enclave: "localhost:8080", repo: "org/repo", attestationRelay: nil, attestor: self.attestor(network)),
+                transportMode: .tls,
+                baseURL: URL(string: "http://localhost:8080/v1")!,
+                userCacheSecret: ""
+            )
+        })
+        XCTAssertTrue(network.urls.isEmpty)
+    }
+
+    /// The public initializers check the base URL before any network I/O:
+    /// the enclave and the router's relay are unreachable, so reaching them
+    /// would fail with a network error instead.
+    func testThePublicInitializersRefuseAnHTTPBaseURLOffLoopback() async throws {
+        let cases: [(TransportMode, String)] = Self.refusedBaseURLs.map { (.ehbp, $0) } + [(.tls, "http://localhost:8080/v1")]
+        for (mode, url) in cases {
+            do {
+                _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", repo: "org/repo", transportMode: mode, baseURL: URL(string: url)!)
+                XCTFail("\(url) must be refused")
+            } catch TinfoilError.configurationError(let failure) {
+                if mode == .ehbp, url.hasPrefix("http://"), !url.contains("@") {
+                    XCTAssertTrue(failure.message.contains("loopback"), failure.message)
+                }
+            }
+            do {
+                _ = try await RouterHTTPClient(transportMode: mode, baseURL: URL(string: url)!, attestationRelay: "127.0.0.1:9")
+                XCTFail("\(url) must be refused")
+            } catch TinfoilError.configurationError {
+            }
+        }
+    }
+
+    func testARouterAcceptsAnHTTPBaseURLOnLoopback() async throws {
+        let network = approving()
+        let client = try await router(network, baseURL: URL(string: "http://localhost:8080/v1/")!)
+        XCTAssertEqual(client.baseURL.absoluteString, "http://localhost:8080/v1/")
+        XCTAssertEqual(client.enclave, "router-a.example", "The router verified stays the enclave.")
+
+        let verifications = network.urls.count
+        for target in ["https://localhost:8080/v1/models", "http://localhost:8081/v1/models", "http://127.0.0.1:8080/v1/models", "http://router-a.example/v1/models"] {
+            do {
+                _ = try await client.data(from: URL(string: target)!)
+                XCTFail("\(target) must be refused")
+            } catch TinfoilError.configurationError {
+            }
+        }
+        XCTAssertEqual(network.urls.count, verifications, "A refused request does not verify.")
+    }
+
     func testOpenAIClientsRequireEHBP() async throws {
         let tls = try await EnclaveHTTPClient(verifying: connection(approving()))
         XCTAssertThrowsError(try EnclaveOpenAIClient(httpClient: tls, apiKey: "test-key")) { error in
