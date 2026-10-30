@@ -25,7 +25,8 @@ public struct VerificationPolicy: Equatable, Sendable {
     /// Register values the enclave measurement must also match. An empty
     /// register keeps its default check.
     public var pinnedRegisters: Verification.Measurement?
-    /// Oldest freshness witness accepted. Nil keeps the seven-day default.
+    /// Oldest freshness witness accepted, in seconds. Nil keeps the seven-day
+    /// default; a value must be positive.
     public var freshnessMaxAge: TimeInterval?
 
     public init(pinnedRegisters: Verification.Measurement? = nil, freshnessMaxAge: TimeInterval? = nil) {
