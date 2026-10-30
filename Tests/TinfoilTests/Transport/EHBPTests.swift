@@ -149,6 +149,10 @@ final class LocalTestServer: @unchecked Sendable {
             guard clientSocket >= 0 else {
                 continue
             }
+            // A client that timed out may already have closed the connection;
+            // writing to it must fail with EPIPE, not kill the test process.
+            var noSigPipe: Int32 = 1
+            setsockopt(clientSocket, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
             handleClient(clientSocket)
         }
@@ -752,6 +756,96 @@ final class EHBPTests: XCTestCase {
                 $0.key.caseInsensitiveCompare(URLHelpers.enclaveURLHeaderName) == .orderedSame
             }?.value
         }
+    }
+
+    // MARK: - Request Timeouts
+
+    /// Delays every response by one second before sending any of it
+    private func delayResponses() {
+        server.responseHandler = { [responseBody = server.responseBody] _ in
+            Thread.sleep(forTimeInterval: 1)
+            return LocalTestServer.Response(statusCode: 200, contentType: "application/json", body: responseBody, includeNonce: true)
+        }
+    }
+
+    /// A network session whose own timeout is shorter than the server's delay
+    private func impatientNetworkSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 0.5
+        return URLSession(configuration: configuration)
+    }
+
+    private func chatRequest(timeoutInterval: TimeInterval) -> URLRequest {
+        var request = chatRequest()
+        request.timeoutInterval = timeoutInterval
+        return request
+    }
+
+    private func assertTimedOut<T>(
+        _ operation: () async throws -> T,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await operation()
+            XCTFail("expected the request to time out", file: file, line: line)
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .timedOut, file: file, line: line)
+        } catch {
+            XCTFail("expected URLError(.timedOut), got \(error)", file: file, line: line)
+        }
+    }
+
+    func testAShorterRequestTimeoutOverridesTheSessions() async throws {
+        delayResponses()
+        let session = pinnedSession()
+
+        await assertTimedOut { try await session.data(for: chatRequest(timeoutInterval: 0.5), delegate: nil) }
+    }
+
+    func testALongerRequestTimeoutOverridesTheSessions() async throws {
+        delayResponses()
+        let session = EHBPURLSession(
+            baseURL: server.baseURL,
+            verifiedState: EHBPVerifiedState(
+                endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey)
+            ),
+            session: impatientNetworkSession()
+        )
+
+        let (_, response) = try await session.data(for: chatRequest(timeoutInterval: 5), delegate: nil)
+
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+    }
+
+    func testAStreamingRequestsShorterTimeoutOverridesTheSessions() async throws {
+        delayResponses()
+        let session = makeStreamingSession(delegate: StreamingRecorder())
+
+        await assertTimedOut { try await session.data(for: chatRequest(timeoutInterval: 0.5), delegate: nil) }
+    }
+
+    func testAStreamingRequestsLongerTimeoutOverridesTheSessions() async throws {
+        delayResponses()
+        let session = EHBPStreamingSession(
+            baseURL: server.baseURL,
+            verifiedState: EHBPVerifiedState(
+                endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey)
+            ),
+            networkSession: impatientNetworkSession(),
+            delegate: StreamingRecorder()
+        )
+
+        let (_, response) = try await session.data(for: chatRequest(timeoutInterval: 5), delegate: nil)
+
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+    }
+
+    func testARecoverableRequestsTimeoutOverridesTheSessions() async throws {
+        delayResponses()
+        let session = pinnedSession()
+
+        await assertTimedOut { try await session.recoverableBytes(for: chatRequest(timeoutInterval: 0.5)) }
     }
 
     // MARK: - Attestation Freshness
