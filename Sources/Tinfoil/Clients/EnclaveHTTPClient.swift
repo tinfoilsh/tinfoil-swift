@@ -160,11 +160,10 @@ public final class EnclaveHTTPClient: Sendable {
     /// call: a request cancelled before the retry is not sent again and fails
     /// with `CancellationError`.
     ///
-    /// Over TLS, the request's `timeoutInterval` is how long it may go without
+    /// The request's `timeoutInterval` is how long it may go without
     /// receiving data before failing with `URLError(.timedOut)`; raise it for
     /// an endpoint that works a long time before it replies. It is 60 seconds
-    /// unless set. Under EHBP it doesn't apply yet, and the limit is 60
-    /// seconds.
+    /// unless set.
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         try await connection.data(for: request)
     }
@@ -184,7 +183,9 @@ public final class EnclaveHTTPClient: Sendable {
     ///
     /// It requires `TransportMode.ehbp`; in TLS mode it fails with
     /// `TinfoilError.configurationError`. The same retry after a key rejection
-    /// applies, and cancelling the task stops it in the same way.
+    /// applies, and cancelling the task stops it in the same way. The
+    /// request's `timeoutInterval` also limits each wait for the body's next
+    /// chunk.
     public func recoverableBytes(for request: URLRequest) async throws -> RecoverableResponse {
         try await connection.recoverableBytes(for: request)
     }

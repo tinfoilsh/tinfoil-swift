@@ -16,6 +16,7 @@ private struct PreparedEHBPRequest {
     let method: String
     let path: String
     let headers: [String: String]
+    let timeoutInterval: TimeInterval
     let body: Data?
 }
 
@@ -57,6 +58,11 @@ private func prepareEHBPRequest(
         method: request.httpMethod ?? "GET",
         path: URLHelpers.extractPath(from: url),
         headers: headers,
+        // The request's idle timeout overrides the session's. URLRequest has
+        // no unset timeout: it is 60 seconds unless set, as is the OpenAI
+        // client's default, and every session the SDK creates also uses 60,
+        // so a request that sets none keeps the timeout it had.
+        timeoutInterval: request.timeoutInterval,
         body: body
     )
 }
@@ -529,6 +535,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
                     method: prepared.method,
                     path: prepared.path,
                     headers: prepared.headers,
+                    timeoutInterval: prepared.timeoutInterval,
                     body: prepared.body
                 )
                 return ((stream, response), response)
@@ -702,6 +709,7 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
                 method: prepared.method,
                 path: prepared.path,
                 headers: prepared.headers,
+                timeoutInterval: prepared.timeoutInterval,
                 body: prepared.body
             )
             try Task.checkCancellation()
@@ -724,6 +732,7 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
                 method: prepared.method,
                 path: prepared.path,
                 headers: prepared.headers,
+                timeoutInterval: prepared.timeoutInterval,
                 body: prepared.body
             )
             try Task.checkCancellation()
