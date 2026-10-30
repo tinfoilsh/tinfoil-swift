@@ -627,6 +627,106 @@ final class EHBPTests: XCTestCase {
         XCTAssertEqual(recorder.completionCount, 1)
     }
 
+    // MARK: - Session Recovery Tokens
+
+    private func pinnedSession() -> EHBPURLSession {
+        EHBPURLSession(
+            baseURL: server.baseURL,
+            verifiedState: EHBPVerifiedState(
+                endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey)
+            )
+        )
+    }
+
+    /// The encapsulated key each request the server received was sealed with
+    private func encapsulatedKeys() -> [String] {
+        server.requestStore.requests.compactMap { $0.headers[EHBPProtocol.encapsulatedKeyHeader] }
+    }
+
+    func testARecoverableResponseCarriesItsRequestsToken() async throws {
+        server.responseContentType = "text/event-stream"
+        server.responseBody = makeEncryptedResponse()
+
+        let recoverable = try await pinnedSession().recoverableBytes(for: chatRequest())
+
+        XCTAssertEqual(recoverable.response.statusCode, 200)
+        let token = try XCTUnwrap(recoverable.recoveryToken)
+        XCTAssertEqual(token.exportedSecret.count, EHBPConstants.exportLength)
+        XCTAssertEqual([token.requestEnc.hexString], encapsulatedKeys(), "The token is for the request that was sent.")
+        var body = Data()
+        for try await chunk in recoverable.body {
+            body.append(chunk)
+        }
+        XCTAssertEqual(body, Data(), "the fixture's encrypted stream decrypts to an empty body")
+    }
+
+    func testConcurrentRecoverableRequestsEachGetTheirOwnToken() async throws {
+        server.responseContentType = "text/event-stream"
+        server.responseBody = makeEncryptedResponse()
+        let session = pinnedSession()
+
+        async let first = session.recoverableBytes(for: chatRequest())
+        async let second = session.recoverableBytes(for: chatRequest())
+        let tokens = try await [first, second].map { try XCTUnwrap($0.recoveryToken).requestEnc.hexString }
+
+        XCTAssertEqual(Set(tokens).count, 2)
+        XCTAssertEqual(Set(tokens), Set(encapsulatedKeys()))
+    }
+
+    func testARecoverableRequestReplayedAfterAKeyRejectionCarriesTheReplaysToken() async throws {
+        server.queuedResponses = [
+            .init(statusCode: 422, contentType: "application/problem+json", body: Self.keyConfigProblemBody, includeNonce: false),
+            .init(statusCode: 200, contentType: "text/event-stream", body: makeEncryptedResponse(), includeNonce: true),
+        ]
+        let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: makeRotatingState(refreshCounter: AsyncCounter()))
+
+        let recoverable = try await session.recoverableBytes(for: chatRequest())
+
+        let keys = encapsulatedKeys()
+        XCTAssertEqual(keys.count, 2)
+        XCTAssertEqual(recoverable.recoveryToken?.requestEnc.hexString, keys.last)
+    }
+
+    func testAnUnsealedResponseHasNoToken() async throws {
+        server.responseStatusCode = 401
+        server.responseContentType = "text/plain"
+        server.responseBody = Data("unauthorized".utf8)
+        server.includeResponseNonce = false
+
+        let recoverable = try await pinnedSession().recoverableBytes(for: chatRequest())
+
+        XCTAssertEqual(recoverable.response.statusCode, 401)
+        XCTAssertNil(recoverable.recoveryToken, "An intermediary's unencrypted error can't be recovered.")
+        var body = Data()
+        for try await chunk in recoverable.body {
+            body.append(chunk)
+        }
+        XCTAssertEqual(body, Data("unauthorized".utf8))
+    }
+
+    func testARequestsTimeoutIntervalAppliesUnderEHBP() async throws {
+        server.responseHandler = { _ in
+            Thread.sleep(forTimeInterval: 1.5)
+            return .init(statusCode: 200, contentType: "application/json", body: Data(), includeNonce: true)
+        }
+        var request = chatRequest()
+        request.timeoutInterval = 0.5
+
+        do {
+            _ = try await pinnedSession().data(for: request, delegate: nil)
+            XCTFail("a server slower than the request's timeout must time out")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .timedOut)
+        }
+    }
+
+    func testEHBPSessionsAreSharedPerOriginAndTimeout() {
+        let session = URLSession.ehbp(baseURL: server.baseURL, timeoutInterval: 300)
+        XCTAssertEqual(session.configuration.timeoutIntervalForRequest, 300)
+        XCTAssertTrue(session === URLSession.ehbp(baseURL: server.baseURL, timeoutInterval: 300))
+        XCTAssertFalse(session === URLSession.ehbp(baseURL: server.baseURL))
+    }
+
     /// A state whose refresh waits on the returned gate, fulfilling the
     /// returned expectation once it starts.
     private func makeGatedRotatingState() -> (EHBPVerifiedState, XCTestExpectation, AsyncGate) {

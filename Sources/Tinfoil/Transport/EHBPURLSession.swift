@@ -24,7 +24,7 @@ private func prepareEHBPRequest(
     baseURL: String,
     verifiedState: EHBPVerifiedState,
     userCacheSecret: String,
-    session: URLSession
+    session: URLSession?
 ) async throws -> PreparedEHBPRequest {
     try Task.checkCancellation()
     try refuseUnsealedTraffic(request)
@@ -34,10 +34,12 @@ private func prepareEHBPRequest(
 
     let snapshot = try await verifiedState.current()
     try Task.checkCancellation()
+    // EHBP builds its own URLRequest, so the request's timeout reaches the
+    // network only through the session's configuration.
     let client = try EHBPClient(
         baseURL: baseURL,
         publicKey: snapshot.endpoint.publicKey,
-        session: session
+        session: session ?? .ehbp(baseURL: baseURL, timeoutInterval: request.timeoutInterval)
     )
     var headers = request.allHTTPHeaderFields ?? [:]
     URLHelpers.addProxyHeaderIfNeeded(
@@ -100,30 +102,39 @@ final class EHBPRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
 
 extension URLSession {
     /// A session for EHBP requests to `baseURL`, which follows redirects
-    /// only within its origin. A session keeps its delegate until it is
-    /// invalidated, so sessions are shared per origin for the life of the
-    /// process rather than created per client: a process talks to few
-    /// origins, while it may create many clients.
-    static func ehbp(baseURL: String) -> URLSession {
-        EHBPSessions.shared.session(for: URLHelpers.origin(from: baseURL))
+    /// only within its origin and fails a request that receives no data for
+    /// `timeoutInterval` seconds. A session keeps its delegate until it is
+    /// invalidated, so sessions are shared per origin and timeout for the life
+    /// of the process rather than created per client: a process talks to few
+    /// origins with few timeouts, while it may create many clients.
+    static func ehbp(baseURL: String, timeoutInterval: TimeInterval = 60) -> URLSession {
+        EHBPSessions.shared.session(for: URLHelpers.origin(from: baseURL), timeoutInterval: timeoutInterval)
     }
 }
 
-/// The redirect-restricted EHBP sessions, one per origin
+/// The redirect-restricted EHBP sessions, one per origin and timeout
 private final class EHBPSessions: @unchecked Sendable {
+    private struct Key: Hashable {
+        let origin: String
+        let timeoutInterval: TimeInterval
+    }
+
     static let shared = EHBPSessions()
 
     private let lock = NSLock()
-    private var sessions: [String: URLSession] = [:]
+    private var sessions: [Key: URLSession] = [:]
 
-    func session(for origin: String) -> URLSession {
+    func session(for origin: String, timeoutInterval: TimeInterval) -> URLSession {
+        let key = Key(origin: origin, timeoutInterval: timeoutInterval)
         lock.lock()
         defer { lock.unlock() }
-        if let session = sessions[origin] {
+        if let session = sessions[key] {
             return session
         }
-        let session = URLSession(configuration: .default, delegate: EHBPRedirectPolicy(origin: origin), delegateQueue: nil)
-        sessions[origin] = session
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = timeoutInterval
+        let session = URLSession(configuration: configuration, delegate: EHBPRedirectPolicy(origin: origin), delegateQueue: nil)
+        sessions[key] = session
         return session
     }
 }
@@ -195,7 +206,8 @@ final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
     let userCacheSecret: String
-    private let networkSession: URLSession
+    /// Nil selects the shared session for each request's timeout
+    private let networkSession: URLSession?
 
     /// Creates an EHBP URLSession factory
     ///
@@ -238,7 +250,7 @@ final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = verifiedState
         self.userCacheSecret = userCacheSecret
-        self.networkSession = session ?? .ehbp(baseURL: baseURL)
+        self.networkSession = session
     }
 
     func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
@@ -258,7 +270,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
     private let userCacheSecret: String
-    private let networkSession: URLSession
+    private let networkSession: URLSession?
     private weak var delegate: URLSessionDataDelegateProtocol?
     private var activeTasks: [ObjectIdentifier: EHBPStreamingDataTask] = [:]
     private let lock = NSLock()
@@ -267,7 +279,7 @@ internal final class EHBPStreamingSession: URLSessionProtocol, @unchecked Sendab
         baseURL: String,
         verifiedState: EHBPVerifiedState,
         userCacheSecret: String = "",
-        networkSession: URLSession,
+        networkSession: URLSession?,
         delegate: URLSessionDataDelegateProtocol
     ) {
         self.baseURL = baseURL
@@ -384,7 +396,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
     private let userCacheSecret: String
-    private let networkSession: URLSession
+    private let networkSession: URLSession?
     private weak var delegate: URLSessionDataDelegateProtocol?
     private weak var session: EHBPStreamingSession?
     /// Whether the full decrypted response is buffered for the completion
@@ -414,7 +426,7 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         userCacheSecret: String = "",
         delegate: URLSessionDataDelegateProtocol?,
         session: EHBPStreamingSession,
-        networkSession: URLSession,
+        networkSession: URLSession?,
         accumulatesResponse: Bool = true,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) {
@@ -564,7 +576,8 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     private let baseURL: String
     private let verifiedState: EHBPVerifiedState
     let userCacheSecret: String
-    private let session: URLSession
+    /// Nil selects the shared session for each request's timeout
+    private let session: URLSession?
 
     /// Creates an EHBP URLSession with the given server public key
     ///
@@ -600,7 +613,7 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.verifiedState = verifiedState
         self.userCacheSecret = userCacheSecret
-        self.session = session ?? .ehbp(baseURL: baseURL)
+        self.session = session
     }
 
     // MARK: - URLSessionProtocol
@@ -695,6 +708,50 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
                 throw refusal
             }
             return result
+        }
+        throw EHBPReplayPolicy.attemptsExhausted
+    }
+
+    /// Sends request as `data(for:)` does, replaying it once after a key
+    /// rejection, but returns once the response headers arrive, with the body
+    /// still streaming and the request's own session recovery token.
+    func recoverableBytes(for request: URLRequest) async throws -> RecoverableResponse {
+        for attempt in 0..<EHBPReplayPolicy.maximumAttempts {
+            let prepared = try await prepareEHBPRequest(
+                request,
+                baseURL: baseURL,
+                verifiedState: verifiedState,
+                userCacheSecret: userCacheSecret,
+                session: session
+            )
+            let stream: AsyncThrowingStream<Data, Error>
+            let response: HTTPURLResponse
+            do {
+                (stream, response) = try await prepared.client.requestStream(
+                    method: prepared.method,
+                    path: prepared.path,
+                    headers: prepared.headers,
+                    body: prepared.body
+                )
+            } catch let error as EHBPError where error.code == .keyConfigMismatch {
+                try await EHBPReplayPolicy.refresh(
+                    verifiedState,
+                    afterRejectedGeneration: prepared.rejectedGeneration,
+                    attempt: attempt
+                )
+                continue
+            }
+            try Task.checkCancellation()
+            if let refusal = refusedRedirect(response, origin: baseURL) {
+                throw refusal
+            }
+            // Each request has a client of its own, so this token is this
+            // request's. EHBP withdraws it for a response that isn't sealed.
+            return RecoverableResponse(
+                response: response,
+                recoveryToken: try? prepared.client.getSessionRecoveryToken(),
+                body: stream
+            )
         }
         throw EHBPReplayPolicy.attemptsExhausted
     }
