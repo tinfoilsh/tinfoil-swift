@@ -704,29 +704,6 @@ final class EHBPTests: XCTestCase {
         XCTAssertEqual(body, Data("unauthorized".utf8))
     }
 
-    func testARequestsTimeoutIntervalAppliesUnderEHBP() async throws {
-        server.responseHandler = { _ in
-            Thread.sleep(forTimeInterval: 1.5)
-            return .init(statusCode: 200, contentType: "application/json", body: Data(), includeNonce: true)
-        }
-        var request = chatRequest()
-        request.timeoutInterval = 0.5
-
-        do {
-            _ = try await pinnedSession().data(for: request, delegate: nil)
-            XCTFail("a server slower than the request's timeout must time out")
-        } catch let error as URLError {
-            XCTAssertEqual(error.code, .timedOut)
-        }
-    }
-
-    func testEHBPSessionsAreSharedPerOriginAndTimeout() {
-        let session = URLSession.ehbp(baseURL: server.baseURL, timeoutInterval: 300)
-        XCTAssertEqual(session.configuration.timeoutIntervalForRequest, 300)
-        XCTAssertTrue(session === URLSession.ehbp(baseURL: server.baseURL, timeoutInterval: 300))
-        XCTAssertFalse(session === URLSession.ehbp(baseURL: server.baseURL))
-    }
-
     /// A state whose refresh waits on the returned gate, fulfilling the
     /// returned expectation once it starts.
     private func makeGatedRotatingState() -> (EHBPVerifiedState, XCTestExpectation, AsyncGate) {

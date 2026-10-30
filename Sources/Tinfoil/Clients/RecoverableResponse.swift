@@ -19,7 +19,8 @@ public struct RecoverableResponse: Sendable {
     /// delete it once the response is fully read or a newer request replaces
     /// it.
     public let recoveryToken: SessionRecoveryToken?
-    /// The decrypted body, chunk by chunk as it arrives. Ending the iteration
-    /// early cancels the transfer.
+    /// The decrypted body, chunk by chunk as it arrives. To stop early, cancel
+    /// the task iterating it or release the response: breaking out of the
+    /// loop alone leaves the transfer running until the response is released.
     public let body: AsyncThrowingStream<Data, Error>
 }
