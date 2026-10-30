@@ -159,6 +159,12 @@ public final class EnclaveHTTPClient: Sendable {
     /// the user signs out while it is pending, cancel the task awaiting this
     /// call: a request cancelled before the retry is not sent again and fails
     /// with `CancellationError`.
+    ///
+    /// Over TLS, the request's `timeoutInterval` is how long it may go without
+    /// receiving data before failing with `URLError(.timedOut)`; raise it for
+    /// an endpoint that works a long time before it replies. It is 60 seconds
+    /// unless set. Under EHBP it doesn't apply yet, and the limit is 60
+    /// seconds.
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         try await connection.data(for: request)
     }
