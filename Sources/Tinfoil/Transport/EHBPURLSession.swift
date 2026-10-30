@@ -163,14 +163,56 @@ private func makePinnedVerifiedState(
     )
 }
 
+/// How every EHBP request is sent: sealed to the current key, replayed once
+/// under a refreshed key if the enclave rejects it, and refused if it was
+/// redirected off its origin.
 private enum EHBPReplayPolicy {
     static let maximumAttempts = 2
 
-    /// Every replay loop either returns, refreshes and continues, or throws
-    /// from `refresh`, so this is unreachable in practice. It exists so a
-    /// future edit to the loop cannot silently leave a request unfinished.
+    /// Every attempt either returns, refreshes and continues, or throws from
+    /// `refresh`, so this is unreachable in practice. It exists so a future
+    /// edit to the loop cannot silently leave a request unfinished.
     static var attemptsExhausted: Error {
         EHBPError.network("EHBP retry limit exhausted")
+    }
+
+    /// Sends request through sendOnce, which receives it prepared and sealed
+    /// and returns its result with the response. Only a key rejection thrown
+    /// by sendOnce is replayed, so it must return once the response headers
+    /// have been checked, before any of the body reaches the caller.
+    static func send<Result>(
+        _ request: URLRequest,
+        baseURL: String,
+        verifiedState: EHBPVerifiedState,
+        userCacheSecret: String,
+        session: URLSession,
+        through sendOnce: (PreparedEHBPRequest) async throws -> (result: Result, response: URLResponse)
+    ) async throws -> Result {
+        for attempt in 0..<maximumAttempts {
+            let prepared = try await prepareEHBPRequest(
+                request,
+                baseURL: baseURL,
+                verifiedState: verifiedState,
+                userCacheSecret: userCacheSecret,
+                session: session
+            )
+            let sent: (result: Result, response: URLResponse)
+            do {
+                sent = try await sendOnce(prepared)
+            } catch let error as EHBPError where error.code == .keyConfigMismatch {
+                try await refresh(
+                    verifiedState,
+                    afterRejectedGeneration: prepared.rejectedGeneration,
+                    attempt: attempt
+                )
+                continue
+            }
+            if let response = sent.response as? HTTPURLResponse, let refusal = refusedRedirect(response, origin: baseURL) {
+                throw refusal
+            }
+            return sent.result
+        }
+        throw attemptsExhausted
     }
 
     static func refresh(
@@ -473,63 +515,46 @@ internal final class EHBPStreamingDataTask: URLSessionDataTaskProtocol, @uncheck
         }
 
         do {
-            for attempt in 0..<EHBPReplayPolicy.maximumAttempts {
-                let prepared = try await prepareEHBPRequest(
-                    request,
-                    baseURL: baseURL,
-                    verifiedState: verifiedState,
-                    userCacheSecret: userCacheSecret,
-                    session: networkSession
+            // EHBP detects the key-config mismatch before any byte of the
+            // rejected response is returned, so nothing leaks to the delegate
+            // ahead of the replay.
+            let (stream, response) = try await EHBPReplayPolicy.send(
+                request,
+                baseURL: baseURL,
+                verifiedState: verifiedState,
+                userCacheSecret: userCacheSecret,
+                session: networkSession
+            ) { prepared in
+                let (stream, response) = try await prepared.client.requestStream(
+                    method: prepared.method,
+                    path: prepared.path,
+                    headers: prepared.headers,
+                    body: prepared.body
                 )
-
-                // EHBP detects the key-config mismatch before any byte of
-                // the rejected response is returned, so nothing leaks to the
-                // delegate ahead of the replay.
-                let stream: AsyncThrowingStream<Data, Error>
-                let response: HTTPURLResponse
-                do {
-                    (stream, response) = try await prepared.client.requestStream(
-                        method: prepared.method,
-                        path: prepared.path,
-                        headers: prepared.headers,
-                        body: prepared.body
-                    )
-                } catch let error as EHBPError where error.code == .keyConfigMismatch {
-                    try await EHBPReplayPolicy.refresh(
-                        verifiedState,
-                        afterRejectedGeneration: prepared.rejectedGeneration,
-                        attempt: attempt
-                    )
-                    continue
-                }
-                if let refusal = refusedRedirect(response, origin: baseURL) {
-                    throw refusal
-                }
-
-                delegate?.urlSession(
-                    session,
-                    dataTask: self,
-                    didReceive: response
-                ) { disposition in
-                    if disposition == .cancel {
-                        self.cancel()
-                    }
-                }
-
-                var accumulatedData = Data()
-                for try await chunk in stream {
-                    try Task.checkCancellation()
-                    if accumulatesResponse {
-                        accumulatedData.append(chunk)
-                    }
-                    delegate?.urlSession(session, dataTask: self, didReceive: chunk)
-                }
-                try Task.checkCancellation()
-
-                finish(data: accumulatedData, response: response, error: nil)
-                return
+                return ((stream, response), response)
             }
-            throw EHBPReplayPolicy.attemptsExhausted
+
+            delegate?.urlSession(
+                session,
+                dataTask: self,
+                didReceive: response
+            ) { disposition in
+                if disposition == .cancel {
+                    self.cancel()
+                }
+            }
+
+            var accumulatedData = Data()
+            for try await chunk in stream {
+                try Task.checkCancellation()
+                if accumulatesResponse {
+                    accumulatedData.append(chunk)
+                }
+                delegate?.urlSession(session, dataTask: self, didReceive: chunk)
+            }
+            try Task.checkCancellation()
+
+            finish(data: accumulatedData, response: response, error: nil)
         } catch {
             finish(data: nil, response: nil, error: error)
         }
@@ -666,81 +691,51 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
     // MARK: - Private
 
     private func performRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
-        for attempt in 0..<EHBPReplayPolicy.maximumAttempts {
-            let prepared = try await prepareEHBPRequest(
-                request,
-                baseURL: baseURL,
-                verifiedState: verifiedState,
-                userCacheSecret: userCacheSecret,
-                session: session
+        try await EHBPReplayPolicy.send(
+            request,
+            baseURL: baseURL,
+            verifiedState: verifiedState,
+            userCacheSecret: userCacheSecret,
+            session: session
+        ) { prepared in
+            let result = try await prepared.client.request(
+                method: prepared.method,
+                path: prepared.path,
+                headers: prepared.headers,
+                body: prepared.body
             )
-            let result: (Data, URLResponse)
-            do {
-                result = try await prepared.client.request(
-                    method: prepared.method,
-                    path: prepared.path,
-                    headers: prepared.headers,
-                    body: prepared.body
-                )
-            } catch let error as EHBPError where error.code == .keyConfigMismatch {
-                try await EHBPReplayPolicy.refresh(
-                    verifiedState,
-                    afterRejectedGeneration: prepared.rejectedGeneration,
-                    attempt: attempt
-                )
-                continue
-            }
             try Task.checkCancellation()
-            if let response = result.1 as? HTTPURLResponse, let refusal = refusedRedirect(response, origin: baseURL) {
-                throw refusal
-            }
-            return result
+            return ((result.data, result.response), result.response)
         }
-        throw EHBPReplayPolicy.attemptsExhausted
     }
 
     /// Sends request as `data(for:)` does, replaying it once after a key
     /// rejection, but returns once the response headers arrive, with the body
     /// still streaming and the request's own session recovery token.
     func recoverableBytes(for request: URLRequest) async throws -> RecoverableResponse {
-        for attempt in 0..<EHBPReplayPolicy.maximumAttempts {
-            let prepared = try await prepareEHBPRequest(
-                request,
-                baseURL: baseURL,
-                verifiedState: verifiedState,
-                userCacheSecret: userCacheSecret,
-                session: session
+        try await EHBPReplayPolicy.send(
+            request,
+            baseURL: baseURL,
+            verifiedState: verifiedState,
+            userCacheSecret: userCacheSecret,
+            session: session
+        ) { prepared in
+            let (stream, response) = try await prepared.client.requestStream(
+                method: prepared.method,
+                path: prepared.path,
+                headers: prepared.headers,
+                body: prepared.body
             )
-            let stream: AsyncThrowingStream<Data, Error>
-            let response: HTTPURLResponse
-            do {
-                (stream, response) = try await prepared.client.requestStream(
-                    method: prepared.method,
-                    path: prepared.path,
-                    headers: prepared.headers,
-                    body: prepared.body
-                )
-            } catch let error as EHBPError where error.code == .keyConfigMismatch {
-                try await EHBPReplayPolicy.refresh(
-                    verifiedState,
-                    afterRejectedGeneration: prepared.rejectedGeneration,
-                    attempt: attempt
-                )
-                continue
-            }
             try Task.checkCancellation()
-            if let refusal = refusedRedirect(response, origin: baseURL) {
-                throw refusal
-            }
             // Each request has a client of its own, so this token is this
             // request's. EHBP withdraws it for a response that isn't sealed.
-            return RecoverableResponse(
+            let recoverable = RecoverableResponse(
                 response: response,
                 recoveryToken: try? prepared.client.getSessionRecoveryToken(),
                 body: stream
             )
+            return (recoverable, response)
         }
-        throw EHBPReplayPolicy.attemptsExhausted
     }
 }
 
