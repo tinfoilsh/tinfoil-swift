@@ -201,6 +201,9 @@ final class EnclaveConnection: Sendable {
         var attempt = 0
         while true {
             let verification = try await handle.ensureVerified()
+            // A caller that cancelled before a retry, as on signing out, must
+            // not have its request, credentials included, sent again.
+            try Task.checkCancellation()
             do {
                 return try await send(request, verification.tlsPublicKeyFingerprint)
             } catch let rejection as PinnedTLS.Rejection {
@@ -213,9 +216,6 @@ final class EnclaveConnection: Sendable {
                 }
                 // The enclave may have rotated its key since it was verified.
                 _ = try await handle.reverify()
-                // A caller that cancelled meanwhile, as on signing out, must
-                // not have its request, credentials included, sent again.
-                try Task.checkCancellation()
             }
         }
     }
