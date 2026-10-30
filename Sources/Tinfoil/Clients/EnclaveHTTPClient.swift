@@ -168,4 +168,18 @@ public final class EnclaveHTTPClient: Sendable {
     public func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         try await connection.data(from: url)
     }
+
+    /// Sends a request as `data(for:)` does, but returns as soon as the
+    /// response headers arrive, with the body still streaming and the
+    /// session recovery token that can decrypt this one response later. Use
+    /// it for a response the server stores so the client can fetch it again
+    /// after an interruption, such as a chat completion. The token is this
+    /// request's own, even with other requests in flight on the client.
+    ///
+    /// It requires `TransportMode.ehbp`; in TLS mode it fails with
+    /// `TinfoilError.configurationError`. The same retry after a key rejection
+    /// applies, and cancelling the task stops it in the same way.
+    public func recoverableBytes(for request: URLRequest) async throws -> RecoverableResponse {
+        try await connection.recoverableBytes(for: request)
+    }
 }

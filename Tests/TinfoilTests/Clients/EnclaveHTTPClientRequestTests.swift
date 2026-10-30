@@ -312,6 +312,18 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         XCTAssertEqual(log.sent.count, 1, "The request was not sent again.")
     }
 
+    func testRecoverableBytesNeedsEHBP() async throws {
+        let log = SendLog()
+        let client = try client(network: approving(), log: log)
+
+        do {
+            _ = try await client.recoverableBytes(for: URLRequest(url: URL(string: "/v1/chat/completions")!))
+            XCTFail("pinned TLS has no session recovery token")
+        } catch TinfoilError.configurationError {
+        }
+        XCTAssertTrue(log.sent.isEmpty)
+    }
+
     func testAKeyRejectedAfterVerifyingAgainFails() async throws {
         let network = approving()
         let log = SendLog { _ in throw self.rejection }

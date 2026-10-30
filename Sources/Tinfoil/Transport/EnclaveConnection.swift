@@ -197,6 +197,20 @@ final class EnclaveConnection: Sendable {
         try await data(for: URLRequest(url: url))
     }
 
+    /// Sends a request as `data(for:)` does under EHBP, returning once the
+    /// response headers arrive with the body still streaming and the request's
+    /// session recovery token. TLS mode has no token, so it is refused.
+    func recoverableBytes(for request: URLRequest) async throws -> RecoverableResponse {
+        guard let ehbp else {
+            throw TinfoilError.configuration(
+                "session recovery tokens need TransportMode.ehbp; pinned TLS has none"
+            )
+        }
+        var resolved = request
+        resolved.url = try resolve(request.url)
+        return try await ehbp.session.recoverableBytes(for: resolved)
+    }
+
     private func sendPinned(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         var attempt = 0
         while true {
