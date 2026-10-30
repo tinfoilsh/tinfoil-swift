@@ -97,12 +97,17 @@ final class GoAttestationVerifierTests: XCTestCase {
         )
         XCTAssertNoThrow(try GoAttestationVerifier(policy: pinned), "Go accepts the pins the policy encodes.")
         XCTAssertNoThrow(try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: 3600)))
+        XCTAssertEqual(
+            try VerificationPolicy(freshnessMaxAge: 1e-9).optionsJSON(),
+            #"{"freshness_max_age_ns":1}"#,
+            "One nanosecond is the shortest age accepted."
+        )
     }
 
-    func testNegativeOrUnrepresentableAgesAreRefused() {
-        // -1e-10 is a tenth of a nanosecond: it rounds to zero, which would
-        // otherwise select the default rather than fail.
-        for age in [-1, -1e-10, TimeInterval.nan, .infinity, -.infinity, 1e300] {
+    func testAgesThatAreNotPositiveOrUnrepresentableAreRefused() {
+        // Zero, and ±1e-10 (a tenth of a nanosecond), round to zero
+        // nanoseconds, which would otherwise select the default rather than fail.
+        for age in [0, -1, 1e-10, -1e-10, TimeInterval.nan, .infinity, -.infinity, 1e300] {
             assertCategory(isConfiguration) { try VerificationPolicy(freshnessMaxAge: age).optionsJSON() }
             assertCategory(isConfiguration) { try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: age)) }
         }

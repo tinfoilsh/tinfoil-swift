@@ -16,15 +16,17 @@ extension VerificationPolicy {
         return String(decoding: try JSONEncoder().encode(options), as: UTF8.self)
     }
 
-    /// The framework takes the age as an integer count of nanoseconds. A
-    /// negative age is refused before rounding, since one under half a
-    /// nanosecond would round to zero and silently select the default. A value
-    /// with no such count, such as NaN, infinity or more than about 292 years,
-    /// is refused rather than trapping in the conversion.
+    /// The framework takes the age as an integer count of nanoseconds, and
+    /// reads zero as "keep the default". So an age must be at least one
+    /// nanosecond once rounded: 0, or a positive age under half a nanosecond,
+    /// would otherwise silently select the seven-day default, and nil is the
+    /// way to ask for it. A value with no such count, such as NaN, infinity or
+    /// more than about 292 years, is refused rather than trapping in the
+    /// conversion.
     private static func nanoseconds(_ seconds: TimeInterval) throws -> Int64 {
-        guard seconds >= 0, let nanoseconds = Int64(exactly: (seconds * 1_000_000_000).rounded()) else {
+        guard let nanoseconds = Int64(exactly: (seconds * 1_000_000_000).rounded()), nanoseconds > 0 else {
             throw TinfoilError.configuration(
-                "freshness maximum age must be a non-negative, finite number of seconds, not \(seconds)"
+                "freshness maximum age must be a positive, finite number of seconds of at least a nanosecond, not \(seconds)"
             )
         }
         return nanoseconds
