@@ -172,7 +172,9 @@ final class EnclaveConnection: Sendable {
     /// endorse before the request was sent, the client verifies again and
     /// retries once; otherwise, or if it happens again, it fails with
     /// `TinfoilError.attestationError`. Under EHBP, a rejected key is
-    /// refreshed and the request replayed in the same way.
+    /// refreshed and the request replayed in the same way. Either way the
+    /// same request goes out again, headers included; cancelling the task
+    /// before the resend prevents it.
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         var resolved = request
         resolved.url = try resolve(request.url)
@@ -211,6 +213,9 @@ final class EnclaveConnection: Sendable {
                 }
                 // The enclave may have rotated its key since it was verified.
                 _ = try await handle.reverify()
+                // A caller that cancelled meanwhile, as on signing out, must
+                // not have its request, credentials included, sent again.
+                try Task.checkCancellation()
             }
         }
     }
