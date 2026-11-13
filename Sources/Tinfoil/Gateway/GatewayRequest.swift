@@ -28,11 +28,13 @@ enum GatewayRequest {
     /// A multipart upload without a model header must carry exactly one
     /// `model` field. Other requests are returned unchanged.
     static func prepare(_ request: URLRequest, secret: String) throws -> URLRequest {
-        guard request.httpMethod?.uppercased() == "POST" else {
-            return request
-        }
+        // A streamed body, which every sealing path would drop, is refused
+        // whatever the method.
         guard request.httpBodyStream == nil else {
             throw TinfoilError.configuration("the gateway client needs a request's body as httpBody, not a stream")
+        }
+        guard request.httpMethod?.uppercased() == "POST" else {
+            return request
         }
         guard let body = request.httpBody, !body.isEmpty,
               let (mediaType, parameters) = mediaType(request.value(forHTTPHeaderField: "Content-Type"))
@@ -366,7 +368,12 @@ struct MultipartParts {
     init?(_ body: Data, boundary: String) {
         let delimiter = Data("--\(boundary)".utf8)
         let crlf = Data("\r\n".utf8)
-        guard var cursor = body.range(of: delimiter)?.upperBound else {
+        // The first delimiter opens the body or starts a line after the
+        // preamble; a "--boundary" inside a preamble line is not one.
+        let first = body.starts(with: delimiter)
+            ? body.startIndex..<(body.startIndex + delimiter.count)
+            : body.range(of: crlf + delimiter).map { ($0.lowerBound + 2)..<$0.upperBound }
+        guard var cursor = first?.upperBound else {
             return nil
         }
         var parts: [Part] = []

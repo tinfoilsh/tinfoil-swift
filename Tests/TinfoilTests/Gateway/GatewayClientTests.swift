@@ -51,6 +51,13 @@ final class GatewayClientTests: XCTestCase {
         XCTAssertEqual(authority("https://[2001:db8::1]/v1/"), "[2001:db8::1]")
     }
 
+    func testABaseURLIsADirectory() {
+        let directory = { GatewayHTTPClient.directory(URL(string: $0)!).absoluteString }
+        XCTAssertEqual(directory("https://gw.example/v1"), "https://gw.example/v1/")
+        XCTAssertEqual(directory("https://gw.example/v1/"), "https://gw.example/v1/")
+        XCTAssertEqual(directory("https://gw.example"), "https://gw.example")
+    }
+
     func testACallerAuthorizedVerifierIsRefused() async throws {
         let authorizing = try Verifier(configAuthorizer: { _ in })
         for (verifier, pin) in [(authorizing, nil), (nil, authorizing)] as [(Verifier?, Verifier?)] {

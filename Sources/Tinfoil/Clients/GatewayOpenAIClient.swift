@@ -2,7 +2,10 @@ import Foundation
 
 /// An OpenAI client whose requests go through Tinfoil's gateway, each sealed
 /// with EHBP to a verified replica of the model it names. It sends through a
-/// `GatewayHTTPClient`.
+/// `GatewayHTTPClient`. Only requests that name a model can be routed, so
+/// methods without one, such as `models()` or the assistants and files
+/// endpoints, fail with `TinfoilError.configurationError`; for the models the
+/// gateway serves, use `httpClient.models()`.
 ///
 /// Experimental: the gateway route is new, and this API may change or be
 /// removed in a later release.

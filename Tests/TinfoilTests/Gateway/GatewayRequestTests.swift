@@ -162,6 +162,25 @@ final class GatewayRequestTests: XCTestCase {
                                  "the gateway client needs a request's body as httpBody, not a stream")
     }
 
+    func testAStreamedBodyIsRefusedWhateverTheMethod() {
+        var original = request("")
+        original.httpMethod = "PUT"
+        original.httpBody = nil
+        original.httpBodyStream = InputStream(data: Data("x".utf8))
+        assertConfigurationError({ try GatewayRequest.prepare(original, secret: "") },
+                                 "the gateway client needs a request's body as httpBody, not a stream")
+    }
+
+    func testABoundaryInsideThePreambleIsNotADelimiter() throws {
+        var body = "the parts below are separated by --XyZ lines\r\n"
+        body += "--XyZ\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper\r\n--XyZ--\r\n"
+        let prepared = try GatewayRequest.prepare(
+            request(body, path: "/v1/audio/transcriptions", contentType: "multipart/form-data; boundary=XyZ"),
+            secret: ""
+        )
+        XCTAssertEqual(prepared.value(forHTTPHeaderField: GatewayRequest.modelHeader), "whisper")
+    }
+
     func testBearerCredential() {
         XCTAssertEqual(GatewayRequest.bearerCredential("Bearer key"), "key")
         XCTAssertEqual(GatewayRequest.bearerCredential("  bearer   key  "), "key")

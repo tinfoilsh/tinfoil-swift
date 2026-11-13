@@ -140,7 +140,7 @@ final class PinnedOpenAITests: XCTestCase {
         XCTAssertEqual(json["user_cache_secret"] as? String, "scope-secret")
     }
 
-    func testTheOpenAIClientsDefaultToTLS() async throws {
+    func testAnOpenAIClientOverAPinnedConnectionUsesItsMode() async throws {
         let client = try await client(PinnedTransport { _ in [Self.chat] })
         XCTAssertEqual(client.httpClient.transportMode, .tls)
     }

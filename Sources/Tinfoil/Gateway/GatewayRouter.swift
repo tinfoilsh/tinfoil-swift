@@ -293,6 +293,8 @@ actor GatewayRouter {
             guard response.response.statusCode == 412, !routed.isEmpty, routed != replica.host else {
                 return response
             }
+            // A caller that cancelled must not have its request sent again.
+            try Task.checkCancellation()
             guard redirects < Self.maximumSealRedirects else {
                 throw TinfoilError.network("gateway kept routing away from the enclave the request was sealed to (last: \(routed))")
             }

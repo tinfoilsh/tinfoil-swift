@@ -219,6 +219,23 @@ final class GatewayRouterTests: XCTestCase {
         XCTAssertEqual(harness.sealedTo.count, 1 + GatewayRouter.maximumSealRedirects)
     }
 
+    /// A caller that cancels while its request is out isn't sent again when
+    /// the gateway reroutes it.
+    func testACancelledRequestIsNotResentAfterAReroute() async throws {
+        let harness = Harness()
+        harness.respond = { _ in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return (412, [GatewayRequest.sealHeader: "a.example"])
+        }
+        let router = try harness.router()
+        do {
+            _ = try await router.open(chat(prefix: "m"))
+            XCTFail("expected the cancellation")
+        } catch is CancellationError {
+        }
+        XCTAssertEqual(harness.sealedTo, ["d.example"])
+    }
+
     func testA412WithoutAnotherReplicaIsReturned() async throws {
         let harness = Harness()
         harness.respond = { request in (412, [GatewayRequest.sealHeader: request.value(forHTTPHeaderField: GatewayRequest.sealHeader)!]) }
@@ -417,6 +434,21 @@ final class GatewayCatalogTests: XCTestCase {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
         XCTFail("timed out waiting for the refresh", file: file, line: line)
+    }
+
+    func testFetchRefusesAHostThatIsNotAnAuthority() async {
+        for host in ["", "gw.example/x", "user@gw.example", "gw.example?q", "gw.example#f", "https://gw.example"] {
+            do {
+                _ = try await GatewayCatalog.fetch(host: host) { url in
+                    XCTFail("fetched \(url) for the host \(host)")
+                    return Data()
+                }
+                XCTFail("\(host) must be refused")
+            } catch TinfoilError.configurationError {
+            } catch {
+                XCTFail("unexpected \(error)")
+            }
+        }
     }
 
     func testFetchKeepsOnlyRoutableEntries() async throws {

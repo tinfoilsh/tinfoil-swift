@@ -178,15 +178,16 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let path = try connection(network, baseURL: URL(string: "https://enclave.example/v1/")!)
         XCTAssertEqual(path.baseURL.absoluteString, "https://enclave.example/v1/", "TLS accepts a path on the enclave's own origin.")
         assertConfigurationError({ try self.connection(network, transportMode: .ehbp, baseURL: URL(string: "http://proxy.example/")!) })
-        for refused in ["https://proxy.example/api/?", "https://proxy.example/api/?key=secret", "https://proxy.example/api/#", "https://enclave.example/v1#x"] {
-            XCTAssertThrowsError(try connection(network, transportMode: .ehbp, baseURL: URL(string: refused)!)) { error in
+        let refusals = ["https://proxy.example/api/?", "https://proxy.example/api/?key=secret", "https://proxy.example/api/#", "https://enclave.example/v1#x", "https://enclave.example/v1?key=secret"]
+        for mode in [TransportMode.tls, .ehbp] { for refused in refusals {
+            XCTAssertThrowsError(try connection(network, transportMode: mode, baseURL: URL(string: refused)!)) { error in
                 guard case TinfoilError.configurationError(let failure) = error else {
                     return XCTFail("expected a configuration error, got \(error)")
                 }
                 XCTAssertEqual(failure.message, "invalid base URL: a base URL must not carry a query or a fragment")
                 XCTAssertFalse(failure.message.contains("secret"), "The URL, whose query may hold a secret, isn't echoed.")
             }
-        }
+        } }
         XCTAssertTrue(network.urls.isEmpty)
     }
 

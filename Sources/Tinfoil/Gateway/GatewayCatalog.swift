@@ -55,8 +55,11 @@ enum GatewayCatalog {
             try await AttestationFetcher(timeout: fetchTimeout, maximumBodyBytes: maximumBytes).fetch($0)
         }
     ) async throws -> Catalog {
-        guard let url = URL(string: "https://\(host)\(path)"), url.host != nil else {
-            throw TinfoilError.configuration("cannot form the catalog URL of the gateway \(host)")
+        // host is an authority: a host with an optional port, nothing else.
+        guard !host.isEmpty, !host.contains(where: { "/?#@".contains($0) }),
+              let url = URL(string: "https://\(host)\(path)"), url.host != nil, url.path == path
+        else {
+            throw TinfoilError.configuration("the gateway host must be a host with an optional port, not \(host)")
         }
         let body = try await fetch(url)
         let catalog: Catalog

@@ -138,3 +138,31 @@ final class StreamingSessionReleaseTests: XCTestCase {
         XCTAssertNil(released, "Nothing keeps a finished task, or the open function it holds, alive.")
     }
 }
+
+#if canImport(Combine)
+import Combine
+
+/// Cancelling a subscription to `StreamingSession.dataTaskPublisher(for:)`
+/// cancels its request, as URLSession's own publisher does.
+final class StreamingSessionPublisherTests: XCTestCase {
+    func testCancellingTheSubscriptionCancelsTheRequest() async throws {
+        let opened = AsyncGate()
+        let cancelled = AsyncGate()
+        let session = StreamingSession(delegate: nil) { _ in
+            await opened.open()
+            do {
+                try await Task.sleep(nanoseconds: 10_000_000_000)
+            } catch {
+                await cancelled.open()
+                throw error
+            }
+            throw TinfoilError.network("not reached")
+        }
+        let subscription = session.dataTaskPublisher(for: URLRequest(url: URL(string: "https://enclave.example/v1/x")!))
+            .sink(receiveCompletion: { _ in }, receiveValue: { _ in })
+        await opened.wait()
+        subscription.cancel()
+        await cancelled.wait()
+    }
+}
+#endif

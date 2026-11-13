@@ -147,8 +147,10 @@ final class EnclaveConnection: Sendable {
     /// and any OpenAI client over it, and cancels a verification in progress.
     /// Requests already sent finish.
     func close() async {
-        await handle.close()
+        // EHBP stops sealing first, so no request is admitted while the
+        // handle closes.
         await ehbp?.state.close()
+        await handle.close()
     }
 
     /// The last successful verification, without checking it. It may have

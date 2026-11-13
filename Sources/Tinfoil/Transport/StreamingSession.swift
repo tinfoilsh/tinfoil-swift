@@ -109,8 +109,12 @@ internal class StreamingSession: URLSessionProtocol, @unchecked Sendable {
 
     #if canImport(Combine)
     func dataTaskPublisher(for request: URLRequest) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
+        // Cancelling the subscription cancels the task, as it does for
+        // URLSession's own publisher.
+        let cancellation = TaskCancellation()
         return Future<(data: Data, response: URLResponse), Error> { [self] promise in
             let task = self.dataTask(with: request) { data, response, error in
+                cancellation.detach()
                 if let error = error {
                     promise(.failure(error))
                 } else if let data = data, let response = response {
@@ -119,8 +123,10 @@ internal class StreamingSession: URLSessionProtocol, @unchecked Sendable {
                     promise(.failure(URLError(.badServerResponse)))
                 }
             }
+            cancellation.attach(task)
             task.resume()
         }
+        .handleEvents(receiveCancel: { cancellation.cancel() })
         .mapError { error -> URLError in
             if let urlError = error as? URLError {
                 return urlError

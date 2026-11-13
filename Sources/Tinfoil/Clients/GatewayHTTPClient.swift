@@ -32,7 +32,8 @@ public final class GatewayHTTPClient: Sendable {
     ///     only pinned models are served, which requires at least one pin.
     ///   - pinnedModelsOnly: Serve only the pinned models
     ///   - baseURL: The gateway's base URL; nil selects Tinfoil's gateway. It
-    ///     must be HTTPS. Request paths join under it, so a URL with
+    ///     must be HTTPS, and is treated as a directory: a path without a
+    ///     trailing slash gets one. Request paths join under it, so a URL with
     ///     credentials, a query or a fragment, even an empty one, is refused.
     ///   - verifier: The trust policy for unpinned models, and pinned ones
     ///     without their own; nil selects the defaults. A policy whose config
@@ -69,7 +70,7 @@ public final class GatewayHTTPClient: Sendable {
         onVerificationResult: VerificationResultCallback? = nil,
         catalog: (@Sendable () -> Catalog)? = nil
     ) async throws {
-        let base = baseURL ?? Self.defaultBaseURL
+        let base = Self.directory(baseURL ?? Self.defaultBaseURL)
         try EnclaveConnection.validateBaseURL(base, transportMode: .ehbp)
         guard base.scheme?.lowercased() == "https" else {
             throw TinfoilError.configuration("invalid base URL: the gateway base URL must use HTTPS")
@@ -114,6 +115,17 @@ public final class GatewayHTTPClient: Sendable {
                 )
             }
         ))
+    }
+
+    /// url with a trailing slash on its path, so that request paths join
+    /// under it rather than replace its last segment
+    static func directory(_ url: URL) -> URL {
+        guard !url.path.isEmpty, !url.absoluteString.hasSuffix("/"),
+              !url.absoluteString.contains(where: { $0 == "?" || $0 == "#" })
+        else {
+            return url
+        }
+        return URL(string: url.absoluteString + "/") ?? url
     }
 
     /// The host and any port of base, which attestation and the catalog are
