@@ -72,6 +72,9 @@ internal class StreamingSession: URLSessionProtocol, @unchecked Sendable {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let task = dataTask(with: request) { data, response, error in
+                    // The task holds this handler, which holds cancellation,
+                    // so drop cancellation's hold on the task once it is done.
+                    cancellation.detach()
                     if let error = error {
                         continuation.resume(throwing: error)
                     } else if let data = data, let response = response {
@@ -297,5 +300,10 @@ private final class TaskCancellation: @unchecked Sendable {
             return self.task
         }
         task?.cancel()
+    }
+
+    /// Releases the task once it has completed.
+    func detach() {
+        lock.withLock { task = nil }
     }
 }

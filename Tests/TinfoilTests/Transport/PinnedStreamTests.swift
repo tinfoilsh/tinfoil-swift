@@ -112,3 +112,29 @@ final class StreamingSessionCancellationTests: XCTestCase {
         XCTAssertTrue(sawCancellation.value, "The request saw the caller's cancellation.")
     }
 }
+
+/// A completed request through `StreamingSession.data(for:delegate:)` is
+/// released, not kept alive by its cancellation handling.
+final class StreamingSessionReleaseTests: XCTestCase {
+    private final class Sentinel: Sendable {}
+
+    func testACompletedTaskIsReleased() async throws {
+        weak var released: Sentinel?
+        do {
+            // The open function, which a finished task holds, captures it.
+            let sentinel = Sentinel()
+            released = sentinel
+            let session = StreamingSession(delegate: nil) { request in
+                _ = sentinel
+                let body = AsyncThrowingStream<Data, Error> { $0.yield(Data("ok".utf8)); $0.finish() }
+                return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }
+            let (data, _) = try await session.data(for: URLRequest(url: URL(string: "https://enclave.example/v1/x")!), delegate: nil)
+            XCTAssertEqual(data, Data("ok".utf8))
+        }
+        for _ in 0..<100 where released != nil {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertNil(released, "Nothing keeps a finished task, or the open function it holds, alive.")
+    }
+}
