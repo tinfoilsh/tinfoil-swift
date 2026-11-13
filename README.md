@@ -15,14 +15,14 @@ Requires iOS 17 or macOS 14, and Swift 5.9.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", branch: "main")
+    .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", .upToNextMinor(from: "0.9.0-rc.5"))
 ],
 targets: [
     .target(name: "YourApp", dependencies: [.product(name: "Tinfoil", package: "tinfoil-swift")])
 ]
 ```
 
-Or in Xcode, File > Add Packages and enter `https://github.com/tinfoilsh/tinfoil-swift.git`.
+Or in Xcode, File > Add Packages, enter `https://github.com/tinfoilsh/tinfoil-swift.git`, and choose a version. While the SDK is below 1.0, a minor version can break the API, so follow minor versions deliberately (`.upToNextMinor`).
 
 ## Quick Start
 
