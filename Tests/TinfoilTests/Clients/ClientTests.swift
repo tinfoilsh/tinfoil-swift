@@ -34,8 +34,13 @@ final class ClientTests: XCTestCase {
 
     func testErrorsDescribeThemselves() {
         let error: Error = TinfoilError.attestation("enclave.example presented a certificate whose key does not match the attestation")
-        XCTAssertEqual(error.localizedDescription, "enclave.example presented a certificate whose key does not match the attestation")
-        XCTAssertEqual(TinfoilError.configuration("bad option").localizedDescription, "bad option")
+        XCTAssertEqual(
+            error.localizedDescription,
+            "attestation error: enclave.example presented a certificate whose key does not match the attestation"
+        )
+        XCTAssertEqual(TinfoilError.configuration("bad option").localizedDescription, "configuration error: bad option")
+        XCTAssertEqual(String(describing: TinfoilError.network("offline")), "network error: offline")
+        XCTAssertEqual(TinfoilError.network("offline").message, "offline", "The message alone omits the category.")
     }
 
     func testURLHelpersAcceptHTTPAndHTTPSURLs() throws {

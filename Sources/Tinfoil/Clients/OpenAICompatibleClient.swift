@@ -165,21 +165,22 @@ extension OpenAICompatibleClient {
 
 /// How the SDK's OpenAI-compatible clients build their `OpenAI` client
 extension OpenAI {
-    /// The static API key, required unless a provider can supply one.
+    /// The static API key, required unless a provider can supply one. The
+    /// environment is not read: supplying the key is the application's job.
     /// Attestation itself does not use the key; it only authorizes inference
     /// requests, so a caller using a rotating token (e.g. a short-lived JWT)
     /// is not forced to pass a placeholder key.
     static func apiKey(_ apiKey: String?, provider: (@Sendable () -> String?)?) throws -> String? {
-        let staticApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
-        guard staticApiKey != nil || provider != nil else {
-            throw TinfoilError.configuration("no API key was given; pass apiKey or apiKeyProvider, or set TINFOIL_API_KEY")
+        guard apiKey != nil || provider != nil else {
+            throw TinfoilError.configuration("no API key was given; pass apiKey or apiKeyProvider")
         }
-        return staticApiKey
+        return apiKey
     }
 
-    /// An OpenAI client over a verified connection's EHBP sessions, which
-    /// every request body is sealed through.
-    static func sealed(
+    /// An OpenAI client over a verified connection, protected by its
+    /// transport mode: every request goes over a connection pinned to the
+    /// attested TLS key, or has its body sealed with EHBP.
+    static func attested(
         apiKey: String?,
         apiKeyProvider: (@Sendable () -> String?)?,
         connection: EnclaveConnection,
@@ -187,30 +188,36 @@ extension OpenAI {
         customHeaders: [String: String],
         tinfoilEvents: Set<TinfoilEvent>
     ) throws -> OpenAI {
-        guard let ehbp = connection.ehbp else {
-            throw TinfoilError.configuration("OpenAI requests are sealed with EHBP, so the HTTP client must use TransportMode.ehbp")
+        let session: URLSessionProtocol
+        let streamingFactory: URLSessionFactory
+        if let ehbp = connection.ehbp {
+            session = ehbp.session
+            streamingFactory = ehbp.streamingFactory
+        } else {
+            session = StreamingSession(delegate: nil, open: connection.open)
+            streamingFactory = PinnedSessionFactory(connection: connection)
         }
         return try sealed(
             apiKey: apiKey,
             apiKeyProvider: apiKeyProvider,
             baseURL: connection.baseURL.absoluteString,
-            session: ehbp.session,
-            streamingFactory: ehbp.streamingFactory,
+            session: session,
+            streamingFactory: streamingFactory,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
             tinfoilEvents: tinfoilEvents
         )
     }
 
-    /// Sets up the OpenAI client over the given EHBP sessions. Requests go to
+    /// Sets up the OpenAI client over the given sessions. Requests go to
     /// `baseURL`, under its path if it has one, and under `/v1` for a bare
     /// origin.
     static func sealed(
         apiKey: String?,
         apiKeyProvider: (@Sendable () -> String?)?,
         baseURL: String,
-        session: EHBPURLSession,
-        streamingFactory: EHBPURLSessionFactory,
+        session: URLSessionProtocol,
+        streamingFactory: URLSessionFactory,
         parsingOptions: ParsingOptions,
         customHeaders: [String: String],
         tinfoilEvents: Set<TinfoilEvent>
@@ -244,5 +251,19 @@ extension OpenAI {
             customSession: session,
             streamingURLSessionFactory: streamingFactory
         )
+    }
+}
+
+/// Makes the OpenAI client's streaming sessions over a connection's pinned
+/// TLS, so a streamed response arrives as the enclave sends it.
+final class PinnedSessionFactory: URLSessionFactory, Sendable {
+    private let connection: EnclaveConnection
+
+    init(connection: EnclaveConnection) {
+        self.connection = connection
+    }
+
+    func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
+        StreamingSession(delegate: delegate, open: connection.open)
     }
 }

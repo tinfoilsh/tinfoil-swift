@@ -48,7 +48,7 @@ public final class EnclaveHTTPClient: Sendable {
     ///     non-empty `user_cache_secret` string in a request's JSON body
     ///     overrides it. Use an opaque random value, not a raw user ID or API
     ///     key.
-    ///   - onEnclaveVerified: Called each time the enclave's evidence
+    ///   - verificationCheck: Called each time the enclave's evidence
     ///     verifies, before its keys are used; throw to reject it.
     ///   - onVerificationResult: Called with each verification's final result.
     ///     It only observes.
@@ -60,7 +60,7 @@ public final class EnclaveHTTPClient: Sendable {
         attestationRelay: String? = nil,
         verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
-        onEnclaveVerified: EnclaveVerifiedCallback? = nil,
+        verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) async throws {
         try await self.init(verifying: Self.connection(
@@ -70,7 +70,7 @@ public final class EnclaveHTTPClient: Sendable {
             baseURL: baseURL,
             attestationRelay: attestationRelay,
             userCacheSecret: userCacheSecret,
-            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), onEnclaveVerified: onEnclaveVerified),
+            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck),
             onVerificationResult: onVerificationResult
         ))
     }
@@ -107,6 +107,14 @@ public final class EnclaveHTTPClient: Sendable {
     init(verifying connection: EnclaveConnection) async throws {
         try await connection.ensureUsable()
         self.connection = connection
+    }
+
+    /// Closes the client: later requests and verifications fail with
+    /// `TinfoilError.configurationError`, from this client and from any
+    /// OpenAI client built over it, and a verification in progress is
+    /// cancelled. Requests already sent finish. Closing again does nothing.
+    public func close() async {
+        await connection.close()
     }
 
     /// How the client protects its requests

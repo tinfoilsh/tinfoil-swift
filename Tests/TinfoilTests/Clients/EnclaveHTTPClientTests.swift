@@ -35,7 +35,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
             transportMode: transportMode,
             baseURL: baseURL,
             attestationRelay: relay,
-            userCacheSecret: "pinned so the tests never touch the persisted secret",
+            userCacheSecret: "test-secret",
             onVerificationResult: onVerificationResult
         ))
     }
@@ -178,6 +178,16 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let path = try connection(network, baseURL: URL(string: "https://enclave.example/v1/")!)
         XCTAssertEqual(path.baseURL.absoluteString, "https://enclave.example/v1/", "TLS accepts a path on the enclave's own origin.")
         assertConfigurationError({ try self.connection(network, transportMode: .ehbp, baseURL: URL(string: "http://proxy.example/")!) })
+        let refusals = ["https://proxy.example/api/?", "https://proxy.example/api/?key=secret", "https://proxy.example/api/#", "https://enclave.example/v1#x", "https://enclave.example/v1?key=secret"]
+        for mode in [TransportMode.tls, .ehbp] { for refused in refusals {
+            XCTAssertThrowsError(try connection(network, transportMode: mode, baseURL: URL(string: refused)!)) { error in
+                guard case TinfoilError.configurationError(let failure) = error else {
+                    return XCTFail("expected a configuration error, got \(error)")
+                }
+                XCTAssertEqual(failure.message, "invalid base URL: a base URL must not carry a query or a fragment")
+                XCTAssertFalse(failure.message.contains("secret"), "The URL, whose query may hold a secret, isn't echoed.")
+            }
+        } }
         XCTAssertTrue(network.urls.isEmpty)
     }
 
@@ -223,6 +233,11 @@ final class EnclaveHTTPClientTests: XCTestCase {
         "http://user:secret@localhost/v1",
         "ftp://localhost/v1",
         "/v1",
+        // A query or a fragment, even an empty one, in any mode.
+        "http://localhost/v1?",
+        "http://localhost/v1?key=secret",
+        "http://localhost/v1#",
+        "http://localhost/v1#part",
     ]
 
     func testEHBPAcceptsAnHTTPBaseURLOnlyOnALoopbackHost() throws {
@@ -264,7 +279,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
                 _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", repo: "org/repo", transportMode: mode, baseURL: URL(string: url)!)
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError(let failure) {
-                if mode == .ehbp, url.hasPrefix("http://"), !url.contains("@") {
+                if mode == .ehbp, url.hasPrefix("http://"), !url.contains("@"), !url.contains("?"), !url.contains("#") {
                     XCTAssertTrue(failure.message.contains("loopback"), failure.message)
                 }
             }
@@ -293,28 +308,22 @@ final class EnclaveHTTPClientTests: XCTestCase {
         XCTAssertEqual(network.urls.count, verifications, "A refused request does not verify.")
     }
 
-    func testOpenAIClientsRequireEHBP() async throws {
-        let tls = try await EnclaveHTTPClient(verifying: connection(approving()))
-        XCTAssertThrowsError(try EnclaveOpenAIClient(httpClient: tls, apiKey: "test-key")) { error in
-            guard case TinfoilError.configurationError = error else {
-                return XCTFail("expected a configuration error, got \(error)")
-            }
+    func testOpenAIClientsUseTheHTTPClientsTransport() async throws {
+        for mode in [TransportMode.tls, .ehbp] {
+            let httpClient = try await EnclaveHTTPClient(verifying: connection(approving(), transportMode: mode))
+            let client = try EnclaveOpenAIClient(httpClient: httpClient, apiKey: "test-key")
+            XCTAssertTrue(client.httpClient === httpClient)
+            XCTAssertEqual(client.httpClient.transportMode, mode)
         }
-        let ehbp = try await EnclaveHTTPClient(verifying: connection(approving(), transportMode: .ehbp))
-        let client = try EnclaveOpenAIClient(httpClient: ehbp, apiKey: "test-key")
-        XCTAssertTrue(client.httpClient === ehbp)
     }
 
     func testAMissingAPIKeyFailsBeforeAnyNetworkIO() async throws {
-        guard ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] == nil else {
-            throw XCTSkip("TINFOIL_API_KEY is set in the environment")
-        }
         do {
             // An unreachable enclave would fail with a network error.
             _ = try await EnclaveOpenAIClient(enclave: "127.0.0.1:9", repo: "org/repo")
             XCTFail("a client without an API key must not be created")
         } catch TinfoilError.configurationError(let failure) {
-            XCTAssertTrue(failure.message.contains("TINFOIL_API_KEY"), failure.message)
+            XCTAssertTrue(failure.message.contains("pass apiKey or apiKeyProvider"), failure.message)
         }
     }
 

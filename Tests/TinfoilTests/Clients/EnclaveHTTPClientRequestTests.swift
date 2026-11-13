@@ -447,6 +447,36 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         XCTAssertFalse(data.isEmpty)
     }
 
+    /// A streamed response comes over a connection pinned to the attested key.
+    func testLivePinnedStream() async throws {
+        try requireLiveIntegration()
+        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, repo: TinfoilConstants.defaultGithubRepo)
+        let verification = try await client.ensureVerified()
+        let request = URLRequest(url: URL(string: "https://\(TinfoilConstants.fallbackEnclave)/health")!)
+
+        let (body, response) = try await PinnedTLS.stream(request, expecting: verification.tlsPublicKeyFingerprint)
+        var received = Data()
+        for try await chunk in body {
+            received.append(chunk)
+        }
+
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertFalse(received.isEmpty)
+    }
+
+    func testLiveStreamWithTheWrongKeyIsRefused() async throws {
+        try requireLiveIntegration()
+        let request = URLRequest(url: URL(string: "https://\(TinfoilConstants.fallbackEnclave)/health")!)
+
+        do {
+            _ = try await PinnedTLS.stream(request, expecting: String(repeating: "0", count: 64))
+            XCTFail("a certificate whose key is not the expected one must be refused")
+        } catch let rejection as PinnedTLS.Rejection {
+            XCTAssertEqual(rejection.host, TinfoilConstants.fallbackEnclave)
+            XCTAssertFalse(rejection.requestMayHaveBeenSent)
+        }
+    }
+
     func testLiveConnectionWithTheWrongKeyIsRefused() async throws {
         try requireLiveIntegration()
         let request = URLRequest(url: URL(string: "https://\(TinfoilConstants.fallbackEnclave)/health")!)

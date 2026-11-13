@@ -6,10 +6,10 @@ import EHBP
 
 /// The handle's callbacks end to end: a stand-in attests, and requests go
 /// through a real EHBP session to a local server.
-final class EnclaveVerifiedCallbackTests: XCTestCase {
+final class VerificationCheckTests: XCTestCase {
     private var server: LocalTestServer!
 
-    /// Pinned so these tests never read or write the persisted secret.
+    /// A fixed secret, so these tests can check the one sent.
     private static let cacheSecret = "enclave-verified-callback-tests"
 
     private static let keyConfigProblem = Data(
@@ -29,7 +29,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
 
     /// An EHBP client for enclave.example that sends to the local server
     private func client(
-        onEnclaveVerified: @escaping EnclaveVerifiedCallback = { _ in },
+        verificationCheck: @escaping VerificationCheck = { _ in },
         onVerificationResult: VerificationResultCallback? = nil,
         path: String = ""
     ) async throws -> EnclaveHTTPClient {
@@ -43,7 +43,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
                     verifier: FakeVerifier(),
                     fetch: { try network.fetch($0) },
                     retryDelay: 0,
-                    onEnclaveVerified: onEnclaveVerified
+                    verificationCheck: verificationCheck
                 ),
                 onVerificationResult: onVerificationResult
             ),
@@ -142,7 +142,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         do {
             _ = try await EnclaveOpenAIClient(
                 httpClient: try client(
-                    onEnclaveVerified: { _ in throw Refusal() },
+                    verificationCheck: { _ in throw Refusal() },
                     onVerificationResult: { reported.value = $0 }
                 ),
                 apiKey: "test-key"
@@ -159,12 +159,12 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
         XCTAssertTrue(server.requestStore.requests.isEmpty, "Nothing is sent to a rejected enclave.")
     }
 
-    func testOnEnclaveVerifiedRunsBeforeTheResultIsReported() async throws {
+    func testTheVerificationCheckRunsBeforeTheResultIsReported() async throws {
         let events = Recorder<String>()
 
         _ = try await EnclaveOpenAIClient(
             httpClient: client(
-                onEnclaveVerified: { _ in events.record("enclave verified") },
+                verificationCheck: { _ in events.record("enclave verified") },
                 onVerificationResult: { _ in events.record("result") }
             ),
             apiKey: "test-key"
@@ -176,7 +176,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
     func testARejectedRefreshFailsTheRequestWithoutReplaying() async throws {
         let verified = Recorder<String>()
         let client = try await EnclaveOpenAIClient(
-            httpClient: client(onEnclaveVerified: { verification in
+            httpClient: client(verificationCheck: { verification in
                 if verified.record(verification.codeDigest) > 1 {
                     throw Refusal()
                 }
@@ -194,7 +194,7 @@ final class EnclaveVerifiedCallbackTests: XCTestCase {
             try await chat(client)
             XCTFail("a rejected refresh must fail the request")
         } catch {
-            XCTAssertTrue(String(describing: error).contains("onEnclaveVerified rejected"), "unexpected error \(error)")
+            XCTAssertTrue(String(describing: error).contains("verification check rejected"), "unexpected error \(error)")
         }
 
         XCTAssertEqual(verified.values.count, 2, "The refreshed enclave was passed to the callback.")

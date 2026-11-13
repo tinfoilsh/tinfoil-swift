@@ -1,21 +1,23 @@
 import Foundation
 
-/// An OpenAI client whose requests are sealed with EHBP to one attested
-/// enclave that you name. It sends through an `EnclaveHTTPClient`, which is
-/// verified before the client is returned.
+/// An OpenAI client whose requests reach only one attested enclave that you
+/// name, over pinned TLS by default or sealed with EHBP. It sends through an
+/// `EnclaveHTTPClient`, which is verified before the client is returned.
 public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     public let openAI: OpenAI
     /// The enclave client requests go through
     public let httpClient: EnclaveHTTPClient
 
-    /// Creates an `EnclaveHTTPClient` for `enclave` using EHBP, verified as
+    /// Creates an `EnclaveHTTPClient` for `enclave`, verified as
     /// `EnclaveHTTPClient.init(enclave:repo:…)` verifies it, and an OpenAI
     /// client over it. The API key is checked before any network I/O.
     ///
-    /// The enclave parameters are those of `EnclaveHTTPClient`, which
-    /// describes them; requests are always sealed with EHBP.
+    /// The enclave parameters, `transportMode` included, are those of
+    /// `EnclaveHTTPClient`, which describes them. Pinned TLS protects whole
+    /// requests and needs a direct connection; EHBP seals bodies, so they stay
+    /// private through a proxy `baseURL`.
     /// - Parameters:
-    ///   - apiKey: The API key; when nil, `TINFOIL_API_KEY` is read
+    ///   - apiKey: The API key; required unless `apiKeyProvider` is given
     ///   - apiKeyProvider: Supplies the API key for each request, as for a
     ///     rotating token
     ///   - parsingOptions: Parsing options for handling different providers
@@ -26,11 +28,12 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     public convenience init(
         enclave: String,
         repo: String,
+        transportMode: TransportMode = .tls,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
         verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
-        onEnclaveVerified: EnclaveVerifiedCallback? = nil,
+        verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil,
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
@@ -42,12 +45,12 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         let httpClient = try await EnclaveHTTPClient(
             enclave: enclave,
             repo: repo,
-            transportMode: .ehbp,
+            transportMode: transportMode,
             baseURL: baseURL,
             attestationRelay: attestationRelay,
             verifier: verifier,
             userCacheSecret: userCacheSecret,
-            onEnclaveVerified: onEnclaveVerified,
+            verificationCheck: verificationCheck,
             onVerificationResult: onVerificationResult
         )
         try self.init(
@@ -60,8 +63,8 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         )
     }
 
-    /// Creates an OpenAI client that sends through `httpClient`, which must
-    /// use `TransportMode.ehbp`. It does no network I/O: the client was
+    /// Creates an OpenAI client that sends through `httpClient`, in its
+    /// transport mode. It does no network I/O: the client was
     /// verified when it was created. See `init(enclave:repo:…)` for the other
     /// parameters.
     public init(
@@ -72,7 +75,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         customHeaders: [String: String] = [:],
         tinfoilEvents: Set<TinfoilEvent> = []
     ) throws {
-        self.openAI = try OpenAI.sealed(
+        self.openAI = try OpenAI.attested(
             apiKey: OpenAI.apiKey(apiKey, provider: apiKeyProvider),
             apiKeyProvider: apiKeyProvider,
             connection: httpClient.connection,

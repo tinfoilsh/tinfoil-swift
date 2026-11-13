@@ -7,20 +7,22 @@ import Security
 /// share cached prompt prefixes, requests carrying different secrets cannot
 /// observe each other's cache timing.
 ///
-/// A client of one of Tinfoil's routers, such as `RouterHTTPClient` or
-/// `Client`, resolves it in this order, mirroring the other Tinfoil SDKs. A
-/// client of an enclave the caller names uses only the first two, since other
-/// enclaves don't read the field, and reads nothing from the environment or
-/// the home directory:
+/// A client of Tinfoil's inference routes, such as `RouterHTTPClient`,
+/// `Client` or `GatewayHTTPClient`, resolves it in this order. A client of an
+/// enclave the caller names uses only the first two, since other enclaves
+/// don't read the field:
 ///
 ///  1. a non-empty per-request `user_cache_secret` field in the body, e.g.
 ///     set via `ChatQuery.extraBody`,
-///  2. the client's `userCacheSecret` parameter, as on `RouterHTTPClient` or
-///     `EnclaveHTTPClient`; `Client` takes none, so for it only steps 1, 3
-///     and 4 apply,
-///  3. the `TINFOIL_USER_CACHE_SECRET` environment variable,
-///  4. a generated secret persisted at `~/.tinfoil/user_cache_secret` (0600),
-///     shared with other Tinfoil SDKs using the same home directory.
+///  2. the client's `userCacheSecret` parameter; `Client` takes none, so for
+///     it only steps 1 and 3 apply,
+///  3. a random secret generated in memory once per process, which every
+///     client in the process shares.
+///
+/// The SDK reads no environment variable or file for the secret. The
+/// generated secret lasts only as long as the process, so an application that
+/// wants a stable secret across processes or devices passes `userCacheSecret`
+/// itself.
 ///
 /// Injection happens in the EHBP session, before the body is sealed, so the
 /// secret is only ever visible to the verified enclave.
@@ -28,19 +30,6 @@ internal enum UserCacheSecret {
     /// Router-only request-body field. A non-empty string scopes the prompt
     /// cache to that secret.
     static let bodyField = "user_cache_secret"
-
-    /// Environment variable that provisions the secret. An empty value is
-    /// treated as unset.
-    static let environmentVariable = "TINFOIL_USER_CACHE_SECRET"
-    private static let homeEnvironmentVariable = "HOME"
-
-    /// Persisted-secret path components under the home directory. The other
-    /// Tinfoil SDKs use the same file, so one machine gets one cache
-    /// namespace across tools.
-    static let directoryName = ".tinfoil"
-    static let fileName = "user_cache_secret"
-    private static let directoryMode: mode_t = 0o700
-    private static let secretFileMode: mode_t = 0o600
 
     /// OpenAI-compatible endpoints whose bodies carry the field. Matched by
     /// suffix with no `/v1` prefix required, so custom base URLs
@@ -55,237 +44,29 @@ internal enum UserCacheSecret {
 
     // MARK: - Resolution
 
-    /// Resolves the client-level secret: a non-empty explicit
-    /// `userCacheSecret` parameter wins, then a non-empty environment value,
-    /// then the persisted (or generated) secret. Never throws: persistence
-    /// failures degrade to an in-memory secret.
-    static func resolve(
-        explicit: String?,
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: URL? = defaultHomeDirectory
-    ) -> String {
+    /// Resolves the client-level secret: the explicit `userCacheSecret`
+    /// parameter when it is non-empty, and otherwise the process's secret.
+    static func resolve(explicit: String?) -> String {
         if let explicit, !explicit.isEmpty {
             return explicit
         }
-        if let env = environment[environmentVariable], !env.isEmpty {
-            return env
-        }
-        return loadOrGenerate(homeDirectory: homeDirectory)
+        return processSecret
     }
 
-    /// Home directory holding the persisted secret. Command-line processes
-    /// honor `$HOME`, matching the other Tinfoil SDKs, while iOS falls back
-    /// to the app container reported by `NSHomeDirectory()`.
-    static var defaultHomeDirectory: URL? {
-        homeDirectory()
-    }
-
-    static func homeDirectory(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        fallback: String = NSHomeDirectory()
-    ) -> URL? {
-        let home = environment[homeEnvironmentVariable] ?? fallback
-        return home.isEmpty ? nil : URL(fileURLWithPath: home, isDirectory: true)
-    }
+    /// The 256-bit random secret, hex-encoded, that every client in the
+    /// process shares when none is given. Generated on first use and never
+    /// persisted.
+    static let processSecret = generate()
 
     /// Returns a fresh 256-bit random secret, hex-encoded. Never falls back
-    /// to a weak generator.
+    /// to a weak generator: if the system generator fails, the process stops
+    /// rather than share a predictable cache namespace.
     static func generate() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            return ""
+            fatalError("tinfoil: the system random number generator failed")
         }
         return bytes.map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// Process-lifetime fallback for when the secret cannot be persisted. An
-    /// unpersisted secret still isolates this process's cache namespace, but
-    /// continuity is lost on restart — like a session ID, it silently resets
-    /// the namespace every deploy.
-    private static let ephemeral = generate()
-
-    /// Returns the secret persisted under the home directory, generating and
-    /// persisting one on first use. When the home directory is unavailable or
-    /// unwritable it falls back to a process-lifetime in-memory secret.
-    static func loadOrGenerate(homeDirectory: URL?) -> String {
-        guard let homeDirectory else {
-            return ephemeral
-        }
-        let directory = homeDirectory.appendingPathComponent(directoryName, isDirectory: true)
-
-        var directoryStatus = stat()
-        if lstat(directory.path, &directoryStatus) == 0 {
-            guard directoryStatus.st_mode & S_IFMT == S_IFDIR else {
-                return ephemeral
-            }
-        } else {
-            guard errno == ENOENT else {
-                return ephemeral
-            }
-            do {
-                try FileManager.default.createDirectory(
-                    at: directory,
-                    withIntermediateDirectories: true,
-                    attributes: [.posixPermissions: directoryMode]
-                )
-            } catch {
-                return ephemeral
-            }
-        }
-
-        let destination = directory.appendingPathComponent(fileName, isDirectory: false)
-        switch readPersistedSecret(at: destination) {
-        case .value(let existing):
-            return existing
-        case .failure, .invalid:
-            return ephemeral
-        case .absent:
-            break
-        }
-
-        let secret = generate()
-        if secret.isEmpty {
-            return ""
-        }
-
-        let candidate = directory.appendingPathComponent(
-            "\(fileName).\(getpid()).\(UUID().uuidString).tmp",
-            isDirectory: false
-        )
-        defer { _ = unlink(candidate.path) }
-        var candidateFD = openRetryingOnInterruption(
-            candidate.path,
-            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
-            secretFileMode
-        )
-        guard candidateFD >= 0 else {
-            return ephemeral
-        }
-        defer {
-            if candidateFD >= 0 {
-                _ = close(candidateFD)
-            }
-        }
-
-        guard writeAll(Data(secret.utf8), to: candidateFD) else {
-            return ephemeral
-        }
-        guard close(candidateFD) == 0 else {
-            candidateFD = -1
-            return ephemeral
-        }
-        candidateFD = -1
-
-        let linkResult = linkRetryingOnInterruption(candidate.path, destination.path)
-        if linkResult == 0 {
-            return secret
-        }
-        guard errno == EEXIST else {
-            return ephemeral
-        }
-
-        switch readPersistedSecret(at: destination) {
-        case .value(let persisted):
-            return persisted
-        case .absent, .failure, .invalid:
-            return ephemeral
-        }
-    }
-
-    /// Reads the persisted secret, trimming surrounding whitespace (the file
-    /// may be hand-edited or written by another SDK with a trailing newline).
-    /// Blank and invalid UTF-8 files are unusable because language runtimes
-    /// do not normalize them consistently.
-    private enum PersistedSecret {
-        case value(String)
-        case absent
-        case invalid
-        case failure
-    }
-
-    private static func readPersistedSecret(at file: URL) -> PersistedSecret {
-        let fd = openRetryingOnInterruption(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard fd >= 0 else {
-            return errno == ENOENT ? .absent : .failure
-        }
-        defer { _ = close(fd) }
-
-        guard descriptorHasType(fd, type: S_IFREG) else {
-            return .failure
-        }
-        return readSecret(from: fd)
-    }
-
-    private static func readSecret(from fd: Int32) -> PersistedSecret {
-        guard lseek(fd, 0, SEEK_SET) >= 0 else {
-            return .failure
-        }
-        var contents = Data()
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        while true {
-            let count = buffer.withUnsafeMutableBytes {
-                read(fd, $0.baseAddress, $0.count)
-            }
-            if count > 0 {
-                contents.append(buffer, count: count)
-            } else if count == 0 {
-                break
-            } else if errno != EINTR {
-                return .failure
-            }
-        }
-        guard let decoded = String(data: contents, encoding: .utf8) else {
-            return .invalid
-        }
-        let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? .invalid : .value(trimmed)
-    }
-
-    private static func writeAll(_ contents: Data, to fd: Int32) -> Bool {
-        contents.withUnsafeBytes { bytes in
-            guard let baseAddress = bytes.baseAddress else {
-                return contents.isEmpty
-            }
-            var offset = 0
-            while offset < bytes.count {
-                let count = write(fd, baseAddress.advanced(by: offset), bytes.count - offset)
-                if count > 0 {
-                    offset += count
-                } else if count == 0 || errno != EINTR {
-                    return false
-                }
-            }
-            return true
-        }
-    }
-
-    private static func openRetryingOnInterruption(
-        _ path: String,
-        _ flags: Int32,
-        _ mode: mode_t = 0
-    ) -> Int32 {
-        var fd: Int32
-        repeat {
-            fd = open(path, flags, mode)
-        } while fd < 0 && errno == EINTR
-        return fd
-    }
-
-    private static func descriptorHasType(
-        _ fd: Int32,
-        type: mode_t
-    ) -> Bool {
-        var status = stat()
-        return fstat(fd, &status) == 0
-            && status.st_mode & S_IFMT == type
-    }
-
-    private static func linkRetryingOnInterruption(_ source: String, _ destination: String) -> Int32 {
-        var result: Int32
-        repeat {
-            result = link(source, destination)
-        } while result != 0 && errno == EINTR
-        return result
     }
 
     // MARK: - Injection
@@ -428,7 +209,7 @@ internal enum UserCacheSecret {
         return nil
     }
 
-    private static func skipWhitespace(in bytes: [UInt8], index: inout Int) {
+    static func skipWhitespace(in bytes: [UInt8], index: inout Int) {
         while index < bytes.count,
               bytes[index] == 0x20 || bytes[index] == 0x09
                 || bytes[index] == 0x0A || bytes[index] == 0x0D {
@@ -436,7 +217,7 @@ internal enum UserCacheSecret {
         }
     }
 
-    private static func stringEnd(in bytes: [UInt8], from start: Int) -> Int? {
+    static func stringEnd(in bytes: [UInt8], from start: Int) -> Int? {
         guard start < bytes.count, bytes[start] == UInt8(ascii: "\"") else {
             return nil
         }
@@ -456,7 +237,7 @@ internal enum UserCacheSecret {
         return nil
     }
 
-    private static func valueEnd(in bytes: [UInt8], from start: Int) -> Int? {
+    static func valueEnd(in bytes: [UInt8], from start: Int) -> Int? {
         guard start < bytes.count else {
             return nil
         }
@@ -510,7 +291,7 @@ internal enum UserCacheSecret {
 
     /// `JSONSerialization` accepts trailing commas on some platforms even
     /// though they are not valid JSON.
-    private static func containsTrailingComma(in body: Data) -> Bool {
+    static func containsTrailingComma(in body: Data) -> Bool {
         let bytes = [UInt8](body)
         var inString = false
         var escaped = false

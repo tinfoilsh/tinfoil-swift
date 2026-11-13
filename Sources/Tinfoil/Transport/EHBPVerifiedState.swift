@@ -62,6 +62,7 @@ internal actor EHBPVerifiedState {
     private let now: @Sendable () -> Date
     private var nextRefreshID: UInt64 = 0
     private var refreshOperation: RefreshOperation?
+    private var closed = false
 
     init(
         endpoint: EHBPVerifiedEndpoint,
@@ -73,14 +74,29 @@ internal actor EHBPVerifiedState {
         self.now = now
     }
 
+    /// Refuses every later request, including the replay of one whose key
+    /// was rejected, and cancels a refresh in progress.
+    func close() {
+        closed = true
+        refreshOperation?.task.cancel()
+    }
+
+    private func checkOpen() throws {
+        if closed {
+            throw TinfoilError.configuration("the client is closed")
+        }
+    }
+
     /// The endpoint to seal a new request to. One whose attestation has
     /// expired is refreshed first, through the same single-flight refresh as a
     /// rejected key, so an expired key never seals a request.
     func current() async throws -> (endpoint: EHBPVerifiedEndpoint, generation: UInt64) {
+        try checkOpen()
         if now() < endpoint.expiresAt {
             return (endpoint, generation)
         }
         _ = try await refresh(afterRejectedGeneration: generation)
+        try checkOpen()
         guard now() < endpoint.expiresAt else {
             throw TinfoilError.attestation("refreshed attestation is already past its freshness deadline")
         }
@@ -88,6 +104,7 @@ internal actor EHBPVerifiedState {
     }
 
     func refresh(afterRejectedGeneration rejectedGeneration: UInt64) async throws -> EHBPVerifiedEndpoint {
+        try checkOpen()
         if generation != rejectedGeneration {
             return endpoint
         }
@@ -121,6 +138,8 @@ internal actor EHBPVerifiedState {
 
         do {
             let refreshed = try await waitForSharedTask(operation.task)
+            // A refresh that finishes despite a late close seals nothing.
+            try checkOpen()
             return install(
                 refreshed,
                 from: operation,
