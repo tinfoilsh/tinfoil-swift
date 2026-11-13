@@ -32,9 +32,10 @@ public final class EnclaveHTTPClient: Sendable {
     ///   - enclave: Host of the enclave, such as "inference.tinfoil.sh"
     ///   - repo: The trusted owner/name[@tag][@sha256:digest] that the
     ///     enclave's config must come from. `nil` accepts any config that the
-    ///     verifier's registry trust authorizes: with the default verifier,
-    ///     any deployment in Tinfoil's public registry. A verifier with a
-    ///     `configAuthorizer` requires `nil`. An empty string is refused, so
+    ///     verifier's trust authorizes: with the default verifier, any
+    ///     deployment in Tinfoil's public registry; with `configSigningKeys`,
+    ///     any config those keys approve; with a `configAuthorizer`, which
+    ///     requires `nil`, any config it approves. An empty string is refused, so
     ///     that a missing value can't widen the trust by accident.
     ///   - transportMode: How requests are protected; pinned TLS by default
     ///   - baseURL: Where requests are sent: a path on the enclave's own
@@ -92,11 +93,11 @@ public final class EnclaveHTTPClient: Sendable {
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
-        // The verifier reads "" as "any config that registry trust
-        // authorizes"; only nil asks for that here.
+        // The verifier reads "" as "any config that its trust authorizes";
+        // only nil asks for that here.
         if repo?.isEmpty == true {
             throw TinfoilError.configuration(
-                "repo must not be empty; pass nil to accept any config that the verifier's registry trust authorizes"
+                "repo must not be empty; pass nil to accept any config that the verifier's trust authorizes"
             )
         }
         let repo = repo ?? ""
@@ -142,7 +143,7 @@ public final class EnclaveHTTPClient: Sendable {
     public var enclave: String { connection.enclave }
 
     /// The repository the enclave is verified against, with any tag or
-    /// digest pins, or nil when any config that the verifier's registry trust
+    /// digest pins, or nil when any config that the verifier's trust
     /// authorizes is accepted
     public var repo: String? { connection.repo.isEmpty ? nil : connection.repo }
 

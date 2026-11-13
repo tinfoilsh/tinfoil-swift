@@ -142,7 +142,7 @@ EHBP response and its session recovery token.
 | `TINFOIL_API_KEY` read when no key is given | not read: pass `apiKey` or `apiKeyProvider` |
 | `localizedDescription` of a `TinfoilError` | now led by the category, as in "configuration error: …"; `message` is the text alone |
 | a base URL with `?` or `#` | refused |
-| `repo: ""` on `EnclaveHTTPClient` or `EnclaveOpenAIClient`, accepting any config that registry trust authorizes | `repo: nil`; an empty string is refused, so that a missing value can't widen the trust by accident. `repo` on the client is `nil` in that case |
+| `repo: ""` on `EnclaveHTTPClient` or `EnclaveOpenAIClient`, accepting any config that the verifier's trust authorizes (by default, Tinfoil's public registry) | `repo: nil`; an empty string is refused, so that a missing value can't widen the trust by accident. `repo` on the client is `nil` in that case |
 
 `Verifier` takes every trust option of the verifier: pinned registers, a
 freshness bound, config registry IDs, config and freshness signing keys (PEM),

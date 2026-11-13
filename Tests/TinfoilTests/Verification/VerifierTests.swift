@@ -114,7 +114,7 @@ final class VerifierTests: XCTestCase {
         )
     }
 
-    /// nil, not "", asks for any config that registry trust authorizes, so a
+    /// nil, not "", asks for any config that the verifier's trust authorizes, so a
     /// missing value can't widen the trust by accident.
     func testAnEmptyRepoIsRefusedAndNilAcceptsRegistryTrust() throws {
         func connection(repo: String?, verifier: Verifier) throws -> EnclaveConnection {
