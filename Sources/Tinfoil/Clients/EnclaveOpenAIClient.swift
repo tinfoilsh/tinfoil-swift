@@ -28,7 +28,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         repo: String,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
-        policy: VerificationPolicy = VerificationPolicy(),
+        verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
         onEnclaveVerified: EnclaveVerifiedCallback? = nil,
         onVerificationResult: VerificationResultCallback? = nil,
@@ -45,7 +45,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
             transportMode: .ehbp,
             baseURL: baseURL,
             attestationRelay: attestationRelay,
-            policy: policy,
+            verifier: verifier,
             userCacheSecret: userCacheSecret,
             onEnclaveVerified: onEnclaveVerified,
             onVerificationResult: onVerificationResult

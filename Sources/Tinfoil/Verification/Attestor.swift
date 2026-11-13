@@ -44,6 +44,18 @@ struct Attestor: Sendable {
         self.onEnclaveVerified = onEnclaveVerified
     }
 
+    /// Whether the verifier takes the config from the caller rather than from
+    /// a repo pin, which rules out discovering a router
+    var callerAuthorizesConfig: Bool {
+        verifier.callerAuthorizesConfig
+    }
+
+    /// Throws the configuration error that every verification against repo
+    /// would end in, without any I/O.
+    func checkRepoVerifiability(_ repo: String) throws {
+        try verifier.checkRepoVerifiability(repo)
+    }
+
     /// Verifies host against repo, fetching through relay when it is not nil.
     /// A failed fetch or verification is retried once against fresh evidence;
     /// a configuration error is not.

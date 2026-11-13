@@ -57,6 +57,11 @@ final class EnclaveConnection: Sendable {
                 )
             }
         }
+        if attestor.callerAuthorizesConfig {
+            throw TinfoilError.configuration(
+                "caller-authorized config requires an explicit enclave"
+            )
+        }
         let discovered = attestationRelay == nil ? try await attestor.discoverRouter() : nil
         if let discovered {
             onVerificationResult?(.success(discovered.verification))
