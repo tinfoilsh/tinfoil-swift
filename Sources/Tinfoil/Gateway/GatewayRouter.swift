@@ -10,6 +10,8 @@ import FoundationNetworking
 /// Experimental: the gateway route is new, and this API may change or be
 /// removed in a later release.
 public struct ModelPin: Sendable {
+    /// The trusted `tinfoilsh/name[@tag][@sha256:digest]` that the model's
+    /// replicas must run
     public let repo: String
     /// The pin's trust policy: nil inherits the gateway client's; a verifier
     /// replaces it.
@@ -36,6 +38,7 @@ public struct ReplicaVerification: Sendable, Equatable {
     /// The model whose pin the replica was verified under, or "" for an
     /// unpinned model
     public let pinnedModel: String
+    /// The replica's last successful verification
     public let verification: Verification
 }
 

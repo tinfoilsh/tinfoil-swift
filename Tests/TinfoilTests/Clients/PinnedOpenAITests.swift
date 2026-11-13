@@ -97,6 +97,31 @@ final class PinnedOpenAITests: XCTestCase {
         XCTAssertEqual(transport.sent.count, 1)
     }
 
+    /// A stream keeps going after the caller releases the client that
+    /// started it, as a URLSession-backed client's does.
+    func testAStreamOutlivesItsClient() async throws {
+        let transport = PinnedTransport { _ in [Self.chunk("Hel"), Self.chunk("lo"), "data: [DONE]\n\n"] }
+        // The client exists only inside this closure.
+        let stream = try await { [query] in try await self.client(transport).chatsStream(query: query) }()
+        let content = try await withThrowingTaskGroup(of: String?.self) { group in
+            group.addTask {
+                var content = ""
+                for try await result in stream {
+                    content += result.choices.first?.delta.content ?? ""
+                }
+                return content
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: 10_000_000_000)
+                return nil
+            }
+            let first = try await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+        XCTAssertEqual(content, "Hello", "The stream must finish, not hang, once its client is released.")
+    }
+
     /// A key that the enclave presents before anything was sent is verified
     /// again, and the request retried once against the new verification.
     func testARejectedKeyIsVerifiedAgainAndRetriedOnce() async throws {

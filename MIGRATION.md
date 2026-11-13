@@ -105,10 +105,16 @@ initializer returns, so there is no separate `verify()`.
 
 ### Errors
 
-Every failure is a `TinfoilError` with one of three cases:
-`.configurationError`, `.networkError` and `.attestationError`. An attestation
-error carries the verifier's `layer` (envelope, provenance, quote or policy).
-`message` is the text alone, and `category` names the case.
+Failures of configuration, of fetching attestation and of verification are a
+`TinfoilError`, with one of three cases: `.configurationError`,
+`.networkError` and `.attestationError`. An attestation error carries the
+verifier's `layer` (envelope, provenance, quote or policy). `message` is the
+text alone, and `category` names the case.
+
+Sending a request can also throw other errors: `URLError` for a transport
+failure over pinned TLS, `EHBPError` from the EHBP layer (for example a key
+that the enclave still rejects after a refresh), `CancellationError` when the
+task is cancelled, and the OpenAI SDK's own errors for an API failure.
 
 | 0.8.x | now |
 |---|---|
@@ -136,14 +142,17 @@ EHBP response and its session recovery token.
 | `TINFOIL_API_KEY` read when no key is given | not read: pass `apiKey` or `apiKeyProvider` |
 | `localizedDescription` of a `TinfoilError` | now led by the category, as in "configuration error: …"; `message` is the text alone |
 | a base URL with `?` or `#` | refused |
+| `repo: ""` on `EnclaveHTTPClient` or `EnclaveOpenAIClient`, accepting any config that registry trust authorizes | `repo: nil`; an empty string is refused, so that a missing value can't widen the trust by accident. `repo` on the client is `nil` in that case |
 
 `Verifier` takes every trust option of the verifier: pinned registers, a
 freshness bound, config registry IDs, config and freshness signing keys (PEM),
 embedded references, and a `configAuthorizer` closure. A verifier that takes the
 config from the caller needs an enclave you name; the router refuses it.
 
-The clients can now be closed with `close()`, after which their requests and
-verifications fail with a configuration error.
+The clients, the OpenAI clients included, can now be closed with `close()`,
+after which their requests and verifications fail with a configuration error.
+The OpenAI clients also take a `timeoutInterval`, 60 seconds by default, for
+how long a request may wait for the next bytes of its response.
 
 ## Prompt cache
 

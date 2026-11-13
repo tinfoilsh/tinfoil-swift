@@ -30,8 +30,12 @@ public final class EnclaveHTTPClient: Sendable {
     ///
     /// - Parameters:
     ///   - enclave: Host of the enclave, such as "inference.tinfoil.sh"
-    ///   - repo: The trusted owner/name[@tag][@sha256:digest] the enclave's
-    ///     code must come from
+    ///   - repo: The trusted owner/name[@tag][@sha256:digest] that the
+    ///     enclave's config must come from. `nil` accepts any config that the
+    ///     verifier's registry trust authorizes: with the default verifier,
+    ///     any deployment in Tinfoil's public registry. A verifier with a
+    ///     `configAuthorizer` requires `nil`. An empty string is refused, so
+    ///     that a missing value can't widen the trust by accident.
     ///   - transportMode: How requests are protected; pinned TLS by default
     ///   - baseURL: Where requests are sent: a path on the enclave's own
     ///     origin, or a proxy on another origin, which requires `.ehbp`.
@@ -54,7 +58,7 @@ public final class EnclaveHTTPClient: Sendable {
     ///     It only observes.
     public convenience init(
         enclave: String,
-        repo: String,
+        repo: String?,
         transportMode: TransportMode = .tls,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
@@ -80,7 +84,7 @@ public final class EnclaveHTTPClient: Sendable {
     /// stays unset.
     static func connection(
         enclave: String,
-        repo: String,
+        repo: String?,
         transportMode: TransportMode,
         baseURL: URL?,
         attestationRelay: String?,
@@ -88,6 +92,14 @@ public final class EnclaveHTTPClient: Sendable {
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
+        // The verifier reads "" as "any config that registry trust
+        // authorizes"; only nil asks for that here.
+        if repo?.isEmpty == true {
+            throw TinfoilError.configuration(
+                "repo must not be empty; pass nil to accept any config that the verifier's registry trust authorizes"
+            )
+        }
+        let repo = repo ?? ""
         try attestor.checkRepoVerifiability(repo)
         return try EnclaveConnection(
             handle: EnclaveHandle(
@@ -130,8 +142,9 @@ public final class EnclaveHTTPClient: Sendable {
     public var enclave: String { connection.enclave }
 
     /// The repository the enclave is verified against, with any tag or
-    /// digest pins
-    public var repo: String { connection.repo }
+    /// digest pins, or nil when any config that the verifier's registry trust
+    /// authorizes is accepted
+    public var repo: String? { connection.repo.isEmpty ? nil : connection.repo }
 
     /// The last successful verification, without checking it. It may have
     /// expired or been rejected; use `ensureVerified()` for one that is valid.

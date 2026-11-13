@@ -16,7 +16,9 @@ public typealias VerificationCheck = @Sendable (Verification) throws -> Void
 
 /// Identifies the software that performed verification
 public struct SoftwareIdentity: Sendable, Equatable {
+    /// The SDK's name, such as "tinfoil-swift"
     public let name: String
+    /// The SDK's version, such as "0.9.0"
     public let version: String
 }
 
@@ -51,15 +53,27 @@ public struct ReferenceSource: RawRepresentable, Hashable, Sendable, CustomStrin
 /// The config bound to the hardware. Only an endorsed config has a reference,
 /// signing key hint, registry ID and times; the others are empty or nil.
 public struct ConfigVerification: Sendable, Equatable {
+    /// Why the config was accepted
     public let source: ReferenceSource
     /// The config's `/org/project/revision` identity, or empty
     public let name: String
     /// SHA-256 of the config, lowercase hex
     public let digest: String
+    /// Identifies the endorsement: `sha256:` and the lowercase hex SHA-256 of
+    /// its signed statement, as DSSE encodes it for signing
     public let reference: String
+    /// Identifies the key that signed the approval: the standard base64
+    /// SHA-256 of its DER `SubjectPublicKeyInfo`
     public let signingKeyHint: String
+    /// When the config was approved, from the approval's authenticated
+    /// RFC 3161 timestamp
     public let approvalTime: Date?
+    /// The registry that approved the config, as its URI. For an approval
+    /// signed with a certificate the certificate authenticates it;
+    /// `Verifier.publicRegistryID` marks Tinfoil's public registry.
     public let registryID: String
+    /// When a certificate-signed approval was signed, from its authenticated
+    /// timestamp; nil for an approval signed with a pinned key
     public let signatureTime: Date?
 }
 
@@ -67,12 +81,20 @@ public struct ConfigVerification: Sendable, Equatable {
 /// An embedded artifact has no name, commit or approval time, and an embedded
 /// platform has only a digest.
 public struct ArtifactVerification: Sendable, Equatable {
+    /// Why the artifact was accepted
     public let source: ReferenceSource
+    /// The `owner/name` repository the artifact was released from
     public let repo: String
+    /// The release tag, such as "v0.15.0"
     public let tag: String
+    /// SHA-256 of the artifact, lowercase hex
     public let digest: String
+    /// The artifact's name in its endorsement
     public let name: String
+    /// The source commit the artifact was built from, lowercase hex
     public let commit: String
+    /// When the artifact was approved, from its endorsement's authenticated
+    /// timestamp
     public let approvalTime: Date?
 }
 
@@ -93,14 +115,21 @@ public struct Verification: Sendable, Equatable {
 
     /// A key the enclave endorses, bound into its hardware evidence
     public struct CryptoMaterial: Sendable, Equatable, Decodable {
+        /// The item's name in the document, such as "tls" or "hpke"
         public let id: String
+        /// A URI naming what the item is and how `data` encodes it, such as
+        /// `https://tinfoil.sh/key/spki-fp-sha256/v1` for a TLS key
+        /// fingerprint or `https://tinfoil.sh/key/x25519-hpke/v1` for an HPKE
+        /// key; both are lowercase hex
         public let format: String
+        /// The item, encoded as `format` says
         public let data: String
     }
 
     /// Repository the code provenance was authenticated against, without a tag
     /// or digest
     public let configRepo: String
+    /// SHA-256 of the verified code release or runtime artifact, lowercase hex
     public let codeDigest: String
     /// The release tag of the verified code or runtime, or empty
     public let codeTag: String

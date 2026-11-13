@@ -8,6 +8,14 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     /// The enclave client requests go through
     public let httpClient: EnclaveHTTPClient
 
+    /// Closes `httpClient`: later requests and verifications fail with
+    /// `TinfoilError.configurationError`, from this client and any other over
+    /// the same HTTP client. Requests already sent finish. Closing again does
+    /// nothing.
+    public func close() async {
+        await httpClient.close()
+    }
+
     /// Creates an `EnclaveHTTPClient` for `enclave`, verified as
     /// `EnclaveHTTPClient.init(enclave:repo:…)` verifies it, and an OpenAI
     /// client over it. The API key is checked before any network I/O.
@@ -23,11 +31,14 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     ///   - parsingOptions: Parsing options for handling different providers
     ///   - customHeaders: Headers to send on every request, merged over those
     ///     `tinfoilEvents` adds; caller values win
+    ///   - timeoutInterval: How long a request may wait for the next bytes
+    ///     of its response before it fails, in seconds; 60 by default. Raise
+    ///     it for long completions that send nothing until they finish.
     ///   - tinfoilEvents: Tinfoil progress events to ask the router for, as
     ///     values of the `X-Tinfoil-Events` header
     public convenience init(
         enclave: String,
-        repo: String,
+        repo: String?,
         transportMode: TransportMode = .tls,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
@@ -39,6 +50,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
+        timeoutInterval: TimeInterval = 60,
         tinfoilEvents: Set<TinfoilEvent> = []
     ) async throws {
         let staticApiKey = try OpenAI.apiKey(apiKey, provider: apiKeyProvider)
@@ -59,6 +71,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
             apiKeyProvider: apiKeyProvider,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
+            timeoutInterval: timeoutInterval,
             tinfoilEvents: tinfoilEvents
         )
     }
@@ -73,6 +86,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
+        timeoutInterval: TimeInterval = 60,
         tinfoilEvents: Set<TinfoilEvent> = []
     ) throws {
         self.openAI = try OpenAI.attested(
@@ -81,6 +95,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
             connection: httpClient.connection,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
+            timeoutInterval: timeoutInterval,
             tinfoilEvents: tinfoilEvents
         )
         self.httpClient = httpClient

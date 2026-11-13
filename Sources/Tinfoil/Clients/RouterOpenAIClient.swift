@@ -12,6 +12,14 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
     /// The router client requests go through
     public let httpClient: RouterHTTPClient
 
+    /// Closes `httpClient`: later requests and verifications fail with
+    /// `TinfoilError.configurationError`, from this client and any other over
+    /// the same HTTP client. Requests already sent finish. Closing again does
+    /// nothing.
+    public func close() async {
+        await httpClient.close()
+    }
+
     /// Creates a `RouterHTTPClient`, picking and verifying a router as
     /// `RouterHTTPClient.init(…)` does, and an OpenAI client over it. The API
     /// key is checked before any network I/O.
@@ -31,6 +39,7 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
+        timeoutInterval: TimeInterval = 60,
         tinfoilEvents: Set<TinfoilEvent> = []
     ) async throws {
         let staticApiKey = try OpenAI.apiKey(apiKey, provider: apiKeyProvider)
@@ -49,6 +58,7 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
             apiKeyProvider: apiKeyProvider,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
+            timeoutInterval: timeoutInterval,
             tinfoilEvents: tinfoilEvents
         )
     }
@@ -62,6 +72,7 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
+        timeoutInterval: TimeInterval = 60,
         tinfoilEvents: Set<TinfoilEvent> = []
     ) throws {
         self.openAI = try OpenAI.attested(
@@ -70,6 +81,7 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
             connection: httpClient.connection,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
+            timeoutInterval: timeoutInterval,
             tinfoilEvents: tinfoilEvents
         )
         self.httpClient = httpClient

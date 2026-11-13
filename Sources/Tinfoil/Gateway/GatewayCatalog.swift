@@ -7,7 +7,10 @@ import Foundation
 /// Experimental: the gateway route is new, and this API may change or be
 /// removed in a later release.
 public struct CatalogEntry: Sendable, Equatable, Codable {
+    /// The `owner/name` repository that the model's replicas run, as the
+    /// gateway reports it
     public let repo: String
+    /// The replicas' hosts, each with an optional port
     public let hosts: [String]
 
     public init(repo: String, hosts: [String]) {

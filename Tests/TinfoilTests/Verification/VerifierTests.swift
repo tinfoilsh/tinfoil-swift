@@ -114,6 +114,30 @@ final class VerifierTests: XCTestCase {
         )
     }
 
+    /// nil, not "", asks for any config that registry trust authorizes, so a
+    /// missing value can't widen the trust by accident.
+    func testAnEmptyRepoIsRefusedAndNilAcceptsRegistryTrust() throws {
+        func connection(repo: String?, verifier: Verifier) throws -> EnclaveConnection {
+            try EnclaveHTTPClient.connection(
+                enclave: "enclave.example",
+                repo: repo,
+                transportMode: .ehbp,
+                baseURL: nil,
+                attestationRelay: nil,
+                userCacheSecret: nil,
+                attestor: Attestor(verifier: verifier.backend, fetch: { url in
+                    XCTFail("fetched \(url) while building a connection")
+                    throw TinfoilError.network("unreachable")
+                }),
+                onVerificationResult: nil
+            )
+        }
+        assertConfigurationError(try connection(repo: "", verifier: Verifier()), containing: "repo must not be empty")
+        XCTAssertEqual(try connection(repo: nil, verifier: Verifier()).repo, "", "nil reaches the verifier as Go's empty repo.")
+        XCTAssertNoThrow(try connection(repo: nil, verifier: Verifier(configAuthorizer: { _ in })))
+        XCTAssertEqual(try connection(repo: "org/repo@v1", verifier: Verifier()).repo, "org/repo@v1")
+    }
+
     /// A verifier that takes the config from the caller can't pick a router.
     func testRouterRefusesCallerAuthorizedConfig() async throws {
         let authorized = try Verifier(configAuthorizer: { _ in })

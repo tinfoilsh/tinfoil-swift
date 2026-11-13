@@ -149,8 +149,12 @@ internal class StreamingSession: URLSessionProtocol, @unchecked Sendable {
 internal final class StreamingDataTask: URLSessionDataTaskProtocol, @unchecked Sendable {
     private let request: URLRequest
     private let open: StreamingSession.Open
-    private weak var delegate: URLSessionDataDelegateProtocol?
-    private weak var session: StreamingSession?
+    // Held strongly until the task finishes, as URLSession holds its
+    // delegate: the OpenAI client's streaming session is the delegate, and
+    // nothing else keeps it alive once the caller releases the client, so a
+    // weak hold would end a stream mid-response without completing it.
+    private var delegate: URLSessionDataDelegateProtocol?
+    private var session: StreamingSession?
     /// Whether the full decrypted response is buffered for the completion
     /// handler. The delegate-driven streaming path disables this because its
     /// completion handler discards the data, so buffering would only double
@@ -267,6 +271,11 @@ internal final class StreamingDataTask: URLSessionDataTaskProtocol, @unchecked S
         }
         hasCompleted = true
         underlyingTask = nil
+        let delegate = self.delegate
+        let session = self.session
+        // Releasing them here breaks the cycle through the session's tasks.
+        self.delegate = nil
+        self.session = nil
         let wasCancelled = isCancellationRequested
         let finalData = wasCancelled ? nil : data
         let finalResponse = wasCancelled ? nil : response

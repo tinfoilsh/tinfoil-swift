@@ -55,7 +55,7 @@ let client = try await EnclaveOpenAIClient(
 
 ### Transport
 
-Every client pins each TLS connection to the attested key by default (`transportMode: .tls`), which protects the whole request and response. With `transportMode: .ehbp`, request and response bodies are sealed to the attested key instead, so they stay private through a proxy that you pass as `baseURL`; the method, URL and headers are not sealed.
+The enclave and router clients, and `Client`, pin each TLS connection to the attested key by default (`transportMode: .tls`), which protects the whole request and response. With `transportMode: .ehbp`, request and response bodies are sealed to the attested key instead, so they stay private through a proxy that you pass as `baseURL`; the method, URL and headers are not sealed. The gateway clients always use EHBP, since the gateway sits between the client and the replica.
 
 ### Trust policy
 
