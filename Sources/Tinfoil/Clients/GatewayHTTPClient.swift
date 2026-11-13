@@ -23,8 +23,9 @@ public final class GatewayHTTPClient: Sendable {
     /// Creates a client and fetches the gateway's catalog, so that an
     /// unreachable gateway fails here rather than on the first request. The
     /// configuration is checked before any network I/O. A model's replicas
-    /// are verified on its first request, so `modelPins` may name models that
-    /// the catalog doesn't list.
+    /// are verified on its first request, so creating the client doesn't
+    /// check that the catalog lists the pinned models; a request for a model
+    /// that the catalog doesn't list fails.
     ///
     /// - Parameters:
     ///   - modelPins: Pins models to repositories. With `pinnedModelsOnly`,
@@ -41,8 +42,10 @@ public final class GatewayHTTPClient: Sendable {
     ///     requests; nil or empty resolves it from `TINFOIL_USER_CACHE_SECRET`
     ///     or `~/.tinfoil/user_cache_secret`. A non-empty `user_cache_secret`
     ///     string in a request's JSON body overrides it, so that a server can
-    ///     scope the cache to each end user. The secret never leaves the
-    ///     client: a salt derived from it and the API key is sent instead. Use
+    ///     scope the cache to each end user. In a request with an
+    ///     `application/json` object body, the secret is replaced by a salt
+    ///     derived from it and the API key; any other body is sent as written,
+    ///     sealed to the verified replica. Use
     ///     an opaque random value, not a raw user ID or API key: the gateway
     ///     sees a cache prefix keyed on it, and could test guesses of a
     ///     guessable secret and then of the prompt.
@@ -70,11 +73,9 @@ public final class GatewayHTTPClient: Sendable {
         guard base.scheme?.lowercased() == "https" else {
             throw TinfoilError.configuration("invalid base URL: the gateway base URL must use HTTPS")
         }
-        guard let host = base.host else {
+        guard let relay = Self.authority(of: base) else {
             throw TinfoilError.configuration("invalid base URL: the gateway base URL has no host")
         }
-        // Attestation and the catalog are fetched through the gateway.
-        let relay = base.port.map { "\(host):\($0)" } ?? host
         let attestor = { (verifier: Verifier?) throws -> Attestor in
             Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck)
         }
@@ -112,6 +113,16 @@ public final class GatewayHTTPClient: Sendable {
                 )
             }
         ))
+    }
+
+    /// The host and any port of base, which attestation and the catalog are
+    /// fetched through, with an IPv6 address in brackets
+    static func authority(of base: URL) -> String? {
+        guard let host = base.host, !host.isEmpty else {
+            return nil
+        }
+        let bracketed = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        return base.port.map { "\(bracketed):\($0)" } ?? bracketed
     }
 
     /// Reads the catalog through router before the client is handed out.
@@ -177,14 +188,6 @@ public final class GatewayHTTPClient: Sendable {
             data.append(chunk)
         }
         return (data, response.response)
-    }
-
-    /// Loads a URL through the gateway, as `URLSession.data(from:)` does. See
-    /// `data(for:)`; a request without a body must name its model in the
-    /// `X-Tinfoil-Model` header, so this suits only a model-less endpoint
-    /// that the gateway serves.
-    public func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
-        try await data(for: URLRequest(url: url))
     }
 
     /// Sends a request as `data(for:)` does, returning once the response

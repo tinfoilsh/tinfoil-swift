@@ -24,7 +24,7 @@ enum GatewayRequest {
     /// model header from its `model` member, unless the caller set one, and,
     /// on an endpoint whose prompts are cached, a `cache_salt` member in place
     /// of any `user_cache_secret`, with a cache-prefix header that keeps a
-    /// conversation on one replica. The secret itself never leaves the client.
+    /// conversation on one replica, so the secret itself is not sent.
     /// A multipart upload without a model header must carry exactly one
     /// `model` field. Other requests are returned unchanged.
     static func prepare(_ request: URLRequest, secret: String) throws -> URLRequest {
@@ -62,7 +62,11 @@ enum GatewayRequest {
             prepared.setValue(model, forHTTPHeaderField: modelHeader)
         }
         if scoped {
-            prepared.httpBody = scopeCache(&prepared, members: members, clientSecret: secret)
+            let scopedBody = scopeCache(&prepared, members: members, clientSecret: secret)
+            prepared.httpBody = scopedBody
+            if prepared.value(forHTTPHeaderField: "Content-Length") != nil {
+                prepared.setValue(String(scopedBody.count), forHTTPHeaderField: "Content-Length")
+            }
         }
         return prepared
     }

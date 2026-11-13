@@ -392,20 +392,31 @@ final class GatewayCatalogTests: XCTestCase {
         clock.advance(.seconds(11))
         let stale = try await cache.get()
         XCTAssertEqual(Array(stale.keys), ["first"], "A refresh doesn't hold up the caller.")
-        for _ in 0..<100 where source.fetches < 2 {
-            await Task.yield()
-        }
-        try await Task.sleep(nanoseconds: 20_000_000)
-        let refreshed = try await cache.get()
-        XCTAssertEqual(Array(refreshed.keys), ["second"])
+        try await eventually { try await cache.get().keys.first == "second" }
+        XCTAssertEqual(source.fetches, 2)
 
         source.fail = true
         clock.advance(.seconds(11))
         _ = try await cache.get()
-        try await Task.sleep(nanoseconds: 20_000_000)
+        try await eventually { source.fetches == 3 }
+        // Whether or not the failed refresh has finished, the cache returns
+        // the last catalog and starts no other refresh within the interval.
         let kept = try await cache.get()
         XCTAssertEqual(Array(kept.keys), ["second"], "A failed refresh keeps the last catalog.")
         XCTAssertEqual(source.fetches, 3)
+    }
+
+    /// Waits, with a generous deadline, for a refresh that runs behind the
+    /// cache to have the effect `condition` checks.
+    private func eventually(_ condition: () async throws -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while ContinuousClock.now < deadline {
+            if try await condition() {
+                return
+            }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail("timed out waiting for the refresh", file: file, line: line)
     }
 
     func testFetchKeepsOnlyRoutableEntries() async throws {

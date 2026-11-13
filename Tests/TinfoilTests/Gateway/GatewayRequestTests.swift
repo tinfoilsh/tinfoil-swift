@@ -59,6 +59,14 @@ final class GatewayRequestTests: XCTestCase {
         )
     }
 
+    func testAContentLengthDescribesTheScopedBody() throws {
+        var original = request(#"{"model":"m","messages":[]}"#)
+        original.setValue("27", forHTTPHeaderField: "Content-Length")
+        let prepared = try GatewayRequest.prepare(original, secret: "client-secret")
+        XCTAssertEqual(prepared.value(forHTTPHeaderField: "Content-Length"), String(try XCTUnwrap(prepared.httpBody).count))
+        XCTAssertNotEqual(prepared.value(forHTTPHeaderField: "Content-Length"), "27")
+    }
+
     func testABodySecretReplacesTheClientsAndNeverLeaves() throws {
         let body = #"{"model":"m","instructions":"follow these","input":"x","user_cache_secret":"body-secret"}"#
         let prepared = try GatewayRequest.prepare(request(body), secret: "client-secret")

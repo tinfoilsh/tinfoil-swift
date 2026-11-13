@@ -43,6 +43,14 @@ final class GatewayClientTests: XCTestCase {
         await assertRefusedBeforeIO(#"model "m""#, modelPins: ["m": ModelPin(repo: "tinfoilsh/")])
     }
 
+    func testTheRelayKeepsThePortAndBracketsAnIPv6Host() {
+        let authority = { GatewayHTTPClient.authority(of: URL(string: $0)!) }
+        XCTAssertEqual(authority("https://gw.example/v1/"), "gw.example")
+        XCTAssertEqual(authority("https://gw.example:8443/v1/"), "gw.example:8443")
+        XCTAssertEqual(authority("https://[2001:db8::1]:8443/v1/"), "[2001:db8::1]:8443")
+        XCTAssertEqual(authority("https://[2001:db8::1]/v1/"), "[2001:db8::1]")
+    }
+
     func testACallerAuthorizedVerifierIsRefused() async throws {
         let authorizing = try Verifier(configAuthorizer: { _ in })
         for (verifier, pin) in [(authorizing, nil), (nil, authorizing)] as [(Verifier?, Verifier?)] {
