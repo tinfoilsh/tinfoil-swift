@@ -147,13 +147,13 @@ import Combine
 final class StreamingSessionPublisherTests: XCTestCase {
     func testCancellingTheSubscriptionCancelsTheRequest() async throws {
         let opened = AsyncGate()
-        let cancelled = AsyncGate()
+        let cancelled = expectation(description: "the request sees the cancellation")
         let session = StreamingSession(delegate: nil) { _ in
             await opened.open()
             do {
                 try await Task.sleep(nanoseconds: 10_000_000_000)
             } catch {
-                await cancelled.open()
+                cancelled.fulfill()
                 throw error
             }
             throw TinfoilError.network("not reached")
@@ -162,7 +162,8 @@ final class StreamingSessionPublisherTests: XCTestCase {
             .sink(receiveCompletion: { _ in }, receiveValue: { _ in })
         await opened.wait()
         subscription.cancel()
-        await cancelled.wait()
+        // Bounded, so a regression fails rather than hangs the suite.
+        await fulfillment(of: [cancelled], timeout: 5)
     }
 }
 #endif
