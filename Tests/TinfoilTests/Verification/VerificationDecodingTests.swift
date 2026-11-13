@@ -119,10 +119,14 @@ final class VerificationDecodingTests: XCTestCase {
 
     func testAPolicyApprovedConfigHasOnlyItsDigest() throws {
         let verification = try Verification(payload: payload(["config": ["source": "policy", "digest": "c0"]]))
-        XCTAssertEqual(verification.config?.source, .policy)
-        XCTAssertEqual(verification.config?.digest, "c0")
-        XCTAssertEqual(verification.config?.reference, "")
-        XCTAssertNil(verification.config?.approvalTime)
+        XCTAssertEqual(
+            verification.config,
+            ConfigVerification(
+                source: .policy, name: "", digest: "c0", reference: "",
+                signingKeyHint: "", approvalTime: nil, registryID: "", signatureTime: nil
+            ),
+            "No endorsement-only fact is reported for a policy approval."
+        )
     }
 
     func testRejectsAConfigFactWithAnInvalidTime() throws {
