@@ -88,9 +88,10 @@ final class PinnedStreamTests: XCTestCase {
         do {
             let (_, response) = try await PinnedTLS.stream(request, expecting: "deadbeef", configuration: configuration)
             XCTFail("a refused redirect came back as a \(response.statusCode) response")
-        } catch is URLError {
-            XCTFail("the pin's refusal must be reported, not the cancellation it caused")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertEqual(failure.message, "refusing redirect to https://elsewhere.example/x: requests stay on the verified enclave")
         } catch {
+            XCTFail("expected the pin's refusal of the redirect, got \(error)")
         }
     }
 
