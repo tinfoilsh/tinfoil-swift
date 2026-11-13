@@ -428,7 +428,7 @@ internal enum UserCacheSecret {
         return nil
     }
 
-    private static func skipWhitespace(in bytes: [UInt8], index: inout Int) {
+    static func skipWhitespace(in bytes: [UInt8], index: inout Int) {
         while index < bytes.count,
               bytes[index] == 0x20 || bytes[index] == 0x09
                 || bytes[index] == 0x0A || bytes[index] == 0x0D {
@@ -436,7 +436,7 @@ internal enum UserCacheSecret {
         }
     }
 
-    private static func stringEnd(in bytes: [UInt8], from start: Int) -> Int? {
+    static func stringEnd(in bytes: [UInt8], from start: Int) -> Int? {
         guard start < bytes.count, bytes[start] == UInt8(ascii: "\"") else {
             return nil
         }
@@ -456,7 +456,7 @@ internal enum UserCacheSecret {
         return nil
     }
 
-    private static func valueEnd(in bytes: [UInt8], from start: Int) -> Int? {
+    static func valueEnd(in bytes: [UInt8], from start: Int) -> Int? {
         guard start < bytes.count else {
             return nil
         }
@@ -510,7 +510,7 @@ internal enum UserCacheSecret {
 
     /// `JSONSerialization` accepts trailing commas on some platforms even
     /// though they are not valid JSON.
-    private static func containsTrailingComma(in body: Data) -> Bool {
+    static func containsTrailingComma(in body: Data) -> Bool {
         let bytes = [UInt8](body)
         var inString = false
         var escaped = false
