@@ -5,7 +5,9 @@
 [![Tests](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-swift/actions/workflows/test.yml)
 [![Documentation](https://img.shields.io/badge/docs-tinfoil.sh-blue)](https://docs.tinfoil.sh/sdk/swift-sdk)
 
-A Swift client for verifiably private AI inference with Tinfoil. It wraps the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with the same API, and before sending any request it verifies the enclave's attestation and encrypts the request body to the attested key using [EHBP](https://docs.tinfoil.sh/resources/ehbp), so only the verified enclave can read it.
+A Swift client for verifiably private AI inference with Tinfoil. It wraps the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI) with the same API. Before sending any request, it verifies the enclave's attestation with Tinfoil's attestation v3 verifier, bundled as the TinfoilGo framework, and then ties every request to the attested keys: each TLS connection is pinned to the attested certificate key, or each request body is sealed to the attested key with [EHBP](https://docs.tinfoil.sh/resources/ehbp). Only the verified enclave can read it.
+
+Upgrading from 0.8.x or a 0.9.0 release candidate? See [MIGRATION.md](MIGRATION.md).
 
 ## Installation
 
@@ -39,13 +41,39 @@ let response = try await client.chats(query: query)
 print(response.choices.first?.message.content ?? "No response")
 ```
 
-To choose the enclave, pin the repo to a tag or digest, send through a proxy, relay attestation, tighten the verification policy, or reject verifications, use an `EnclaveOpenAIClient`, which has the same OpenAI methods:
+`Client` uses one of Tinfoil's routers. To choose the enclave, pin the repo to a tag or digest, send through a proxy, relay attestation, tighten the trust policy or reject verifications, use an `EnclaveOpenAIClient`, which has the same OpenAI methods:
 
 ```swift
-let client = try await EnclaveOpenAIClient(enclave: "enclave.example.com", repo: "org/repo@v1.2.3", apiKey: "YOUR_API_KEY")
+let client = try await EnclaveOpenAIClient(
+    enclave: "enclave.example.com",
+    repo: "org/repo@v1.2.3",
+    apiKey: "YOUR_API_KEY"
+)
 ```
 
-`RouterOpenAIClient` does the same for one of Tinfoil's routers, which `Client` uses today. Each sends through an `EnclaveHTTPClient` or `RouterHTTPClient`, which you can also create directly. Both are verified before they're returned, and send requests of their own with `data(from:)` and `data(for:)`, over TLS pinned to the attested key (the default for an enclave you name) or sealed with EHBP. Their doc comments describe the callbacks, refresh, and request rules.
+`RouterOpenAIClient` does the same for Tinfoil's routers. Each sends through an `EnclaveHTTPClient` or `RouterHTTPClient`, which you can also create directly to send requests of your own with `data(for:)`. Both are verified before they are returned, verify again by themselves when the verification expires or the enclave rejects its key, and can be closed with `close()`. Their doc comments describe the parameters and request rules.
+
+### Transport
+
+Every client pins each TLS connection to the attested key by default (`transportMode: .tls`), which protects the whole request and response. With `transportMode: .ehbp`, request and response bodies are sealed to the attested key instead, so they stay private through a proxy that you pass as `baseURL`; the method, URL and headers are not sealed.
+
+### Trust policy
+
+A `Verifier` sets what an enclave must prove, and every client takes one as `verifier`:
+
+```swift
+let verifier = try Verifier(
+    pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
+    freshnessMaxAge: 3600
+)
+let client = try await EnclaveOpenAIClient(enclave: host, repo: repo, verifier: verifier, apiKey: key)
+```
+
+It also takes config registry IDs, config and freshness signing keys, embedded references, and a `configAuthorizer` closure for configs that your application approves. Pass `verificationCheck` to inspect each `Verification` before its keys are used, and throw to reject it.
+
+### Gateway (experimental)
+
+`GatewayOpenAIClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. Models can be pinned to repositories with `modelPins`. The gateway API may change in a later release.
 
 ## Documentation
 
