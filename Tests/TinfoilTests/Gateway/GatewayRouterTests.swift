@@ -18,11 +18,20 @@ final class GatewayRouterTests: XCTestCase {
         private var _closed = false
         let fails: Bool
         let respond: @Sendable (URLRequest) -> (Int, [String: String])
+        /// Called with the host on each send, so a harness can keep one
+        /// chronological log across replicas
+        let record: @Sendable (String) -> Void
 
-        init(_ replica: GatewayRouter.Replica, fails: Bool, respond: @escaping @Sendable (URLRequest) -> (Int, [String: String])) {
+        init(
+            _ replica: GatewayRouter.Replica,
+            fails: Bool,
+            respond: @escaping @Sendable (URLRequest) -> (Int, [String: String]),
+            record: @escaping @Sendable (String) -> Void = { _ in }
+        ) {
             self.replica = replica
             self.fails = fails
             self.respond = respond
+            self.record = record
         }
 
         var sent: [URLRequest] { lock.withLock { _sent } }
@@ -39,6 +48,7 @@ final class GatewayRouterTests: XCTestCase {
 
         func open(_ request: URLRequest) async throws -> RecoverableResponse {
             lock.withLock { _sent.append(request) }
+            record(replica.host)
             let (status, headers) = respond(request)
             return RecoverableResponse(
                 response: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!,
@@ -61,6 +71,7 @@ final class GatewayRouterTests: XCTestCase {
         private let lock = NSLock()
         private var _replicas: [FakeReplica] = []
         private var _catalogReads = 0
+        private var _sealedTo: [String] = []
         var failing: Set<String> = []
         var respond: @Sendable (URLRequest) -> (Int, [String: String]) = { _ in (200, [:]) }
         var catalog: Catalog = [
@@ -71,10 +82,8 @@ final class GatewayRouterTests: XCTestCase {
         var replicas: [FakeReplica] { lock.withLock { _replicas } }
         var catalogReads: Int { lock.withLock { _catalogReads } }
 
-        /// Hosts that a request was sealed to, in order
-        var sealedTo: [String] {
-            replicas.flatMap { replica in replica.sent.map { _ in replica.replica.host } }
-        }
+        /// Hosts that a request was sealed to, in the order of the sends
+        var sealedTo: [String] { lock.withLock { _sealedTo } }
 
         func router(
             pins: [String: (repo: String, attestor: Attestor?)] = [:],
@@ -90,7 +99,9 @@ final class GatewayRouterTests: XCTestCase {
                 },
                 secret: "",
                 makeReplica: { replica, _ in
-                    let fake = FakeReplica(replica, fails: self.failing.contains(replica.host), respond: self.respond)
+                    let fake = FakeReplica(replica, fails: self.failing.contains(replica.host), respond: self.respond) { host in
+                        self.lock.withLock { self._sealedTo.append(host) }
+                    }
                     self.lock.withLock { self._replicas.append(fake) }
                     return fake
                 }

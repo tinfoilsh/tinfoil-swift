@@ -184,8 +184,9 @@ final class EnclaveHTTPClientTests: XCTestCase {
                 guard case TinfoilError.configurationError(let failure) = error else {
                     return XCTFail("expected a configuration error, got \(error)")
                 }
+                // The exact message holds no part of the URL, whose query may
+                // hold a secret.
                 XCTAssertEqual(failure.message, "invalid base URL: a base URL must not carry a query or a fragment")
-                XCTAssertFalse(failure.message.contains("secret"), "The URL, whose query may hold a secret, isn't echoed.")
             }
         } }
         XCTAssertTrue(network.urls.isEmpty)

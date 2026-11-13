@@ -82,7 +82,11 @@ actor EnclaveHandle {
                     self.onVerificationResult?(.success(verified))
                     return verified
                 } catch let error as TinfoilError {
-                    self.onVerificationResult?(.failure(error))
+                    // A run that the client's close ended isn't a failed
+                    // verification, so it isn't reported as one.
+                    if !self.closed {
+                        self.onVerificationResult?(.failure(error))
+                    }
                     throw error
                 }
             }

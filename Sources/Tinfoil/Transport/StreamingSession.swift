@@ -109,31 +109,42 @@ internal class StreamingSession: URLSessionProtocol, @unchecked Sendable {
 
     #if canImport(Combine)
     func dataTaskPublisher(for request: URLRequest) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
-        // Cancelling the subscription cancels the task, as it does for
-        // URLSession's own publisher.
-        let cancellation = TaskCancellation()
-        return Future<(data: Data, response: URLResponse), Error> { [self] promise in
-            let task = self.dataTask(with: request) { data, response, error in
-                cancellation.detach()
-                if let error = error {
-                    promise(.failure(error))
-                } else if let data = data, let response = response {
-                    promise(.success((data, response)))
-                } else {
-                    promise(.failure(URLError(.badServerResponse)))
+        // Deferred starts the request on subscription, as URLSession's own
+        // publisher does, and gives each subscription a task of its own.
+        Deferred { [self] () -> AnyPublisher<(data: Data, response: URLResponse), URLError> in
+            // Cancelling the subscription cancels the task.
+            let cancellation = TaskCancellation()
+            return Future<(data: Data, response: URLResponse), Error> { promise in
+                let task = self.dataTask(with: request) { data, response, error in
+                    cancellation.detach()
+                    if let error = error {
+                        promise(.failure(error))
+                    } else if let data = data, let response = response {
+                        promise(.success((data, response)))
+                    } else {
+                        promise(.failure(URLError(.badServerResponse)))
+                    }
                 }
+                cancellation.attach(task)
+                task.resume()
             }
-            cancellation.attach(task)
-            task.resume()
-        }
-        .handleEvents(receiveCancel: { cancellation.cancel() })
-        .mapError { error -> URLError in
-            if let urlError = error as? URLError {
-                return urlError
-            }
-            return URLError(.cannotDecodeContentData)
+            .handleEvents(receiveCancel: { cancellation.cancel() })
+            .mapError(Self.urlError)
+            .eraseToAnyPublisher()
         }
         .eraseToAnyPublisher()
+    }
+
+    /// error as the URLError that the publisher's type requires: itself, or
+    /// one that carries it as the underlying error and keeps its description
+    static func urlError(_ error: Error) -> URLError {
+        if let urlError = error as? URLError {
+            return urlError
+        }
+        return URLError(.unknown, userInfo: [
+            NSUnderlyingErrorKey: error,
+            NSLocalizedDescriptionKey: String(describing: error),
+        ])
     }
     #endif
 
