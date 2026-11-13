@@ -17,6 +17,12 @@ final class PinnedStreamTests: XCTestCase {
         override func startLoading() {
             switch Self.respond?(request) ?? .failure(URLError(.unknown)) {
             case let .success((response, chunks)):
+                // A 3xx with a Location is offered to the session as a
+                // redirect first, as the network would.
+                if (300..<400).contains(response.statusCode),
+                   let location = response.value(forHTTPHeaderField: "Location").flatMap(URL.init(string:)) {
+                    client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: location), redirectResponse: response)
+                }
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
                 for chunk in chunks {
                     client?.urlProtocol(self, didLoad: chunk)
@@ -67,6 +73,34 @@ final class PinnedStreamTests: XCTestCase {
             XCTFail("expected the failure")
         } catch let error as URLError {
             XCTAssertEqual(error.code, .timedOut)
+        }
+    }
+
+    /// A redirect off the pinned origin, which the pin refuses, fails the
+    /// stream rather than coming back as a response.
+    func testARefusedRedirectIsAnError() async throws {
+        StubProtocol.respond = { request in
+            .success((
+                HTTPURLResponse(url: request.url!, statusCode: 302, httpVersion: nil, headerFields: ["Location": "https://elsewhere.example/x"])!,
+                []
+            ))
+        }
+        do {
+            let (_, response) = try await PinnedTLS.stream(request, expecting: "deadbeef", configuration: configuration)
+            XCTFail("a refused redirect came back as a \(response.statusCode) response")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertEqual(failure.message, "refusing redirect to https://elsewhere.example/x: requests stay on the verified enclave")
+        } catch {
+            XCTFail("expected the pin's refusal of the redirect, got \(error)")
+        }
+    }
+
+    func testACancelledRequestThrowsCancellationError() async throws {
+        StubProtocol.respond = { _ in .failure(URLError(.cancelled)) }
+        do {
+            _ = try await PinnedTLS.stream(request, expecting: "deadbeef", configuration: configuration)
+            XCTFail("expected the cancellation")
+        } catch is CancellationError {
         }
     }
 
@@ -178,6 +212,32 @@ final class StreamingSessionPublisherTests: XCTestCase {
         subscription.cancel()
         // Bounded, so a regression fails rather than hangs the suite.
         await fulfillment(of: [cancelled], timeout: 5)
+    }
+
+    func testThePublisherStartsOnSubscriptionAndKeepsTheError() async throws {
+        let opened = Box(value: 0)
+        let session = StreamingSession(delegate: nil) { _ in
+            opened.value += 1
+            throw TinfoilError.attestation("rejected", layer: .quote)
+        }
+        let publisher = session.dataTaskPublisher(for: URLRequest(url: URL(string: "https://enclave.example/v1/x")!))
+        try await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertEqual(opened.value, 0, "Nothing is sent before a subscriber attaches.")
+
+        let failed = expectation(description: "the request fails")
+        let failure = Box<URLError?>(value: nil)
+        let subscription = publisher.sink(receiveCompletion: { completion in
+            if case .failure(let error) = completion {
+                failure.value = error
+            }
+            failed.fulfill()
+        }, receiveValue: { _ in })
+        await fulfillment(of: [failed], timeout: 5)
+        subscription.cancel()
+
+        XCTAssertEqual(opened.value, 1)
+        let underlying = try XCTUnwrap(failure.value?.userInfo[NSUnderlyingErrorKey] as? TinfoilError)
+        XCTAssertEqual(underlying, TinfoilError.attestation("rejected", layer: .quote), "The real error is kept.")
     }
 }
 #endif

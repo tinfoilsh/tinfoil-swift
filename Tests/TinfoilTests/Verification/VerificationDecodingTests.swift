@@ -134,6 +134,10 @@ final class VerificationDecodingTests: XCTestCase {
             try Verification(payload: payload(["config": ["source": "endorsement", "digest": "c0", "approval_time": "yesterday"]])),
             containing: "config.approval_time"
         )
+        assertAttestationError(
+            try Verification(payload: payload(["runtime": ["source": "endorsement", "digest": "r0", "approval_time": "yesterday"]])),
+            containing: "runtime.approval_time"
+        )
     }
 
     func testIgnoresFieldsTheSDKRecordsItself() throws {

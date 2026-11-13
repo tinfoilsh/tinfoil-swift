@@ -114,16 +114,7 @@ enum PinnedTLS {
         expecting fingerprint: String,
         configuration: URLSessionConfiguration = .ephemeral
     ) async throws -> (Data, HTTPURLResponse) {
-        // "https:host/path" has a scheme but no host, yet URLSession would
-        // still connect to host, so a host is required as well as HTTPS.
-        guard let url = request.url, url.scheme?.lowercased() == "https", url.host != nil else {
-            throw TinfoilError.configuration("pinned requests need an HTTPS URL with a host, not \(request.url?.absoluteString ?? "no URL")")
-        }
-        let origin = URLHelpers.origin(from: url.absoluteString)
-        guard !origin.isEmpty else {
-            throw TinfoilError.configuration("cannot pin a request to \(url.absoluteString)")
-        }
-        let pin = PinningDelegate(fingerprint: fingerprint, origin: origin)
+        let pin = PinningDelegate(fingerprint: fingerprint, origin: try origin(of: request))
         let session = URLSession(configuration: configuration, delegate: pin, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
 
@@ -146,6 +137,20 @@ enum PinnedTLS {
             throw error
         }
     }
+
+    /// The origin that a pinned request and its redirects must stay on. The
+    /// URL must be HTTPS with a host: "https:host/path" has a scheme but no
+    /// host, yet URLSession would still connect to host.
+    static func origin(of request: URLRequest) throws -> String {
+        guard let url = request.url, url.scheme?.lowercased() == "https", url.host != nil else {
+            throw TinfoilError.configuration("pinned requests need an HTTPS URL with a host, not \(request.url?.absoluteString ?? "no URL")")
+        }
+        let origin = URLHelpers.origin(from: url.absoluteString)
+        guard !origin.isEmpty else {
+            throw TinfoilError.configuration("cannot pin a request to \(url.absoluteString)")
+        }
+        return origin
+    }
 }
 
 extension PinnedTLS {
@@ -160,14 +165,7 @@ extension PinnedTLS {
         expecting fingerprint: String,
         configuration: URLSessionConfiguration = .ephemeral
     ) async throws -> (AsyncThrowingStream<Data, Error>, HTTPURLResponse) {
-        guard let url = request.url, url.scheme?.lowercased() == "https", url.host != nil else {
-            throw TinfoilError.configuration("pinned requests need an HTTPS URL with a host, not \(request.url?.absoluteString ?? "no URL")")
-        }
-        let origin = URLHelpers.origin(from: url.absoluteString)
-        guard !origin.isEmpty else {
-            throw TinfoilError.configuration("cannot pin a request to \(url.absoluteString)")
-        }
-        let receiver = StreamingPinDelegate(pin: PinningDelegate(fingerprint: fingerprint, origin: origin))
+        let receiver = StreamingPinDelegate(pin: PinningDelegate(fingerprint: fingerprint, origin: try origin(of: request)))
         let session = URLSession(configuration: configuration, delegate: receiver, delegateQueue: nil)
         let task: URLSessionDataTask = session.dataTask(with: request)
         // The session holds its delegate until it is invalidated, which
@@ -235,7 +233,10 @@ private final class StreamingPinDelegate: NSObject, URLSessionDataDelegate, @unc
         didReceive response: URLResponse,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        guard let response = response as? HTTPURLResponse else {
+        // A refused redirect arrives as the redirect response itself; it is
+        // reported as the pin's failure, not as a response, and so is
+        // anything that isn't HTTP.
+        guard pin.failure == nil, let response = response as? HTTPURLResponse else {
             completionHandler(.cancel)
             return
         }
@@ -269,8 +270,12 @@ private final class StreamingPinDelegate: NSObject, URLSessionDataDelegate, @unc
         self.body = nil
         lock.unlock()
         // A refused connection or redirect is reported as the pin's failure
-        // rather than as the cancellation that it caused.
-        let failure = pin.failure ?? error
+        // rather than as the cancellation that it caused, and a cancellation
+        // as CancellationError, as send reports it.
+        var failure = pin.failure ?? error
+        if pin.failure == nil, (error as? URLError)?.code == .cancelled {
+            failure = CancellationError()
+        }
         if let headers {
             headers.resume(throwing: failure ?? URLError(.badServerResponse))
         } else if let failure {

@@ -193,8 +193,8 @@ extension Verification {
             codeMeasurement: decoded.codeMeasurement,
             enclaveMeasurement: decoded.enclaveMeasurement,
             config: try decoded.config.map { try $0.verification() },
-            runtime: try decoded.runtime.map { try $0.verification() },
-            platform: try decoded.platform.map { try $0.verification() },
+            runtime: try decoded.runtime.map { try $0.verification(of: "runtime") },
+            platform: try decoded.platform.map { try $0.verification(of: "platform") },
             tlsPublicKeyFingerprint: decoded.tlsPublicKeyFP,
             hpkePublicKey: decoded.hpkePublicKey ?? "",
             cryptoMaterial: decoded.cryptoMaterial,
@@ -292,7 +292,8 @@ extension Verification {
             case approvalTime = "approval_time"
         }
 
-        func verification() throws -> ArtifactVerification {
+        /// - Parameter field: The artifact's member, which errors name
+        func verification(of field: String) throws -> ArtifactVerification {
             ArtifactVerification(
                 source: ReferenceSource(rawValue: source),
                 repo: repo ?? "",
@@ -300,7 +301,7 @@ extension Verification {
                 digest: digest,
                 name: name ?? "",
                 commit: commit ?? "",
-                approvalTime: try approvalTime.map { try Verification.parseDate($0, field: "approval_time") }
+                approvalTime: try approvalTime.map { try Verification.parseDate($0, field: "\(field).approval_time") }
             )
         }
     }
