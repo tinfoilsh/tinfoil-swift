@@ -7,156 +7,34 @@ import OpenAI
 
 final class UserCacheSecretTests: XCTestCase {
 
-    private let envVar = UserCacheSecret.environmentVariable
-    private let promptResolutionTimeout: TimeInterval = 1
-
-    private final class StartGate: @unchecked Sendable {
-        private let condition = NSCondition()
-        private let participantCount: Int
-        private var waitingCount = 0
-        private var isOpen = false
-
-        init(participantCount: Int) {
-            self.participantCount = participantCount
-        }
-
-        func arriveAndWait() {
-            condition.lock()
-            waitingCount += 1
-            condition.broadcast()
-            while !isOpen {
-                condition.wait()
-            }
-            condition.unlock()
-        }
-
-        func releaseWhenReady() {
-            condition.lock()
-            while waitingCount < participantCount {
-                condition.wait()
-            }
-            isOpen = true
-            condition.broadcast()
-            condition.unlock()
-        }
-    }
-
-    /// Creates a throwaway home directory, removed on teardown.
-    private func makeTempHome() throws -> URL {
-        let home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tinfoil-ucs-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
-        return home
-    }
-
-    private func secretFile(in home: URL) -> URL {
-        home.appendingPathComponent(UserCacheSecret.directoryName, isDirectory: true)
-            .appendingPathComponent(UserCacheSecret.fileName, isDirectory: false)
-    }
-
-    private func permissions(of file: URL) throws -> Int16 {
-        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
-        return try XCTUnwrap(attributes[.posixPermissions] as? NSNumber).int16Value
-    }
-
     private func assertIsGeneratedSecret(_ secret: String, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(secret.count, 64, "expected a hex-encoded 256-bit secret", file: file, line: line)
         XCTAssertEqual(secret, secret.lowercased(), "expected lowercase hex", file: file, line: line)
         XCTAssertTrue(secret.allSatisfy { $0.isHexDigit }, "expected hex digits only", file: file, line: line)
     }
 
-    private func resolvePromptly(
-        homeDirectory: URL,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> String? {
-        let completion = expectation(description: "secret resolution completes")
-        let resultLock = NSLock()
-        var result: String?
-        DispatchQueue.global().async {
-            let resolved = UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: homeDirectory)
-            resultLock.lock()
-            result = resolved
-            resultLock.unlock()
-            completion.fulfill()
-        }
-
-        guard XCTWaiter.wait(for: [completion], timeout: promptResolutionTimeout) == .completed else {
-            XCTFail("secret resolution blocked on a FIFO", file: file, line: line)
-            return nil
-        }
-        resultLock.lock()
-        defer { resultLock.unlock() }
-        return result
-    }
-
-    private func assertIsFIFO(_ fileURL: URL, file: StaticString = #filePath, line: UInt = #line) {
-        var status = stat()
-        XCTAssertEqual(lstat(fileURL.path, &status), 0, file: file, line: line)
-        XCTAssertEqual(status.st_mode & S_IFMT, S_IFIFO, file: file, line: line)
-    }
-
     // MARK: - Resolution
 
-    func testHomeDirectoryHonorsEnvironment() throws {
-        let home = try makeTempHome()
-
-        XCTAssertEqual(
-            UserCacheSecret.homeDirectory(
-                environment: ["HOME": home.path],
-                fallback: NSHomeDirectory()
-            ),
-            home
-        )
+    func testAnExplicitSecretWinsAndOtherwiseTheProcessSecret() {
+        XCTAssertEqual(UserCacheSecret.resolve(explicit: "s1"), "s1")
+        for unset in [nil, ""] as [String?] {
+            let resolved = UserCacheSecret.resolve(explicit: unset)
+            assertIsGeneratedSecret(resolved)
+            XCTAssertEqual(resolved, UserCacheSecret.processSecret, "Every client in the process shares one secret.")
+        }
     }
 
-    func testExplicitSecretSetVersusUnset() throws {
-        let home = try makeTempHome()
-
-        XCTAssertEqual(
-            UserCacheSecret.resolve(explicit: "s1", environment: [:], homeDirectory: home),
-            "s1"
-        )
-
-        let resolved = UserCacheSecret.resolve(explicit: "", environment: [:], homeDirectory: home)
-        assertIsGeneratedSecret(resolved)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: secretFile(in: home).path))
+    /// The SDK reads no environment variable or file for the secret.
+    func testTheEnvironmentIsNotRead() {
+        setenv("TINFOIL_USER_CACHE_SECRET", "from-the-environment", 1)
+        defer { unsetenv("TINFOIL_USER_CACHE_SECRET") }
+        XCTAssertEqual(UserCacheSecret.resolve(explicit: nil), UserCacheSecret.processSecret)
     }
 
-    func testResolvePrecedence() throws {
-        let home = try makeTempHome()
-
-        // Explicit option beats environment.
-        XCTAssertEqual(
-            UserCacheSecret.resolve(explicit: "explicit", environment: [envVar: "from-env"], homeDirectory: home),
-            "explicit"
-        )
-
-        // Explicit empty is treated as unset.
-        XCTAssertEqual(
-            UserCacheSecret.resolve(explicit: "", environment: [envVar: "from-env"], homeDirectory: home),
-            "from-env"
-        )
-
-        // Environment beats generation and touches no file.
-        XCTAssertEqual(
-            UserCacheSecret.resolve(explicit: nil, environment: [envVar: "from-env"], homeDirectory: home),
-            "from-env"
-        )
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: secretFile(in: home).path),
-            "an environment-provided secret must not create the secret file"
-        )
-
-        // Environment set but empty falls through to generation.
-        let resolved = UserCacheSecret.resolve(
-            explicit: nil,
-            environment: [envVar: ""],
-            homeDirectory: home
-        )
-        assertIsGeneratedSecret(resolved)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: secretFile(in: home).path))
+    func testGeneratedSecretsAreFresh() {
+        let first = UserCacheSecret.generate()
+        assertIsGeneratedSecret(first)
+        XCTAssertNotEqual(first, UserCacheSecret.generate())
     }
 
     func testAnEnclaveTheCallerNamesGetsOnlyAnExplicitSecret() throws {
@@ -180,227 +58,17 @@ final class UserCacheSecretTests: XCTestCase {
         XCTAssertEqual(try connection(secret: "explicit").userCacheSecret, "explicit")
     }
 
-    func testDiscoveringARouterResolvesTheSecret() async throws {
-        let home = try makeTempHome()
+    func testDiscoveringARouterUsesTheProcessSecret() async throws {
         // A relay skips discovery's network I/O; the route is still Tinfoil's router.
-        func discover(environment: [String: String]) async throws -> EnclaveConnection {
-            try await EnclaveConnection.router(
-                attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
-                transportMode: .ehbp,
-                baseURL: nil,
-                attestationRelay: "relay.example",
-                userCacheSecret: nil,
-                environment: environment,
-                homeDirectory: home,
-                onVerificationResult: nil
-            )
-        }
-
-        let fromEnvironment = try await discover(environment: [envVar: "from-env"])
-        XCTAssertEqual(fromEnvironment.userCacheSecret, "from-env")
-        let generated = try await discover(environment: [:])
-        assertIsGeneratedSecret(generated.userCacheSecret)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: secretFile(in: home).path), "The router route provisions the shared secret.")
-    }
-
-    // MARK: - Persistence
-
-    func testGenerateAndPersist() throws {
-        let home = try makeTempHome()
-
-        let first = UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: home)
-        assertIsGeneratedSecret(first)
-
-        let file = secretFile(in: home)
-        let directory = file.deletingLastPathComponent()
-        XCTAssertEqual(try permissions(of: directory), 0o700, "the persistence directory must have mode 0700")
-        XCTAssertEqual(try permissions(of: file), 0o600, "the secret file must have mode 0600")
-
-        let persisted = try String(contentsOf: file, encoding: .utf8)
-        XCTAssertEqual(persisted, first, "the persisted contents must be the resolved secret")
-    }
-
-    func testConcurrentGenerationAdoptsSingleSecret() throws {
-        let home = try makeTempHome()
-        let callerCount = 32
-        let startGate = StartGate(participantCount: callerCount)
-        let completion = DispatchGroup()
-        let resultsLock = NSLock()
-        var results: [String] = []
-
-        for _ in 0..<callerCount {
-            completion.enter()
-            Thread.detachNewThread {
-                startGate.arriveAndWait()
-                let secret = UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: home)
-                resultsLock.lock()
-                results.append(secret)
-                resultsLock.unlock()
-                completion.leave()
-            }
-        }
-
-        startGate.releaseWhenReady()
-        completion.wait()
-
-        let first = try XCTUnwrap(results.first)
-        assertIsGeneratedSecret(first)
-        XCTAssertEqual(results.count, callerCount)
-        XCTAssertEqual(Set(results), [first], "all concurrent callers must adopt one secret")
-        XCTAssertEqual(
-            try String(contentsOf: secretFile(in: home), encoding: .utf8),
-            first,
-            "the persisted secret must match every caller's result"
+        let connection = try await EnclaveConnection.router(
+            attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
+            transportMode: .ehbp,
+            baseURL: nil,
+            attestationRelay: "relay.example",
+            userCacheSecret: nil,
+            onVerificationResult: nil
         )
-    }
-
-    func testAdoptsExistingFile() throws {
-        let home = try makeTempHome()
-        let file = secretFile(in: home)
-        try FileManager.default.createDirectory(
-            at: file.deletingLastPathComponent(),
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        // Trailing newline: the file may be hand-edited or written by another SDK.
-        try Data("shared-secret\n".utf8).write(to: file)
-
-        XCTAssertEqual(
-            UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: home),
-            "shared-secret"
-        )
-    }
-
-    func testAdoptsPermissiveExistingStateWithoutChangingModes() throws {
-        let home = try makeTempHome()
-        let file = secretFile(in: home)
-        let directory = file.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o777]
-        )
-        try Data("shared-secret".utf8).write(to: file)
-        try FileManager.default.setAttributes([.posixPermissions: 0o777], ofItemAtPath: directory.path)
-        try FileManager.default.setAttributes([.posixPermissions: 0o666], ofItemAtPath: file.path)
-
-        XCTAssertEqual(
-            UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: home),
-            "shared-secret"
-        )
-        XCTAssertEqual(try permissions(of: directory), 0o777)
-        XCTAssertEqual(try permissions(of: file), 0o666)
-    }
-
-    func testRejectsNonUTF8FileWithoutRewriting() throws {
-        let home = try makeTempHome()
-        let file = secretFile(in: home)
-        try FileManager.default.createDirectory(
-            at: file.deletingLastPathComponent(),
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        let corrupted = Data([0xFF, 0xFE] + Array("abc".utf8))
-        try corrupted.write(to: file)
-
-        let secret = UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: home)
-        XCTAssertEqual(secret, UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: nil))
-        XCTAssertEqual(
-            try Data(contentsOf: file),
-            corrupted,
-            "invalid persistence state must not be rewritten"
-        )
-    }
-
-    func testRejectsBlankFileWithoutRewriting() throws {
-        let home = try makeTempHome()
-        let file = secretFile(in: home)
-        try FileManager.default.createDirectory(
-            at: file.deletingLastPathComponent(),
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try Data("  \n".utf8).write(to: file)
-
-        let secret = UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: home)
-        XCTAssertEqual(secret, UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: nil))
-        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "  \n")
-    }
-
-    func testRejectsSymlinkSecretWithoutChangingTarget() throws {
-        let home = try makeTempHome()
-        let file = secretFile(in: home)
-        let target = home.appendingPathComponent("target", isDirectory: false)
-        try FileManager.default.createDirectory(
-            at: file.deletingLastPathComponent(),
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try Data("target-secret".utf8).write(to: target)
-        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: target)
-
-        let secret = UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: home)
-
-        XCTAssertEqual(secret, UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: nil))
-        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "target-secret")
-        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: file.path), target.path)
-    }
-
-    func testRejectsFIFOSecretWithoutBlocking() throws {
-        let home = try makeTempHome()
-        let file = secretFile(in: home)
-        try FileManager.default.createDirectory(
-            at: file.deletingLastPathComponent(),
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        XCTAssertEqual(mkfifo(file.path, 0o600), 0)
-
-        XCTAssertEqual(
-            resolvePromptly(homeDirectory: home),
-            UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: nil)
-        )
-        assertIsFIFO(file)
-    }
-
-    func testRejectsSymlinkPersistenceDirectoryWithoutChangingTarget() throws {
-        let home = try makeTempHome()
-        let target = home.appendingPathComponent("target", isDirectory: true)
-        let directory = secretFile(in: home).deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: target,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o755]
-        )
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
-        try FileManager.default.createSymbolicLink(at: directory, withDestinationURL: target)
-
-        let secret = UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: home)
-
-        assertIsGeneratedSecret(secret)
-        XCTAssertEqual(try permissions(of: target), 0o755)
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: target.appendingPathComponent(UserCacheSecret.fileName).path)
-        )
-    }
-
-    func testFallsBackWithoutHome() {
-        let first = UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: nil)
-        XCTAssertFalse(first.isEmpty, "no home directory must still yield a process-lifetime secret")
-        XCTAssertEqual(
-            UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: nil),
-            first,
-            "the in-memory fallback must be stable within the process"
-        )
-    }
-
-    func testFallsBackWhenHomeNotADirectory() throws {
-        let parent = try makeTempHome()
-        let notADirectory = parent.appendingPathComponent("not-a-dir", isDirectory: false)
-        try Data("x".utf8).write(to: notADirectory)
-
-        let secret = UserCacheSecret.resolve(explicit: nil, environment: [:], homeDirectory: notADirectory)
-        XCTAssertFalse(secret.isEmpty, "an unwritable home must still yield a process-lifetime secret")
+        XCTAssertEqual(connection.userCacheSecret, UserCacheSecret.processSecret)
     }
 
     // MARK: - Injection

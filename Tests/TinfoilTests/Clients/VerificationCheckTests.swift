@@ -9,7 +9,7 @@ import EHBP
 final class VerificationCheckTests: XCTestCase {
     private var server: LocalTestServer!
 
-    /// Pinned so these tests never read or write the persisted secret.
+    /// A fixed secret, so these tests can check the one sent.
     private static let cacheSecret = "enclave-verified-callback-tests"
 
     private static let keyConfigProblem = Data(

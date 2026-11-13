@@ -37,16 +37,14 @@ final class EnclaveConnection: Sendable {
     /// A connection to the first of Tinfoil's routers that verifies, and
     /// otherwise to the fallback router, which is left unverified for the
     /// caller to verify. With an attestation relay, the relay is asked for the
-    /// fallback router instead. An unset `userCacheSecret` is resolved from the
-    /// environment or the persisted secret, since this is Tinfoil's router.
+    /// fallback router instead. An unset `userCacheSecret` falls back to the
+    /// process's generated secret, since this is Tinfoil's router.
     static func router(
         attestor: Attestor,
         transportMode: TransportMode,
         baseURL: URL?,
         attestationRelay: String?,
         userCacheSecret: String?,
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: URL? = UserCacheSecret.defaultHomeDirectory,
         onVerificationResult: VerificationResultCallback?
     ) async throws -> EnclaveConnection {
         // Checked before discovery, so a misconfiguration costs no network I/O.
@@ -79,11 +77,7 @@ final class EnclaveConnection: Sendable {
             initial: discovered?.verification,
             transportMode: transportMode,
             baseURL: baseURL,
-            userCacheSecret: UserCacheSecret.resolve(
-                explicit: userCacheSecret,
-                environment: environment,
-                homeDirectory: homeDirectory
-            )
+            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret)
         )
     }
 

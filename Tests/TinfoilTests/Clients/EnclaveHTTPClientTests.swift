@@ -35,7 +35,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
             transportMode: transportMode,
             baseURL: baseURL,
             attestationRelay: relay,
-            userCacheSecret: "pinned so the tests never touch the persisted secret",
+            userCacheSecret: "test-secret",
             onVerificationResult: onVerificationResult
         ))
     }

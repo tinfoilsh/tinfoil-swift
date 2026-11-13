@@ -19,7 +19,7 @@ final class GatewayClientTests: XCTestCase {
                 modelPins: modelPins,
                 pinnedModelsOnly: pinnedModelsOnly,
                 baseURL: baseURL,
-                userCacheSecret: "pinned so the test never touches the persisted secret",
+                userCacheSecret: "test-secret",
                 catalog: {
                     XCTFail("the catalog was read despite a refused configuration", file: file, line: line)
                     return [:]
@@ -86,7 +86,7 @@ final class GatewayClientTests: XCTestCase {
         try requireLiveIntegration()
         let results = Box<[Result<Verification, TinfoilError>]>(value: [])
         let client = try await GatewayHTTPClient(
-            userCacheSecret: "pinned so the test never touches the persisted secret",
+            userCacheSecret: "test-secret",
             onVerificationResult: { results.value.append($0) }
         )
         let models = try await client.models()
@@ -114,7 +114,7 @@ final class GatewayClientTests: XCTestCase {
             throw XCTSkip("set TINFOIL_API_KEY to send inference through the gateway")
         }
         let client = try await GatewayOpenAIClient(
-            userCacheSecret: "pinned so the test never touches the persisted secret",
+            userCacheSecret: "test-secret",
             apiKey: apiKey
         )
         let models = try await client.httpClient.models()

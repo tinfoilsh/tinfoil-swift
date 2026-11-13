@@ -39,13 +39,14 @@ public final class GatewayHTTPClient: Sendable {
     ///     the caller supplies or approves is refused: replicas are verified
     ///     against repositories.
     ///   - userCacheSecret: The default prompt-cache scope of the client's
-    ///     requests; nil or empty resolves it from `TINFOIL_USER_CACHE_SECRET`
-    ///     or `~/.tinfoil/user_cache_secret`. A non-empty `user_cache_secret`
-    ///     string in a request's JSON body overrides it, so that a server can
-    ///     scope the cache to each end user. In a request with an
-    ///     `application/json` object body, the secret is replaced by a salt
-    ///     derived from it and the API key; any other body is sent as written,
-    ///     sealed to the verified replica. Use
+    ///     requests; nil or empty uses a random secret generated once per
+    ///     process and shared by its clients, so cache hits aren't shared
+    ///     across processes; pass one to keep it stable. A non-empty
+    ///     `user_cache_secret` string in a request's JSON body overrides it,
+    ///     so that a server can scope the cache to each end user. In a
+    ///     request with an `application/json` object body, the secret is
+    ///     replaced by a salt derived from it and the API key; any other body
+    ///     is sent as written, sealed to the verified replica. Use
     ///     an opaque random value, not a raw user ID or API key: the gateway
     ///     sees a cache prefix keyed on it, and could test guesses of a
     ///     guessable secret and then of the prompt.
