@@ -32,6 +32,7 @@ final class EnclaveConnection: Sendable {
     /// The EHBP sessions, sealing to one shared verified key; nil in TLS mode.
     let ehbp: EHBPChannel?
     private let send: PinnedTLS.Send
+    private let stream: PinnedTLS.Stream
 
     /// A connection to the first of Tinfoil's routers that verifies, and
     /// otherwise to the fallback router, which is left unverified for the
@@ -95,7 +96,8 @@ final class EnclaveConnection: Sendable {
         transportMode: TransportMode,
         baseURL: URL?,
         userCacheSecret: String,
-        send: @escaping PinnedTLS.Send = { try await PinnedTLS.send($0, expecting: $1) }
+        send: @escaping PinnedTLS.Send = { try await PinnedTLS.send($0, expecting: $1) },
+        stream: @escaping PinnedTLS.Stream = { try await PinnedTLS.stream($0, expecting: $1) }
     ) throws {
         guard let enclaveOrigin = URL(string: "https://\(handle.enclave)/"), enclaveOrigin.host != nil else {
             throw TinfoilError.configuration("cannot form a URL for the enclave \(handle.enclave)")
@@ -113,6 +115,7 @@ final class EnclaveConnection: Sendable {
         self.baseURL = base
         self.userCacheSecret = userCacheSecret
         self.send = send
+        self.stream = stream
         self.ehbp = transportMode == .ehbp
             ? EHBPChannel(origin: origin, enclaveURL: "https://\(handle.enclave)", handle: handle, initial: initial, userCacheSecret: userCacheSecret)
             : nil
@@ -194,10 +197,34 @@ final class EnclaveConnection: Sendable {
             }
             return (data, response)
         }
-        var headers = resolved.allHTTPHeaderFields ?? [:]
-        resolved.httpBody = UserCacheSecret.provision(request: resolved, headers: &headers, clientSecret: userCacheSecret)
-        resolved.allHTTPHeaderFields = headers
-        return try await sendPinned(resolved)
+        return try await pinned(provisioned(resolved)) { request, fingerprint in
+            try await self.send(request, fingerprint)
+        }
+    }
+
+    /// Sends a request as `data(for:)` does in TLS mode, returning once the
+    /// response's headers arrive with its body still streaming. The OpenAI
+    /// client's TLS sessions send through it.
+    func open(_ request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
+        guard ehbp == nil else {
+            throw TinfoilError.configuration("open(_:) sends with pinned TLS; this connection uses EHBP")
+        }
+        var resolved = request
+        resolved.url = try resolve(request.url)
+        let (body, response) = try await pinned(provisioned(resolved)) { request, fingerprint in
+            try await self.stream(request, fingerprint)
+        }
+        return (body, response)
+    }
+
+    /// The request with the client's prompt-cache secret added to its body
+    /// where it applies
+    private func provisioned(_ request: URLRequest) -> URLRequest {
+        var provisioned = request
+        var headers = provisioned.allHTTPHeaderFields ?? [:]
+        provisioned.httpBody = UserCacheSecret.provision(request: provisioned, headers: &headers, clientSecret: userCacheSecret)
+        provisioned.allHTTPHeaderFields = headers
+        return provisioned
     }
 
     /// Loads a URL from the enclave, as `URLSession.data(from:)` does. See
@@ -220,7 +247,13 @@ final class EnclaveConnection: Sendable {
         return try await ehbp.session.recoverableBytes(for: resolved)
     }
 
-    private func sendPinned(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    /// Sends request over connections pinned to the verified TLS key, with
+    /// `transmit`. A key the enclave presents before the request left is
+    /// verified again and the request retried once.
+    private func pinned<Result>(
+        _ request: URLRequest,
+        transmit: (URLRequest, String) async throws -> Result
+    ) async throws -> Result {
         var attempt = 0
         while true {
             let verification = try await handle.ensureVerified()
@@ -228,7 +261,7 @@ final class EnclaveConnection: Sendable {
             // not have its request, credentials included, sent again.
             try Task.checkCancellation()
             do {
-                return try await send(request, verification.tlsPublicKeyFingerprint)
+                return try await transmit(request, verification.tlsPublicKeyFingerprint)
             } catch let rejection as PinnedTLS.Rejection {
                 attempt += 1
                 // Replaying is safe only if the request never left: a rejection

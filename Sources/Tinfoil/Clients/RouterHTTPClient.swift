@@ -21,7 +21,7 @@ public final class RouterHTTPClient: Sendable {
     /// The configuration is checked before any network I/O.
     ///
     /// - Parameters:
-    ///   - transportMode: How requests are protected; EHBP by default
+    ///   - transportMode: How requests are protected; pinned TLS by default
     ///   - baseURL: A proxy requests are sent to, which requires `.ehbp`
     ///     because the router's origin isn't known before discovery.
     ///     Requests carry `X-Tinfoil-Enclave-Url` so it can forward them. It
@@ -43,7 +43,7 @@ public final class RouterHTTPClient: Sendable {
     ///   - onVerificationResult: Called with each verification's final result.
     ///     It only observes.
     public convenience init(
-        transportMode: TransportMode = .ehbp,
+        transportMode: TransportMode = .tls,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
         verifier: Verifier? = nil,

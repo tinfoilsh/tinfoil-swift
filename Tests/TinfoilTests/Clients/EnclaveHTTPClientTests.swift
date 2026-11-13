@@ -293,16 +293,13 @@ final class EnclaveHTTPClientTests: XCTestCase {
         XCTAssertEqual(network.urls.count, verifications, "A refused request does not verify.")
     }
 
-    func testOpenAIClientsRequireEHBP() async throws {
-        let tls = try await EnclaveHTTPClient(verifying: connection(approving()))
-        XCTAssertThrowsError(try EnclaveOpenAIClient(httpClient: tls, apiKey: "test-key")) { error in
-            guard case TinfoilError.configurationError = error else {
-                return XCTFail("expected a configuration error, got \(error)")
-            }
+    func testOpenAIClientsUseTheHTTPClientsTransport() async throws {
+        for mode in [TransportMode.tls, .ehbp] {
+            let httpClient = try await EnclaveHTTPClient(verifying: connection(approving(), transportMode: mode))
+            let client = try EnclaveOpenAIClient(httpClient: httpClient, apiKey: "test-key")
+            XCTAssertTrue(client.httpClient === httpClient)
+            XCTAssertEqual(client.httpClient.transportMode, mode)
         }
-        let ehbp = try await EnclaveHTTPClient(verifying: connection(approving(), transportMode: .ehbp))
-        let client = try EnclaveOpenAIClient(httpClient: ehbp, apiKey: "test-key")
-        XCTAssertTrue(client.httpClient === ehbp)
     }
 
     func testAMissingAPIKeyFailsBeforeAnyNetworkIO() async throws {

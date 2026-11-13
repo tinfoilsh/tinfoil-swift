@@ -6,7 +6,8 @@ import EHBP
 public let version = TinfoilConstants.sdkVersion
 
 /// An OpenAI-compatible client for inference on Tinfoil's default route.
-/// Every request body is sealed to a verified enclave with EHBP.
+/// Every request goes to a verified enclave over a connection pinned to the
+/// enclave's attested TLS key.
 ///
 /// It takes only OpenAI-level options and exposes nothing about the route,
 /// so the route can change without breaking callers. To choose the enclave,
