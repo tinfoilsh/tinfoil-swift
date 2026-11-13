@@ -39,6 +39,9 @@ public final class Client: OpenAICompatibleClient, Sendable {
     ///   - parsingOptions: Parsing options for handling different providers
     ///   - customHeaders: Headers to send on every request, merged over those
     ///     `tinfoilEvents` adds; caller values win
+    ///   - timeoutInterval: How long a request may wait for the next bytes
+    ///     of its response before it fails, in seconds; 60 by default. Raise
+    ///     it for long completions that send nothing until they finish.
     ///   - tinfoilEvents: Tinfoil progress events to opt into. Each adds a
     ///     value to the `X-Tinfoil-Events` header, so the router emits
     ///     `<tinfoil-event>...</tinfoil-event>` markers inline with the
@@ -52,6 +55,7 @@ public final class Client: OpenAICompatibleClient, Sendable {
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
+        timeoutInterval: TimeInterval = 60,
         tinfoilEvents: Set<TinfoilEvent> = []
     ) async throws {
         // Today the default route is one of Tinfoil's routers.
@@ -60,6 +64,7 @@ public final class Client: OpenAICompatibleClient, Sendable {
             apiKeyProvider: apiKeyProvider,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
+            timeoutInterval: timeoutInterval,
             tinfoilEvents: tinfoilEvents
         )
         let httpClient = route.httpClient
@@ -79,6 +84,7 @@ public final class Client: OpenAICompatibleClient, Sendable {
         expiresAt: Date = .distantFuture,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
+        timeoutInterval: TimeInterval = 60,
         tinfoilEvents: Set<TinfoilEvent> = [],
         userCacheSecret: String = "",
         refreshEndpoint: EHBPVerifiedState.Refresh? = nil
@@ -99,6 +105,7 @@ public final class Client: OpenAICompatibleClient, Sendable {
             streamingFactory: EHBPURLSessionFactory(baseURL: baseURL, verifiedState: verifiedState, userCacheSecret: userCacheSecret),
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
+            timeoutInterval: timeoutInterval,
             tinfoilEvents: tinfoilEvents
         ), close: { await verifiedState.close() })
     }

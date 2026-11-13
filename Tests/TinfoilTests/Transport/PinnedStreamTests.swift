@@ -118,6 +118,20 @@ final class StreamingSessionCancellationTests: XCTestCase {
 final class StreamingSessionReleaseTests: XCTestCase {
     private final class Sentinel: Sendable {}
 
+    func testATaskThatNeverStartsDoesNotKeepItsSessionAlive() {
+        weak var released: Sentinel?
+        do {
+            let sentinel = Sentinel()
+            released = sentinel
+            let session = StreamingSession(delegate: nil) { _ in
+                _ = sentinel
+                throw TinfoilError.network("not reached")
+            }
+            _ = session.dataTask(with: URLRequest(url: URL(string: "https://enclave.example/v1/x")!))
+        }
+        XCTAssertNil(released, "An unstarted task and its session are released together.")
+    }
+
     func testACompletedTaskIsReleased() async throws {
         weak var released: Sentinel?
         do {

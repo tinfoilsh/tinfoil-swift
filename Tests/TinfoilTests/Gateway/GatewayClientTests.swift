@@ -82,6 +82,9 @@ final class GatewayClientTests: XCTestCase {
         XCTAssertEqual(models, [])
         let openAI = try GatewayOpenAIClient(httpClient: client, apiKey: "test-key")
         XCTAssertEqual(openAI.openAI.configuration.host, "inference-gateway.tinfoil.sh")
+        XCTAssertEqual(openAI.openAI.configuration.timeoutInterval, 60, "The default idle timeout")
+        let patient = try GatewayOpenAIClient(httpClient: client, apiKey: "test-key", timeoutInterval: 600)
+        XCTAssertEqual(patient.openAI.configuration.timeoutInterval, 600)
         XCTAssertEqual(openAI.openAI.configuration.basePath, "/v1")
     }
 

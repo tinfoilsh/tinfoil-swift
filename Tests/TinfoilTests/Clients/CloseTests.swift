@@ -84,6 +84,16 @@ final class CloseTests: XCTestCase {
         }
     }
 
+    func testClosingAnOpenAIClientClosesItsHTTPClient() async throws {
+        let httpClient = try await EnclaveHTTPClient(verifying: connection(approving(), transportMode: .tls))
+        let client = try EnclaveOpenAIClient(httpClient: httpClient, apiKey: "test-key")
+
+        await client.close()
+
+        await assertClosed { try await httpClient.ensureVerified() }
+        await assertClosed { try await client.chats(query: self.query) }
+    }
+
     /// A verification in progress when the client closes ends in an error,
     /// whether its fetch sees the cancellation or its result arrives after
     /// the close, and is never kept.

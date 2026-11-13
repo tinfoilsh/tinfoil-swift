@@ -34,7 +34,7 @@ public final class Verifier: Sendable {
     ///     endorsements. Set at least one component.
     ///   - configAuthorizer: Decides which configs are authorized, replacing
     ///     their endorsements. A client with one needs an explicit enclave and
-    ///     an empty repo.
+    ///     a nil repo.
     public init(
         pinnedRegisters: Verification.Measurement? = nil,
         freshnessMaxAge: TimeInterval? = nil,
@@ -247,14 +247,21 @@ public struct EmbeddedReferences: Sendable, Equatable {
 /// pins. `name` optionally gives either an `/org/project/revision` identity,
 /// which a client's repo is then checked against.
 public enum EmbeddedConfig: Sendable, Equatable {
+    /// The config itself, and optionally its `/org/project/revision` name,
+    /// which a client's repo is then checked against
     case bytes(Data, name: String = "")
+    /// The config by its SHA-256 (lowercase hex) and the runtime release that
+    /// it runs, and optionally its name
     case reference(digest: String, runtime: RuntimeReference, name: String = "")
 }
 
 /// A runtime release: its repository, tag and digest
 public struct RuntimeReference: Sendable, Equatable {
+    /// The `owner/name` repository the runtime is released from
     public let repo: String
+    /// The release tag
     public let tag: String
+    /// SHA-256 of the runtime artifact, lowercase hex
     public let digest: String
 
     public init(repo: String, tag: String, digest: String) {

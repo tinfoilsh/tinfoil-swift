@@ -1,12 +1,14 @@
 import Foundation
 
-/// An OpenAI-compatible client whose requests are sealed to a verified
-/// enclave. `Client`, `EnclaveOpenAIClient` and `RouterOpenAIClient` share
-/// its OpenAI methods, which pass through to `openAI`.
-public protocol OpenAICompatibleClient {
-    /// The OpenAI client every request goes through, built so its requests
-    /// are sealed to the verified enclave. Use it for an OpenAI method the
-    /// client doesn't offer itself.
+/// An OpenAI-compatible client whose requests reach only a verified
+/// enclave, protected by the client's transport mode: over TLS pinned to the
+/// attested key, or with bodies sealed by EHBP. `Client`,
+/// `EnclaveOpenAIClient`, `RouterOpenAIClient` and `GatewayOpenAIClient`
+/// share its OpenAI methods, which pass through to `openAI`.
+public protocol OpenAICompatibleClient: Sendable {
+    /// The OpenAI client every request goes through, built so that its
+    /// requests are protected in the same way. Use it for an OpenAI method
+    /// the client doesn't offer itself.
     var openAI: OpenAI { get }
 }
 
@@ -70,7 +72,7 @@ extension OpenAICompatibleClient {
         openAI.audioCreateSpeechStream(query: query)
     }
 
-    /// Streams EHBP-encrypted speech with response validation options, such as
+    /// Streams speech with response validation options, such as
     /// requiring `audio/pcm` before delivering bytes to a PCM player.
     public func audioCreateSpeechStream(query: AudioSpeechQuery, options: AudioSpeechStreamOptions) -> AsyncThrowingStream<AudioSpeechResult, Error> {
         openAI.audioCreateSpeechStream(query: query, options: options)
@@ -186,6 +188,7 @@ extension OpenAI {
         connection: EnclaveConnection,
         parsingOptions: ParsingOptions,
         customHeaders: [String: String],
+        timeoutInterval: TimeInterval,
         tinfoilEvents: Set<TinfoilEvent>
     ) throws -> OpenAI {
         let session: URLSessionProtocol
@@ -205,6 +208,7 @@ extension OpenAI {
             streamingFactory: streamingFactory,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
+            timeoutInterval: timeoutInterval,
             tinfoilEvents: tinfoilEvents
         )
     }
@@ -220,6 +224,7 @@ extension OpenAI {
         streamingFactory: URLSessionFactory,
         parsingOptions: ParsingOptions,
         customHeaders: [String: String],
+        timeoutInterval: TimeInterval,
         tinfoilEvents: Set<TinfoilEvent>
     ) throws -> OpenAI {
         let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
@@ -242,6 +247,7 @@ extension OpenAI {
             port: urlComponents.port ?? defaultPort,
             scheme: urlComponents.scheme,
             basePath: basePath.isEmpty ? "/v1" : basePath,
+            timeoutInterval: timeoutInterval,
             customHeaders: mergedHeaders,
             parsingOptions: parsingOptions
         )

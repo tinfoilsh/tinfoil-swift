@@ -119,6 +119,7 @@ final class VerificationCheckTests: XCTestCase {
                 streamingFactory: EHBPURLSessionFactory(baseURL: baseURL, verifiedState: EHBPVerifiedState(endpoint: EHBPVerifiedEndpoint(enclaveURL: "https://enclave.example", publicKey: Data(repeating: 1, count: 32))), userCacheSecret: ""),
                 parsingOptions: .relaxed,
                 customHeaders: [:],
+                timeoutInterval: 60,
                 tinfoilEvents: []
             )
             XCTAssertEqual(openAI.configuration.host, "proxy.example", baseURL)
