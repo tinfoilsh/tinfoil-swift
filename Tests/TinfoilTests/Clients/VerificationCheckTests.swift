@@ -159,7 +159,7 @@ final class VerificationCheckTests: XCTestCase {
         XCTAssertTrue(server.requestStore.requests.isEmpty, "Nothing is sent to a rejected enclave.")
     }
 
-    func testOnEnclaveVerifiedRunsBeforeTheResultIsReported() async throws {
+    func testTheVerificationCheckRunsBeforeTheResultIsReported() async throws {
         let events = Recorder<String>()
 
         _ = try await EnclaveOpenAIClient(

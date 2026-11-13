@@ -220,7 +220,7 @@ final class AttestorTests: XCTestCase {
         XCTAssertFalse(network.urls.contains { $0.host == TinfoilConstants.fallbackEnclave }, "A cancelled discovery does not fall back.")
     }
 
-    func testOnEnclaveVerifiedSeesEachVerifiedEnclaveOnce() async throws {
+    func testTheVerificationCheckSeesEachVerifiedEnclaveOnce() async throws {
         let verified = Recorder<String>()
         let network = FakeNetwork { url, previous in
             FakeNetwork.document(previous == 0 ? "reject" : "ok", for: url)
