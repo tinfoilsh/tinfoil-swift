@@ -85,40 +85,6 @@ final class GoAttestationVerifierTests: XCTestCase {
         // the collateral format), so it cannot be exercised with "{}".
     }
 
-    func testPolicyOptionsJSON() throws {
-        XCTAssertEqual(try VerificationPolicy().optionsJSON(), "", "Defaults send no options.")
-        XCTAssertEqual(
-            try VerificationPolicy(freshnessMaxAge: 3600).optionsJSON(),
-            #"{"freshness_max_age_ns":3600000000000}"#
-        )
-        let register = String(repeating: "ab", count: 48)
-        let pinned = VerificationPolicy(
-            pinnedRegisters: .init(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: ["", "", "", "", register])
-        )
-        XCTAssertNoThrow(try GoAttestationVerifier(policy: pinned), "Go accepts the pins the policy encodes.")
-        XCTAssertNoThrow(try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: 3600)))
-        XCTAssertEqual(
-            try VerificationPolicy(freshnessMaxAge: 1e-9).optionsJSON(),
-            #"{"freshness_max_age_ns":1}"#,
-            "One nanosecond is the shortest age accepted."
-        )
-    }
-
-    func testAgesThatAreNotPositiveOrUnrepresentableAreRefused() {
-        // Zero, and ±1e-10 (a tenth of a nanosecond), round to zero
-        // nanoseconds, which would otherwise select the default rather than fail.
-        for age in [0, -1, 1e-10, -1e-10, TimeInterval.nan, .infinity, -.infinity, 1e300] {
-            assertCategory(isConfiguration) { try VerificationPolicy(freshnessMaxAge: age).optionsJSON() }
-            assertCategory(isConfiguration) { try GoAttestationVerifier(policy: VerificationPolicy(freshnessMaxAge: age)) }
-        }
-    }
-
-    func testGoRejectsAnInvalidPolicy() {
-        assertCategory(isConfiguration) {
-            try GoAttestationVerifier(policy: VerificationPolicy(pinnedRegisters: .init(type: "bogus", registers: ["aa"])))
-        }
-    }
-
     /// Attests the production router end to end: Swift fetches, Go verifies.
     func testLiveAttestation() async throws {
         try requireLiveIntegration()
@@ -130,7 +96,7 @@ final class GoAttestationVerifierTests: XCTestCase {
         )
 
         XCTAssertEqual(verification.configRepo, Self.routerRepo)
-        XCTAssertEqual(verification.hpkePublicKey?.count, 64)
+        XCTAssertEqual(verification.hpkePublicKey.count, 64)
         XCTAssertEqual(verification.tlsPublicKeyFingerprint.count, 64)
         XCTAssertGreaterThan(verification.freshnessExpiresAt, Date())
     }

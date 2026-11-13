@@ -30,8 +30,13 @@ public final class EnclaveHTTPClient: Sendable {
     ///
     /// - Parameters:
     ///   - enclave: Host of the enclave, such as "inference.tinfoil.sh"
-    ///   - repo: The trusted owner/name[@tag][@sha256:digest] the enclave's
-    ///     code must come from
+    ///   - repo: The trusted owner/name[@tag][@sha256:digest] that the
+    ///     enclave's config must come from. `nil` accepts any config that the
+    ///     verifier's trust authorizes: with the default verifier, any
+    ///     deployment in Tinfoil's public registry; with `configSigningKeys`,
+    ///     any config those keys approve; with a `configAuthorizer`, which
+    ///     requires `nil`, any config it approves. An empty string is refused, so
+    ///     that a missing value can't widen the trust by accident.
     ///   - transportMode: How requests are protected; pinned TLS by default
     ///   - baseURL: Where requests are sent: a path on the enclave's own
     ///     origin, or a proxy on another origin, which requires `.ehbp`.
@@ -42,25 +47,25 @@ public final class EnclaveHTTPClient: Sendable {
     ///     as for a local development proxy or a sidecar.
     ///   - attestationRelay: Host, with an optional port, that forwards
     ///     attestation requests to the enclave
-    ///   - policy: Checks beyond the defaults
+    ///   - verifier: The trust policy; nil selects the defaults
     ///   - userCacheSecret: Scopes the prompt cache of the client's requests.
     ///     Only Tinfoil's router reads it, so it is sent only when set. A
     ///     non-empty `user_cache_secret` string in a request's JSON body
     ///     overrides it. Use an opaque random value, not a raw user ID or API
     ///     key.
-    ///   - onEnclaveVerified: Called each time the enclave's evidence
+    ///   - verificationCheck: Called each time the enclave's evidence
     ///     verifies, before its keys are used; throw to reject it.
     ///   - onVerificationResult: Called with each verification's final result.
     ///     It only observes.
     public convenience init(
         enclave: String,
-        repo: String,
+        repo: String?,
         transportMode: TransportMode = .tls,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
-        policy: VerificationPolicy = VerificationPolicy(),
+        verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
-        onEnclaveVerified: EnclaveVerifiedCallback? = nil,
+        verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) async throws {
         try await self.init(verifying: Self.connection(
@@ -70,7 +75,7 @@ public final class EnclaveHTTPClient: Sendable {
             baseURL: baseURL,
             attestationRelay: attestationRelay,
             userCacheSecret: userCacheSecret,
-            attestor: Attestor(verifier: try GoAttestationVerifier(policy: policy), onEnclaveVerified: onEnclaveVerified),
+            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck),
             onVerificationResult: onVerificationResult
         ))
     }
@@ -80,7 +85,7 @@ public final class EnclaveHTTPClient: Sendable {
     /// stays unset.
     static func connection(
         enclave: String,
-        repo: String,
+        repo: String?,
         transportMode: TransportMode,
         baseURL: URL?,
         attestationRelay: String?,
@@ -88,7 +93,16 @@ public final class EnclaveHTTPClient: Sendable {
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
-        try EnclaveConnection(
+        // The verifier reads "" as "any config that its trust authorizes";
+        // only nil asks for that here.
+        if repo?.isEmpty == true {
+            throw TinfoilError.configuration(
+                "repo must not be empty; pass nil to accept any config that the verifier's trust authorizes"
+            )
+        }
+        let repo = repo ?? ""
+        try attestor.checkRepoVerifiability(repo)
+        return try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: enclave,
                 repo: repo,
@@ -108,6 +122,14 @@ public final class EnclaveHTTPClient: Sendable {
         self.connection = connection
     }
 
+    /// Closes the client: later requests and verifications fail with
+    /// `TinfoilError.configurationError`, from this client and from any
+    /// OpenAI client built over it, and a verification in progress is
+    /// cancelled. Requests already sent finish. Closing again does nothing.
+    public func close() async {
+        await connection.close()
+    }
+
     /// How the client protects its requests
     public var transportMode: TransportMode { connection.transportMode }
 
@@ -121,8 +143,9 @@ public final class EnclaveHTTPClient: Sendable {
     public var enclave: String { connection.enclave }
 
     /// The repository the enclave is verified against, with any tag or
-    /// digest pins
-    public var repo: String { connection.repo }
+    /// digest pins, or nil when any config that the verifier's trust
+    /// authorizes is accepted
+    public var repo: String? { connection.repo.isEmpty ? nil : connection.repo }
 
     /// The last successful verification, without checking it. It may have
     /// expired or been rejected; use `ensureVerified()` for one that is valid.

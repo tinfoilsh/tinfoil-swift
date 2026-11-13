@@ -17,7 +17,7 @@ struct Attestor: Sendable {
     private let retryDelay: TimeInterval
     private let discoveryTimeout: TimeInterval
     private let now: @Sendable () -> ContinuousClock.Instant
-    private let onEnclaveVerified: EnclaveVerifiedCallback?
+    private let verificationCheck: VerificationCheck?
 
     /// - Parameters:
     ///   - retryDelay: Wait before the one retry of a failed fetch or
@@ -26,7 +26,7 @@ struct Attestor: Sendable {
     ///     routers may take together before the fallback router is used
     ///   - now: The monotonic clock the discovery deadline is measured on, so
     ///     a change to the wall clock cannot move it.
-    ///   - onEnclaveVerified: The caller's check on each enclave whose evidence
+    ///   - verificationCheck: The caller's check on each enclave whose evidence
     ///     verifies.
     init(
         verifier: any AttestationVerifier,
@@ -34,14 +34,26 @@ struct Attestor: Sendable {
         retryDelay: TimeInterval = 1,
         discoveryTimeout: TimeInterval = 30,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
-        onEnclaveVerified: EnclaveVerifiedCallback? = nil
+        verificationCheck: VerificationCheck? = nil
     ) {
         self.verifier = verifier
         self.fetch = fetch
         self.retryDelay = retryDelay
         self.discoveryTimeout = discoveryTimeout
         self.now = now
-        self.onEnclaveVerified = onEnclaveVerified
+        self.verificationCheck = verificationCheck
+    }
+
+    /// Whether the verifier takes the config from the caller rather than from
+    /// a repo pin, which rules out discovering a router
+    var callerAuthorizesConfig: Bool {
+        verifier.callerAuthorizesConfig
+    }
+
+    /// Throws the configuration error that every verification against repo
+    /// would end in, without any I/O.
+    func checkRepoVerifiability(_ repo: String) throws {
+        try verifier.checkRepoVerifiability(repo)
     }
 
     /// Verifies host against repo, fetching through relay when it is not nil.
@@ -112,13 +124,13 @@ struct Attestor: Sendable {
     /// A rejection is a decision about this evidence, so callers check it
     /// outside any retry; during discovery the next router is tried instead.
     private func accepted(_ verification: Verification, host: String) throws -> Verification {
-        guard let onEnclaveVerified else {
+        guard let verificationCheck else {
             return verification
         }
         do {
-            try onEnclaveVerified(verification)
+            try verificationCheck(verification)
         } catch {
-            throw TinfoilError.attestation("onEnclaveVerified rejected \(host): \(error)")
+            throw TinfoilError.attestation("verification check rejected \(host): \(error)")
         }
         return verification
     }

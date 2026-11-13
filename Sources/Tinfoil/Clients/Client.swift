@@ -6,7 +6,8 @@ import EHBP
 public let version = TinfoilConstants.sdkVersion
 
 /// An OpenAI-compatible client for inference on Tinfoil's default route.
-/// Every request body is sealed to a verified enclave with EHBP.
+/// Every request goes to a verified enclave over a connection pinned to the
+/// enclave's attested TLS key.
 ///
 /// It takes only OpenAI-level options and exposes nothing about the route,
 /// so the route can change without breaking callers. To choose the enclave,
@@ -14,20 +15,33 @@ public let version = TinfoilConstants.sdkVersion
 /// observe verifications, use `EnclaveOpenAIClient` or `RouterOpenAIClient`.
 public final class Client: OpenAICompatibleClient, Sendable {
     public let openAI: OpenAI
+    /// Closes whatever the route sends through
+    private let closeRoute: @Sendable () async -> Void
 
-    private init(openAI: OpenAI) {
+    private init(openAI: OpenAI, close: @escaping @Sendable () async -> Void) {
         self.openAI = openAI
+        self.closeRoute = close
+    }
+
+    /// Closes the client: later requests fail with
+    /// `TinfoilError.configurationError`, and a verification in progress is
+    /// cancelled. Requests already sent finish. Closing again does nothing.
+    public func close() async {
+        await closeRoute()
     }
 
     /// Creates a client on Tinfoil's default route, verified before it
     /// returns. The API key is checked before any network I/O.
     /// - Parameters:
-    ///   - apiKey: The API key; when nil, `TINFOIL_API_KEY` is read
+    ///   - apiKey: The API key; required unless `apiKeyProvider` is given
     ///   - apiKeyProvider: Supplies the API key for each request, as for a
     ///     rotating token
     ///   - parsingOptions: Parsing options for handling different providers
     ///   - customHeaders: Headers to send on every request, merged over those
     ///     `tinfoilEvents` adds; caller values win
+    ///   - timeoutInterval: How long a request may wait for the next bytes
+    ///     of its response before it fails, in seconds; 60 by default. Raise
+    ///     it for long completions that send nothing until they finish.
     ///   - tinfoilEvents: Tinfoil progress events to opt into. Each adds a
     ///     value to the `X-Tinfoil-Events` header, so the router emits
     ///     `<tinfoil-event>...</tinfoil-event>` markers inline with the
@@ -41,6 +55,7 @@ public final class Client: OpenAICompatibleClient, Sendable {
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
+        timeoutInterval: TimeInterval = 60,
         tinfoilEvents: Set<TinfoilEvent> = []
     ) async throws {
         // Today the default route is one of Tinfoil's routers.
@@ -49,9 +64,11 @@ public final class Client: OpenAICompatibleClient, Sendable {
             apiKeyProvider: apiKeyProvider,
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
+            timeoutInterval: timeoutInterval,
             tinfoilEvents: tinfoilEvents
         )
-        self.init(openAI: route.openAI)
+        let httpClient = route.httpClient
+        self.init(openAI: route.openAI, close: { await httpClient.close() })
     }
 
     /// Internal initializer that seals to a fixed enclave key, for tests.
@@ -67,6 +84,7 @@ public final class Client: OpenAICompatibleClient, Sendable {
         expiresAt: Date = .distantFuture,
         parsingOptions: ParsingOptions = .relaxed,
         customHeaders: [String: String] = [:],
+        timeoutInterval: TimeInterval = 60,
         tinfoilEvents: Set<TinfoilEvent> = [],
         userCacheSecret: String = "",
         refreshEndpoint: EHBPVerifiedState.Refresh? = nil
@@ -87,7 +105,8 @@ public final class Client: OpenAICompatibleClient, Sendable {
             streamingFactory: EHBPURLSessionFactory(baseURL: baseURL, verifiedState: verifiedState, userCacheSecret: userCacheSecret),
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
+            timeoutInterval: timeoutInterval,
             tinfoilEvents: tinfoilEvents
-        ))
+        ), close: { await verifiedState.close() })
     }
 }

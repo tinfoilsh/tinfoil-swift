@@ -57,15 +57,15 @@ final class VerificationDecodingTests: XCTestCase {
         XCTAssertEqual(verification.hpkePublicKey, "cafebabe")
         XCTAssertEqual(verification.cryptoMaterial.map(\.id), ["tls", "hpke"])
         XCTAssertEqual(verification.freshnessExpiresAt, Date(timeIntervalSince1970: 1_791_028_800.5))
-        XCTAssertEqual(verification.verifiedAt, Date(timeIntervalSince1970: 1_790_424_000))
+        XCTAssertEqual(verification.metadata.verifiedAt, Date(timeIntervalSince1970: 1_790_424_000))
         XCTAssertEqual(
-            verification.verifier,
+            verification.metadata.verifier,
             SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion),
             "The payload names no verifier; the SDK records itself."
         )
     }
 
-    func testOmittedOptionalFieldsDecodeAsNil() throws {
+    func testOmittedFieldsDecodeAsEmptyOrNil() throws {
         let verification = try Verification(
             payload: payload([
                 "code_tag": nil,
@@ -74,10 +74,70 @@ final class VerificationDecodingTests: XCTestCase {
                 "hpke_public_key": nil,
             ])
         )
-        XCTAssertNil(verification.codeTag)
+        XCTAssertEqual(verification.codeTag, "")
         XCTAssertNil(verification.codeMeasurement)
         XCTAssertNil(verification.enclaveMeasurement)
-        XCTAssertNil(verification.hpkePublicKey, "An enclave that endorses only TLS has no HPKE key.")
+        XCTAssertEqual(verification.hpkePublicKey, "", "An enclave that endorses only TLS has no HPKE key.")
+        XCTAssertNil(verification.config, "A code-release verification has no config.")
+        XCTAssertNil(verification.runtime)
+        XCTAssertNil(verification.platform)
+    }
+
+    func testDecodesConfigFacts() throws {
+        let verification = try Verification(
+            payload: payload([
+                "config": [
+                    "source": "endorsement", "name": "/org/project/v1", "digest": "c0",
+                    "reference": "sha256:c0", "signing_key_hint": "hint",
+                    "approval_time": "2026-09-20T08:00:00Z", "registry_id": "registry",
+                    "signature_time": "2026-09-20T08:01:00.5Z",
+                ],
+                "runtime": [
+                    "source": "endorsement", "repo": "tinfoilsh/cvmimage", "tag": "v0.15.0",
+                    "digest": "r0", "name": "runtime", "commit": "abc",
+                    "approval_time": "2026-09-20T08:00:00Z",
+                ],
+                "platform": ["source": "embedded", "digest": "p0"],
+            ])
+        )
+        let approved = Date(timeIntervalSince1970: 1_789_891_200)
+        XCTAssertEqual(verification.config, ConfigVerification(
+            source: .endorsement, name: "/org/project/v1", digest: "c0", reference: "sha256:c0",
+            signingKeyHint: "hint", approvalTime: approved, registryID: "registry",
+            signatureTime: approved.addingTimeInterval(60.5)
+        ))
+        XCTAssertEqual(verification.runtime, ArtifactVerification(
+            source: .endorsement, repo: "tinfoilsh/cvmimage", tag: "v0.15.0", digest: "r0",
+            name: "runtime", commit: "abc", approvalTime: approved
+        ))
+        XCTAssertEqual(
+            verification.platform,
+            ArtifactVerification(source: .embedded, repo: "", tag: "", digest: "p0", name: "", commit: "", approvalTime: nil),
+            "Absent facts are empty strings and nil times."
+        )
+    }
+
+    func testAPolicyApprovedConfigHasOnlyItsDigest() throws {
+        let verification = try Verification(payload: payload(["config": ["source": "policy", "digest": "c0"]]))
+        XCTAssertEqual(
+            verification.config,
+            ConfigVerification(
+                source: .policy, name: "", digest: "c0", reference: "",
+                signingKeyHint: "", approvalTime: nil, registryID: "", signatureTime: nil
+            ),
+            "No endorsement-only fact is reported for a policy approval."
+        )
+    }
+
+    func testRejectsAConfigFactWithAnInvalidTime() throws {
+        assertAttestationError(
+            try Verification(payload: payload(["config": ["source": "endorsement", "digest": "c0", "approval_time": "yesterday"]])),
+            containing: "config.approval_time"
+        )
+        assertAttestationError(
+            try Verification(payload: payload(["runtime": ["source": "endorsement", "digest": "r0", "approval_time": "yesterday"]])),
+            containing: "runtime.approval_time"
+        )
     }
 
     func testIgnoresFieldsTheSDKRecordsItself() throws {
@@ -86,7 +146,7 @@ final class VerificationDecodingTests: XCTestCase {
                 "verifier": ["name": "tinfoil-go", "version": "devel"],
             ])
         )
-        XCTAssertEqual(verification.verifier.name, TinfoilConstants.sdkName)
+        XCTAssertEqual(verification.metadata.verifier.name, TinfoilConstants.sdkName)
     }
 
     func testDatesWithAndWithoutFractionalSeconds() throws {

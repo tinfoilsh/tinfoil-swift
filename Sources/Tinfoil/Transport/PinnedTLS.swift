@@ -114,16 +114,7 @@ enum PinnedTLS {
         expecting fingerprint: String,
         configuration: URLSessionConfiguration = .ephemeral
     ) async throws -> (Data, HTTPURLResponse) {
-        // "https:host/path" has a scheme but no host, yet URLSession would
-        // still connect to host, so a host is required as well as HTTPS.
-        guard let url = request.url, url.scheme?.lowercased() == "https", url.host != nil else {
-            throw TinfoilError.configuration("pinned requests need an HTTPS URL with a host, not \(request.url?.absoluteString ?? "no URL")")
-        }
-        let origin = URLHelpers.origin(from: url.absoluteString)
-        guard !origin.isEmpty else {
-            throw TinfoilError.configuration("cannot pin a request to \(url.absoluteString)")
-        }
-        let pin = PinningDelegate(fingerprint: fingerprint, origin: origin)
+        let pin = PinningDelegate(fingerprint: fingerprint, origin: try origin(of: request))
         let session = URLSession(configuration: configuration, delegate: pin, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
 
@@ -144,6 +135,153 @@ enum PinnedTLS {
                 throw CancellationError()
             }
             throw error
+        }
+    }
+
+    /// The origin that a pinned request and its redirects must stay on. The
+    /// URL must be HTTPS with a host: "https:host/path" has a scheme but no
+    /// host, yet URLSession would still connect to host.
+    static func origin(of request: URLRequest) throws -> String {
+        guard let url = request.url, url.scheme?.lowercased() == "https", url.host != nil else {
+            throw TinfoilError.configuration("pinned requests need an HTTPS URL with a host, not \(request.url?.absoluteString ?? "no URL")")
+        }
+        let origin = URLHelpers.origin(from: url.absoluteString)
+        guard !origin.isEmpty else {
+            throw TinfoilError.configuration("cannot pin a request to \(url.absoluteString)")
+        }
+        return origin
+    }
+}
+
+extension PinnedTLS {
+    typealias Stream = @Sendable (_ request: URLRequest, _ fingerprint: String) async throws -> (AsyncThrowingStream<Data, Error>, HTTPURLResponse)
+
+    /// Sends a request as `send` does, with the same pin on every connection,
+    /// but returns once the response's headers arrive, with its body streaming
+    /// chunk by chunk. Ending the stream early, or cancelling the task that
+    /// awaits the headers, cancels the request.
+    static func stream(
+        _ request: URLRequest,
+        expecting fingerprint: String,
+        configuration: URLSessionConfiguration = .ephemeral
+    ) async throws -> (AsyncThrowingStream<Data, Error>, HTTPURLResponse) {
+        let receiver = StreamingPinDelegate(pin: PinningDelegate(fingerprint: fingerprint, origin: try origin(of: request)))
+        let session = URLSession(configuration: configuration, delegate: receiver, delegateQueue: nil)
+        let task: URLSessionDataTask = session.dataTask(with: request)
+        // The session holds its delegate until it is invalidated, which
+        // happens once the task completes.
+        defer { session.finishTasksAndInvalidate() }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                receiver.start(task, headers: continuation)
+            }
+        } onCancel: {
+            task.cancel()
+        }
+    }
+}
+
+/// Feeds one pinned request's response to its caller: the headers once, then
+/// the body as it arrives. It leaves the TLS checks and redirects to its
+/// `PinningDelegate`.
+private final class StreamingPinDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    typealias Headers = CheckedContinuation<(AsyncThrowingStream<Data, Error>, HTTPURLResponse), Error>
+
+    private let pin: PinningDelegate
+    private let lock = NSLock()
+    private var headers: Headers?
+    private var body: AsyncThrowingStream<Data, Error>.Continuation?
+
+    init(pin: PinningDelegate) {
+        self.pin = pin
+    }
+
+    func start(_ task: URLSessionDataTask, headers: Headers) {
+        lock.lock()
+        self.headers = headers
+        lock.unlock()
+        task.resume()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        pin.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        pin.urlSession(
+            session,
+            task: task,
+            willPerformHTTPRedirection: response,
+            newRequest: request,
+            completionHandler: completionHandler
+        )
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        // A refused redirect arrives as the redirect response itself; it is
+        // reported as the pin's failure, not as a response, and so is
+        // anything that isn't HTTP.
+        guard pin.failure == nil, let response = response as? HTTPURLResponse else {
+            completionHandler(.cancel)
+            return
+        }
+        let (stream, body) = AsyncThrowingStream<Data, Error>.makeStream()
+        body.onTermination = { termination in
+            if case .cancelled = termination {
+                dataTask.cancel()
+            }
+        }
+        lock.lock()
+        let headers = self.headers
+        self.headers = nil
+        self.body = body
+        lock.unlock()
+        headers?.resume(returning: (stream, response))
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        let body = self.body
+        lock.unlock()
+        body?.yield(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let headers = self.headers
+        let body = self.body
+        self.headers = nil
+        self.body = nil
+        lock.unlock()
+        // A refused connection or redirect is reported as the pin's failure
+        // rather than as the cancellation that it caused, and a cancellation
+        // as CancellationError, as send reports it.
+        var failure = pin.failure ?? error
+        if pin.failure == nil, (error as? URLError)?.code == .cancelled {
+            failure = CancellationError()
+        }
+        if let headers {
+            headers.resume(throwing: failure ?? URLError(.badServerResponse))
+        } else if let failure {
+            body?.finish(throwing: failure)
+        } else {
+            body?.finish()
         }
     }
 }

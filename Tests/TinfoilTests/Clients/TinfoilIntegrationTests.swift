@@ -12,7 +12,7 @@ final class TinfoilIntegrationTests: XCTestCase {
 
         _ = try await RouterOpenAIClient(
             httpClient: RouterHTTPClient(
-                userCacheSecret: "pinned so the test never touches the persisted secret",
+                userCacheSecret: "test-secret",
                 onVerificationResult: { result in captured.value = result }
             ),
             apiKey: "test-key"
@@ -27,17 +27,22 @@ final class TinfoilIntegrationTests: XCTestCase {
         XCTAssertEqual(Tinfoil.version, TinfoilConstants.sdkVersion)
     }
 
-    func testMissingAPIKeyError() async throws {
-        let originalValue = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
-        guard originalValue == nil else {
-            throw XCTSkip("Skipping test: TINFOIL_API_KEY is set in environment")
+    /// The key comes only from the caller: the environment is not read.
+    func testMissingAPIKeyIgnoresTheEnvironment() async throws {
+        let original = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
+        setenv("TINFOIL_API_KEY", "from-the-environment", 1)
+        defer {
+            if let original {
+                setenv("TINFOIL_API_KEY", original, 1)
+            } else {
+                unsetenv("TINFOIL_API_KEY")
+            }
         }
-
         do {
             _ = try await Client(apiKey: nil)
             XCTFail("Should have thrown a configuration error")
         } catch TinfoilError.configurationError(let failure) {
-            XCTAssertTrue(failure.message.contains("TINFOIL_API_KEY"), failure.message)
+            XCTAssertTrue(failure.message.contains("pass apiKey or apiKeyProvider"), failure.message)
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -48,7 +53,7 @@ final class TinfoilIntegrationTests: XCTestCase {
             _ = try await RouterOpenAIClient(
                 httpClient: RouterHTTPClient(
                     attestationRelay: "127.0.0.1:9",
-                    userCacheSecret: "pinned so the test never touches the persisted secret"
+                    userCacheSecret: "test-secret"
                 ),
                 apiKey: "test-key"
             )

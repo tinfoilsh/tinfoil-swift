@@ -21,7 +21,7 @@ public final class RouterHTTPClient: Sendable {
     /// The configuration is checked before any network I/O.
     ///
     /// - Parameters:
-    ///   - transportMode: How requests are protected; EHBP by default
+    ///   - transportMode: How requests are protected; pinned TLS by default
     ///   - baseURL: A proxy requests are sent to, which requires `.ehbp`
     ///     because the router's origin isn't known before discovery.
     ///     Requests carry `X-Tinfoil-Enclave-Url` so it can forward them. It
@@ -30,29 +30,29 @@ public final class RouterHTTPClient: Sendable {
     ///     address, as for a local development proxy or a sidecar.
     ///   - attestationRelay: Host, with an optional port, that forwards
     ///     attestation requests to the fallback router
-    ///   - policy: Checks beyond the defaults
+    ///   - verifier: The trust policy; nil selects the defaults
     ///   - userCacheSecret: Scopes the router's prompt cache for the client's
-    ///     requests. When unset, it is resolved from
-    ///     `TINFOIL_USER_CACHE_SECRET` or a generated value persisted at
-    ///     `~/.tinfoil/user_cache_secret`. A non-empty `user_cache_secret`
-    ///     string in a request's JSON body overrides it. Use an opaque random
-    ///     value, not a raw user ID or API key.
-    ///   - onEnclaveVerified: Called each time a router's evidence verifies,
+    ///     requests. When unset, a random secret generated once per process
+    ///     and shared by its clients is used, so cache hits aren't shared
+    ///     across processes; pass one to keep it stable. A non-empty
+    ///     `user_cache_secret` string in a request's JSON body overrides it.
+    ///     Use an opaque random value, not a raw user ID or API key.
+    ///   - verificationCheck: Called each time a router's evidence verifies,
     ///     before its keys are used; throw to reject it, and discovery moves
     ///     to the next router.
     ///   - onVerificationResult: Called with each verification's final result.
     ///     It only observes.
     public convenience init(
-        transportMode: TransportMode = .ehbp,
+        transportMode: TransportMode = .tls,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
-        policy: VerificationPolicy = VerificationPolicy(),
+        verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
-        onEnclaveVerified: EnclaveVerifiedCallback? = nil,
+        verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) async throws {
         try await self.init(verifying: EnclaveConnection.router(
-            attestor: Attestor(verifier: try GoAttestationVerifier(policy: policy), onEnclaveVerified: onEnclaveVerified),
+            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck),
             transportMode: transportMode,
             baseURL: baseURL,
             attestationRelay: attestationRelay,
@@ -66,6 +66,14 @@ public final class RouterHTTPClient: Sendable {
     init(verifying connection: EnclaveConnection) async throws {
         try await connection.ensureUsable()
         self.connection = connection
+    }
+
+    /// Closes the client: later requests and verifications fail with
+    /// `TinfoilError.configurationError`, from this client and from any
+    /// OpenAI client built over it, and a verification in progress is
+    /// cancelled. Requests already sent finish. Closing again does nothing.
+    public func close() async {
+        await connection.close()
     }
 
     /// How the client protects its requests

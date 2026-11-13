@@ -10,9 +10,25 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
     private var _repos: [String] = []
     /// The clock a verification's hour of freshness is counted from
     private let now: @Sendable () -> Date
+    let callerAuthorizesConfig: Bool
+    /// A repo that checkRepoVerifiability refuses, as a verifier with a config
+    /// authorizer refuses any non-empty repo
+    private let refusedRepo: String?
 
-    init(now: @escaping @Sendable () -> Date = { Date() }) {
+    init(
+        now: @escaping @Sendable () -> Date = { Date() },
+        callerAuthorizesConfig: Bool = false,
+        refusedRepo: String? = nil
+    ) {
         self.now = now
+        self.callerAuthorizesConfig = callerAuthorizesConfig
+        self.refusedRepo = refusedRepo
+    }
+
+    func checkRepoVerifiability(_ repo: String) throws {
+        if repo == refusedRepo {
+            throw TinfoilError.configuration("repo \(repo) cannot be verified")
+        }
     }
 
     var repos: [String] {
@@ -48,7 +64,7 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         case "ok":
             return .stub(repo: repo, expiresAt: now().addingTimeInterval(3600))
         case "tls-only":
-            return .stub(repo: repo, expiresAt: now().addingTimeInterval(3600), hpkePublicKey: nil)
+            return .stub(repo: repo, expiresAt: now().addingTimeInterval(3600), hpkePublicKey: "")
         case "config":
             throw TinfoilError.configuration("bad repo")
         default:
@@ -100,22 +116,27 @@ extension Verification {
     static func stub(
         repo: String = TinfoilConstants.defaultGithubRepo,
         expiresAt: Date = Date().addingTimeInterval(3600),
-        hpkePublicKey: String? = stubHPKEKey
+        hpkePublicKey: String = stubHPKEKey
     ) -> Verification {
         Verification(
             configRepo: String(repo.prefix { $0 != "@" }),
             codeDigest: "abc123",
-            codeTag: nil,
+            codeTag: "",
             codeMeasurement: nil,
             enclaveMeasurement: nil,
+            config: nil,
+            runtime: nil,
+            platform: nil,
             tlsPublicKeyFingerprint: "deadbeef",
             hpkePublicKey: hpkePublicKey,
             cryptoMaterial: [
                 .init(id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "deadbeef"),
-            ] + (hpkePublicKey.map { [.init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: $0)] } ?? []),
+            ] + (hpkePublicKey.isEmpty ? [] : [.init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: hpkePublicKey)]),
             freshnessExpiresAt: expiresAt,
-            verifiedAt: Date(),
-            verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion)
+            metadata: VerificationMetadata(
+                verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion),
+                verifiedAt: Date()
+            )
         )
     }
 }
@@ -126,11 +147,11 @@ struct Refusal: Error, CustomStringConvertible {
 }
 
 extension TinfoilError {
-    /// Whether this is the error an `onEnclaveVerified` callback's `Refusal`
+    /// Whether this is the error an `verificationCheck` callback's `Refusal`
     /// becomes, rather than any other attestation failure
     var isRefusal: Bool {
         guard case .attestationError(let failure) = self, failure.layer == nil else { return false }
-        return failure.message.contains("onEnclaveVerified rejected") && failure.message.contains(Refusal().description)
+        return failure.message.contains("verification check rejected") && failure.message.contains(Refusal().description)
     }
 }
 

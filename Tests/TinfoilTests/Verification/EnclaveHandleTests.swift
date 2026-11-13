@@ -113,7 +113,7 @@ final class EnclaveHandleTests: XCTestCase {
                 verifier: FakeVerifier(),
                 fetch: { try network.fetch($0) },
                 retryDelay: 0,
-                onEnclaveVerified: { verification in
+                verificationCheck: { verification in
                     if verified.record(verification.codeDigest) > 1 {
                         throw Refusal()
                     }

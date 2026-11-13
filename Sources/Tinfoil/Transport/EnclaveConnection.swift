@@ -32,20 +32,19 @@ final class EnclaveConnection: Sendable {
     /// The EHBP sessions, sealing to one shared verified key; nil in TLS mode.
     let ehbp: EHBPChannel?
     private let send: PinnedTLS.Send
+    private let stream: PinnedTLS.Stream
 
     /// A connection to the first of Tinfoil's routers that verifies, and
     /// otherwise to the fallback router, which is left unverified for the
     /// caller to verify. With an attestation relay, the relay is asked for the
-    /// fallback router instead. An unset `userCacheSecret` is resolved from the
-    /// environment or the persisted secret, since this is Tinfoil's router.
+    /// fallback router instead. An unset `userCacheSecret` falls back to the
+    /// process's generated secret, since this is Tinfoil's router.
     static func router(
         attestor: Attestor,
         transportMode: TransportMode,
         baseURL: URL?,
         attestationRelay: String?,
         userCacheSecret: String?,
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: URL? = UserCacheSecret.defaultHomeDirectory,
         onVerificationResult: VerificationResultCallback?
     ) async throws -> EnclaveConnection {
         // Checked before discovery, so a misconfiguration costs no network I/O.
@@ -56,6 +55,11 @@ final class EnclaveConnection: Sendable {
                     "a base URL requires TransportMode.ehbp when discovering the router, because the router's origin isn't known before discovery"
                 )
             }
+        }
+        if attestor.callerAuthorizesConfig {
+            throw TinfoilError.configuration(
+                "caller-authorized config requires an explicit enclave"
+            )
         }
         let discovered = attestationRelay == nil ? try await attestor.discoverRouter() : nil
         if let discovered {
@@ -73,11 +77,7 @@ final class EnclaveConnection: Sendable {
             initial: discovered?.verification,
             transportMode: transportMode,
             baseURL: baseURL,
-            userCacheSecret: UserCacheSecret.resolve(
-                explicit: userCacheSecret,
-                environment: environment,
-                homeDirectory: homeDirectory
-            )
+            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret)
         )
     }
 
@@ -90,7 +90,8 @@ final class EnclaveConnection: Sendable {
         transportMode: TransportMode,
         baseURL: URL?,
         userCacheSecret: String,
-        send: @escaping PinnedTLS.Send = { try await PinnedTLS.send($0, expecting: $1) }
+        send: @escaping PinnedTLS.Send = { try await PinnedTLS.send($0, expecting: $1) },
+        stream: @escaping PinnedTLS.Stream = { try await PinnedTLS.stream($0, expecting: $1) }
     ) throws {
         guard let enclaveOrigin = URL(string: "https://\(handle.enclave)/"), enclaveOrigin.host != nil else {
             throw TinfoilError.configuration("cannot form a URL for the enclave \(handle.enclave)")
@@ -108,17 +109,25 @@ final class EnclaveConnection: Sendable {
         self.baseURL = base
         self.userCacheSecret = userCacheSecret
         self.send = send
+        self.stream = stream
         self.ehbp = transportMode == .ehbp
             ? EHBPChannel(origin: origin, enclaveURL: "https://\(handle.enclave)", handle: handle, initial: initial, userCacheSecret: userCacheSecret)
             : nil
     }
 
     /// Refuses a base URL that isn't HTTPS, which would expose request
-    /// headers, or that has no host or carries credentials. Under EHBP, HTTP
-    /// is accepted when the host as written is localhost or a loopback IP
-    /// address, whose traffic never leaves the machine, as for a local
-    /// development proxy or a sidecar.
+    /// headers, or that has no host, carries credentials, or has a query or
+    /// a fragment, even an empty one, since request paths join under it.
+    /// Under EHBP, HTTP is accepted when the host as written is localhost or
+    /// a loopback IP address, whose traffic never leaves the machine, as for
+    /// a local development proxy or a sidecar.
     static func validateBaseURL(_ url: URL, transportMode: TransportMode) throws {
+        // A query or fragment, even an empty one, would not survive joining a
+        // request path under the base URL. The message doesn't echo the URL,
+        // whose query may hold a secret.
+        guard !url.absoluteString.contains(where: { $0 == "?" || $0 == "#" }) else {
+            throw TinfoilError.configuration("invalid base URL: a base URL must not carry a query or a fragment")
+        }
         let scheme = url.scheme?.lowercased()
         guard scheme == "https" || scheme == "http", url.host != nil, url.user == nil, url.password == nil else {
             throw TinfoilError.configuration(
@@ -132,6 +141,16 @@ final class EnclaveConnection: Sendable {
                     : "invalid base URL \(url.absoluteString): TransportMode.tls requires HTTPS"
             )
         }
+    }
+
+    /// Refuses every later request and verification, from the HTTP client
+    /// and any OpenAI client over it, and cancels a verification in progress.
+    /// Requests already sent finish.
+    func close() async {
+        // EHBP stops sealing first, so no request is admitted while the
+        // handle closes.
+        await ehbp?.state.close()
+        await handle.close()
     }
 
     /// The last successful verification, without checking it. It may have
@@ -158,11 +177,13 @@ final class EnclaveConnection: Sendable {
     /// Verifies the enclave, as the public clients do before they return. In
     /// EHBP mode the enclave must also endorse an HPKE key, which every
     /// request is sealed to.
-    func ensureUsable() async throws {
+    @discardableResult
+    func ensureUsable() async throws -> Verification {
         let verified = try await handle.ensureVerified()
         if ehbp != nil {
             _ = try EHBPVerifiedEndpoint(enclaveURL: "https://\(enclave)", verification: verified)
         }
+        return verified
     }
 
     /// Loads a request from the enclave, as `URLSession.data(for:)` does,
@@ -189,10 +210,34 @@ final class EnclaveConnection: Sendable {
             }
             return (data, response)
         }
-        var headers = resolved.allHTTPHeaderFields ?? [:]
-        resolved.httpBody = UserCacheSecret.provision(request: resolved, headers: &headers, clientSecret: userCacheSecret)
-        resolved.allHTTPHeaderFields = headers
-        return try await sendPinned(resolved)
+        return try await pinned(provisioned(resolved)) { request, fingerprint in
+            try await self.send(request, fingerprint)
+        }
+    }
+
+    /// Sends a request as `data(for:)` does in TLS mode, returning once the
+    /// response's headers arrive with its body still streaming. The OpenAI
+    /// client's TLS sessions send through it.
+    func open(_ request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
+        guard ehbp == nil else {
+            throw TinfoilError.configuration("open(_:) sends with pinned TLS; this connection uses EHBP")
+        }
+        var resolved = request
+        resolved.url = try resolve(request.url)
+        let (body, response) = try await pinned(provisioned(resolved)) { request, fingerprint in
+            try await self.stream(request, fingerprint)
+        }
+        return (body, response)
+    }
+
+    /// The request with the client's prompt-cache secret added to its body
+    /// where it applies
+    private func provisioned(_ request: URLRequest) -> URLRequest {
+        var provisioned = request
+        var headers = provisioned.allHTTPHeaderFields ?? [:]
+        provisioned.httpBody = UserCacheSecret.provision(request: provisioned, headers: &headers, clientSecret: userCacheSecret)
+        provisioned.allHTTPHeaderFields = headers
+        return provisioned
     }
 
     /// Loads a URL from the enclave, as `URLSession.data(from:)` does. See
@@ -215,7 +260,13 @@ final class EnclaveConnection: Sendable {
         return try await ehbp.session.recoverableBytes(for: resolved)
     }
 
-    private func sendPinned(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    /// Sends request over connections pinned to the verified TLS key, with
+    /// `transmit`. A key the enclave presents before the request left is
+    /// verified again and the request retried once.
+    private func pinned<Result>(
+        _ request: URLRequest,
+        transmit: (URLRequest, String) async throws -> Result
+    ) async throws -> Result {
         var attempt = 0
         while true {
             let verification = try await handle.ensureVerified()
@@ -223,7 +274,7 @@ final class EnclaveConnection: Sendable {
             // not have its request, credentials included, sent again.
             try Task.checkCancellation()
             do {
-                return try await send(request, verification.tlsPublicKeyFingerprint)
+                return try await transmit(request, verification.tlsPublicKeyFingerprint)
             } catch let rejection as PinnedTLS.Rejection {
                 attempt += 1
                 // Replaying is safe only if the request never left: a rejection
