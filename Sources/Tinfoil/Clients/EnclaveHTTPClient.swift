@@ -109,6 +109,14 @@ public final class EnclaveHTTPClient: Sendable {
         self.connection = connection
     }
 
+    /// Closes the client: later requests and verifications fail with
+    /// `TinfoilError.configurationError`, from this client and from any
+    /// OpenAI client built over it, and a verification in progress is
+    /// cancelled. Requests already sent finish. Closing again does nothing.
+    public func close() async {
+        await connection.close()
+    }
+
     /// How the client protects its requests
     public var transportMode: TransportMode { connection.transportMode }
 

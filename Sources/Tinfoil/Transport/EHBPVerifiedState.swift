@@ -62,6 +62,7 @@ internal actor EHBPVerifiedState {
     private let now: @Sendable () -> Date
     private var nextRefreshID: UInt64 = 0
     private var refreshOperation: RefreshOperation?
+    private var closed = false
 
     init(
         endpoint: EHBPVerifiedEndpoint,
@@ -76,7 +77,21 @@ internal actor EHBPVerifiedState {
     /// The endpoint to seal a new request to. One whose attestation has
     /// expired is refreshed first, through the same single-flight refresh as a
     /// rejected key, so an expired key never seals a request.
+    /// Refuses every later request, including the replay of one whose key
+    /// was rejected, and cancels a refresh in progress.
+    func close() {
+        closed = true
+        refreshOperation?.task.cancel()
+    }
+
+    private func checkOpen() throws {
+        if closed {
+            throw TinfoilError.configuration("the client is closed")
+        }
+    }
+
     func current() async throws -> (endpoint: EHBPVerifiedEndpoint, generation: UInt64) {
+        try checkOpen()
         if now() < endpoint.expiresAt {
             return (endpoint, generation)
         }
@@ -88,6 +103,7 @@ internal actor EHBPVerifiedState {
     }
 
     func refresh(afterRejectedGeneration rejectedGeneration: UInt64) async throws -> EHBPVerifiedEndpoint {
+        try checkOpen()
         if generation != rejectedGeneration {
             return endpoint
         }

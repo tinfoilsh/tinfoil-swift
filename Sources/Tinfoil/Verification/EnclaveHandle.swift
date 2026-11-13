@@ -18,6 +18,7 @@ actor EnclaveHandle {
     /// The verification in progress, shared by every caller that asks while
     /// it runs
     private var inFlight: Task<Verification, Error>?
+    private var closed = false
 
     /// The latest successful verification, or nil before the first. It may
     /// have expired; `ensureVerified()` returns one that has not.
@@ -43,10 +44,24 @@ actor EnclaveHandle {
         self.now = now
     }
 
+    /// Stops verifying: later calls fail, and a verification in progress is
+    /// cancelled.
+    func close() {
+        closed = true
+        inFlight?.cancel()
+    }
+
+    private func checkOpen() throws {
+        if closed {
+            throw TinfoilError.configuration("the client is closed")
+        }
+    }
+
     /// Verifies the enclave against fresh evidence and returns the result.
     /// Calls made while a verification runs share it. Cancelling a call ends
     /// only its own wait; the shared verification still completes.
     func reverify() async throws -> Verification {
+        try checkOpen()
         let task: Task<Verification, Error>
         if let inFlight {
             task = inFlight
@@ -76,6 +91,7 @@ actor EnclaveHandle {
     /// Returns a verification that is valid now, verifying only when there
     /// is none yet or the latest has reached its `freshnessExpiresAt`.
     func ensureVerified() async throws -> Verification {
+        try checkOpen()
         if let current, now() < current.freshnessExpiresAt {
             return current
         }

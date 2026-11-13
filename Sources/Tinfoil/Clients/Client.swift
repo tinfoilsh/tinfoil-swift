@@ -15,9 +15,19 @@ public let version = TinfoilConstants.sdkVersion
 /// observe verifications, use `EnclaveOpenAIClient` or `RouterOpenAIClient`.
 public final class Client: OpenAICompatibleClient, Sendable {
     public let openAI: OpenAI
+    /// Closes whatever the route sends through
+    private let closeRoute: @Sendable () async -> Void
 
-    private init(openAI: OpenAI) {
+    private init(openAI: OpenAI, close: @escaping @Sendable () async -> Void) {
         self.openAI = openAI
+        self.closeRoute = close
+    }
+
+    /// Closes the client: later requests fail with
+    /// `TinfoilError.configurationError`, and a verification in progress is
+    /// cancelled. Requests already sent finish. Closing again does nothing.
+    public func close() async {
+        await closeRoute()
     }
 
     /// Creates a client on Tinfoil's default route, verified before it
@@ -52,7 +62,8 @@ public final class Client: OpenAICompatibleClient, Sendable {
             customHeaders: customHeaders,
             tinfoilEvents: tinfoilEvents
         )
-        self.init(openAI: route.openAI)
+        let httpClient = route.httpClient
+        self.init(openAI: route.openAI, close: { await httpClient.close() })
     }
 
     /// Internal initializer that seals to a fixed enclave key, for tests.
@@ -89,6 +100,6 @@ public final class Client: OpenAICompatibleClient, Sendable {
             parsingOptions: parsingOptions,
             customHeaders: customHeaders,
             tinfoilEvents: tinfoilEvents
-        ))
+        ), close: { await verifiedState.close() })
     }
 }

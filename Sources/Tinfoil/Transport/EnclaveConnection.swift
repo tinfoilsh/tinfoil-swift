@@ -142,6 +142,14 @@ final class EnclaveConnection: Sendable {
         }
     }
 
+    /// Refuses every later request and verification, from the HTTP client
+    /// and any OpenAI client over it, and cancels a verification in progress.
+    /// Requests already sent finish.
+    func close() async {
+        await handle.close()
+        await ehbp?.state.close()
+    }
+
     /// The last successful verification, without checking it. It may have
     /// expired or been rejected; use `ensureVerified()` for one that is valid.
     var current: Verification? {
