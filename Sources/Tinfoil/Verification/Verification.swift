@@ -12,7 +12,7 @@ public typealias VerificationResultCallback = @Sendable (Result<Verification, Ti
 /// the run fails with `TinfoilError.attestationError` and the enclave's key is
 /// never used. It runs synchronously, so keep it fast: requests waiting on a
 /// refresh wait on it too.
-public typealias EnclaveVerifiedCallback = @Sendable (Verification) throws -> Void
+public typealias VerificationCheck = @Sendable (Verification) throws -> Void
 
 /// Identifies the software that performed verification
 public struct SoftwareIdentity: Sendable, Equatable {

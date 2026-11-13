@@ -306,15 +306,12 @@ final class EnclaveHTTPClientTests: XCTestCase {
     }
 
     func testAMissingAPIKeyFailsBeforeAnyNetworkIO() async throws {
-        guard ProcessInfo.processInfo.environment["TINFOIL_API_KEY"] == nil else {
-            throw XCTSkip("TINFOIL_API_KEY is set in the environment")
-        }
         do {
             // An unreachable enclave would fail with a network error.
             _ = try await EnclaveOpenAIClient(enclave: "127.0.0.1:9", repo: "org/repo")
             XCTFail("a client without an API key must not be created")
         } catch TinfoilError.configurationError(let failure) {
-            XCTAssertTrue(failure.message.contains("TINFOIL_API_KEY"), failure.message)
+            XCTAssertTrue(failure.message.contains("pass apiKey or apiKeyProvider"), failure.message)
         }
     }
 

@@ -165,16 +165,16 @@ extension OpenAICompatibleClient {
 
 /// How the SDK's OpenAI-compatible clients build their `OpenAI` client
 extension OpenAI {
-    /// The static API key, required unless a provider can supply one.
+    /// The static API key, required unless a provider can supply one. The
+    /// environment is not read: supplying the key is the application's job.
     /// Attestation itself does not use the key; it only authorizes inference
     /// requests, so a caller using a rotating token (e.g. a short-lived JWT)
     /// is not forced to pass a placeholder key.
     static func apiKey(_ apiKey: String?, provider: (@Sendable () -> String?)?) throws -> String? {
-        let staticApiKey = apiKey ?? ProcessInfo.processInfo.environment["TINFOIL_API_KEY"]
-        guard staticApiKey != nil || provider != nil else {
-            throw TinfoilError.configuration("no API key was given; pass apiKey or apiKeyProvider, or set TINFOIL_API_KEY")
+        guard apiKey != nil || provider != nil else {
+            throw TinfoilError.configuration("no API key was given; pass apiKey or apiKeyProvider")
         }
-        return staticApiKey
+        return apiKey
     }
 
     /// An OpenAI client over a verified connection's EHBP sessions, which

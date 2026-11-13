@@ -14,7 +14,7 @@ final class AttestorTests: XCTestCase {
         hanging: Set<String> = [],
         discoveryTimeout: TimeInterval = 30,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
-        onEnclaveVerified: EnclaveVerifiedCallback? = nil
+        verificationCheck: VerificationCheck? = nil
     ) -> Attestor {
         Attestor(
             verifier: verifier,
@@ -28,7 +28,7 @@ final class AttestorTests: XCTestCase {
             retryDelay: retryDelay,
             discoveryTimeout: discoveryTimeout,
             now: now,
-            onEnclaveVerified: onEnclaveVerified
+            verificationCheck: verificationCheck
         )
     }
 
@@ -226,7 +226,7 @@ final class AttestorTests: XCTestCase {
             FakeNetwork.document(previous == 0 ? "reject" : "ok", for: url)
         }
 
-        _ = try await attestor(FakeVerifier(), network, onEnclaveVerified: { verified.record($0.configRepo) })
+        _ = try await attestor(FakeVerifier(), network, verificationCheck: { verified.record($0.configRepo) })
             .attest(host: "enclave.example", relay: nil, repo: "org/repo")
 
         XCTAssertEqual(verified.values, ["org/repo"], "A failed attempt is never passed to the callback.")
@@ -237,7 +237,7 @@ final class AttestorTests: XCTestCase {
 
         await assertThrows(
             {
-                try await self.attestor(FakeVerifier(), network, onEnclaveVerified: { _ in throw Refusal() })
+                try await self.attestor(FakeVerifier(), network, verificationCheck: { _ in throw Refusal() })
                     .attest(host: "enclave.example", relay: nil, repo: "org/repo")
             },
             { error in
@@ -256,13 +256,13 @@ final class AttestorTests: XCTestCase {
         }
         // Routers are tried in order, so the first verification is router-a's.
         let verified = Recorder<String>()
-        let onEnclaveVerified: EnclaveVerifiedCallback = { verification in
+        let verificationCheck: VerificationCheck = { verification in
             if verified.record(verification.codeDigest) == 1 {
                 throw Refusal()
             }
         }
 
-        let discovered = try await attestor(FakeVerifier(), network, onEnclaveVerified: onEnclaveVerified).discoverRouter()
+        let discovered = try await attestor(FakeVerifier(), network, verificationCheck: verificationCheck).discoverRouter()
 
         XCTAssertEqual(discovered?.host, "router-b.example")
     }

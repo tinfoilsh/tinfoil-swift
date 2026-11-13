@@ -15,7 +15,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     /// The enclave parameters are those of `EnclaveHTTPClient`, which
     /// describes them; requests are always sealed with EHBP.
     /// - Parameters:
-    ///   - apiKey: The API key; when nil, `TINFOIL_API_KEY` is read
+    ///   - apiKey: The API key; required unless `apiKeyProvider` is given
     ///   - apiKeyProvider: Supplies the API key for each request, as for a
     ///     rotating token
     ///   - parsingOptions: Parsing options for handling different providers
@@ -30,7 +30,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         attestationRelay: String? = nil,
         verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
-        onEnclaveVerified: EnclaveVerifiedCallback? = nil,
+        verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil,
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
@@ -47,7 +47,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
             attestationRelay: attestationRelay,
             verifier: verifier,
             userCacheSecret: userCacheSecret,
-            onEnclaveVerified: onEnclaveVerified,
+            verificationCheck: verificationCheck,
             onVerificationResult: onVerificationResult
         )
         try self.init(

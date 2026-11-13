@@ -22,7 +22,7 @@ public final class Client: OpenAICompatibleClient, Sendable {
     /// Creates a client on Tinfoil's default route, verified before it
     /// returns. The API key is checked before any network I/O.
     /// - Parameters:
-    ///   - apiKey: The API key; when nil, `TINFOIL_API_KEY` is read
+    ///   - apiKey: The API key; required unless `apiKeyProvider` is given
     ///   - apiKeyProvider: Supplies the API key for each request, as for a
     ///     rotating token
     ///   - parsingOptions: Parsing options for handling different providers

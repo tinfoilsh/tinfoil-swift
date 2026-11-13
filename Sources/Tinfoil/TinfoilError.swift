@@ -14,7 +14,7 @@ public enum TinfoilError: Error, Equatable {
     /// fetched, or a response wasn't HTTP.
     case networkError(Network)
     /// The enclave's evidence, the policy or the channel binding was rejected,
-    /// including by an `onEnclaveVerified` callback.
+    /// including by a `verificationCheck` callback.
     case attestationError(Attestation)
 
     /// Details of a configuration error
@@ -92,10 +92,26 @@ public struct VerificationLayer: RawRepresentable, Hashable, Sendable, CustomStr
     public var description: String { rawValue }
 }
 
-/// Gives `localizedDescription` each error's message, rather than Foundation's
-/// generic "The operation couldn't be completed" with an enum case number.
-extension TinfoilError: LocalizedError {
+/// Gives `localizedDescription` and `description` the category and the
+/// message, as in "configuration error: no API key was given", rather than
+/// Foundation's generic "The operation couldn't be completed" with an enum
+/// case number. `message` alone omits the category.
+extension TinfoilError: LocalizedError, CustomStringConvertible {
+    /// The category's name, as it leads the error's description:
+    /// "configuration error", "network error" or "attestation error"
+    public var category: String {
+        switch self {
+        case .configurationError: "configuration error"
+        case .networkError: "network error"
+        case .attestationError: "attestation error"
+        }
+    }
+
     public var errorDescription: String? {
-        message
+        description
+    }
+
+    public var description: String {
+        "\(category): \(message)"
     }
 }

@@ -37,7 +37,7 @@ public final class RouterHTTPClient: Sendable {
     ///     `~/.tinfoil/user_cache_secret`. A non-empty `user_cache_secret`
     ///     string in a request's JSON body overrides it. Use an opaque random
     ///     value, not a raw user ID or API key.
-    ///   - onEnclaveVerified: Called each time a router's evidence verifies,
+    ///   - verificationCheck: Called each time a router's evidence verifies,
     ///     before its keys are used; throw to reject it, and discovery moves
     ///     to the next router.
     ///   - onVerificationResult: Called with each verification's final result.
@@ -48,11 +48,11 @@ public final class RouterHTTPClient: Sendable {
         attestationRelay: String? = nil,
         verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
-        onEnclaveVerified: EnclaveVerifiedCallback? = nil,
+        verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) async throws {
         try await self.init(verifying: EnclaveConnection.router(
-            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), onEnclaveVerified: onEnclaveVerified),
+            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck),
             transportMode: transportMode,
             baseURL: baseURL,
             attestationRelay: attestationRelay,

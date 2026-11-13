@@ -147,11 +147,11 @@ struct Refusal: Error, CustomStringConvertible {
 }
 
 extension TinfoilError {
-    /// Whether this is the error an `onEnclaveVerified` callback's `Refusal`
+    /// Whether this is the error an `verificationCheck` callback's `Refusal`
     /// becomes, rather than any other attestation failure
     var isRefusal: Bool {
         guard case .attestationError(let failure) = self, failure.layer == nil else { return false }
-        return failure.message.contains("onEnclaveVerified rejected") && failure.message.contains(Refusal().description)
+        return failure.message.contains("verification check rejected") && failure.message.contains(Refusal().description)
     }
 }
 

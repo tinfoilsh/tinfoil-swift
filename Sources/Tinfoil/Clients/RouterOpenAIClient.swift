@@ -23,7 +23,7 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
         attestationRelay: String? = nil,
         verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
-        onEnclaveVerified: EnclaveVerifiedCallback? = nil,
+        verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil,
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
@@ -38,7 +38,7 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
             attestationRelay: attestationRelay,
             verifier: verifier,
             userCacheSecret: userCacheSecret,
-            onEnclaveVerified: onEnclaveVerified,
+            verificationCheck: verificationCheck,
             onVerificationResult: onVerificationResult
         )
         try self.init(
