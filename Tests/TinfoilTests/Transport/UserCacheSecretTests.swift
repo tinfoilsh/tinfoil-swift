@@ -26,8 +26,15 @@ final class UserCacheSecretTests: XCTestCase {
 
     /// The SDK reads no environment variable or file for the secret.
     func testTheEnvironmentIsNotRead() {
+        let original = ProcessInfo.processInfo.environment["TINFOIL_USER_CACHE_SECRET"]
         setenv("TINFOIL_USER_CACHE_SECRET", "from-the-environment", 1)
-        defer { unsetenv("TINFOIL_USER_CACHE_SECRET") }
+        defer {
+            if let original {
+                setenv("TINFOIL_USER_CACHE_SECRET", original, 1)
+            } else {
+                unsetenv("TINFOIL_USER_CACHE_SECRET")
+            }
+        }
         XCTAssertEqual(UserCacheSecret.resolve(explicit: nil), UserCacheSecret.processSecret)
     }
 

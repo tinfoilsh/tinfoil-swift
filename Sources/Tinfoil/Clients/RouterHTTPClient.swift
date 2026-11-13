@@ -35,8 +35,8 @@ public final class RouterHTTPClient: Sendable {
     ///     requests. When unset, a random secret generated once per process
     ///     and shared by its clients is used, so cache hits aren't shared
     ///     across processes; pass one to keep it stable. A non-empty
-    ///     `user_cache_secret` string in a request's JSON body overrides it. Use an opaque random
-    ///     value, not a raw user ID or API key.
+    ///     `user_cache_secret` string in a request's JSON body overrides it.
+    ///     Use an opaque random value, not a raw user ID or API key.
     ///   - verificationCheck: Called each time a router's evidence verifies,
     ///     before its keys are used; throw to reject it, and discovery moves
     ///     to the next router.
