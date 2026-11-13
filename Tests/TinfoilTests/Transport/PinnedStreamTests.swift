@@ -82,3 +82,33 @@ final class PinnedStreamTests: XCTestCase {
         }
     }
 }
+
+/// Cancelling a caller of `StreamingSession.data(for:delegate:)` cancels the
+/// request it started, as URLSession's own method does.
+final class StreamingSessionCancellationTests: XCTestCase {
+    func testCancellingTheCallerCancelsTheRequest() async throws {
+        let opened = AsyncGate()
+        let sawCancellation = Box(value: false)
+        let session = StreamingSession(delegate: nil) { _ in
+            await opened.open()
+            do {
+                try await Task.sleep(nanoseconds: 10_000_000_000)
+            } catch {
+                sawCancellation.value = true
+                throw error
+            }
+            throw TinfoilError.network("not reached")
+        }
+        let caller = Task {
+            try await session.data(for: URLRequest(url: URL(string: "https://enclave.example/v1/x")!), delegate: nil)
+        }
+        await opened.wait()
+        caller.cancel()
+        do {
+            _ = try await caller.value
+            XCTFail("a cancelled request must not complete")
+        } catch {
+        }
+        XCTAssertTrue(sawCancellation.value, "The request saw the caller's cancellation.")
+    }
+}

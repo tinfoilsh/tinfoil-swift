@@ -66,17 +66,27 @@ internal class StreamingSession: URLSessionProtocol, @unchecked Sendable {
         for request: URLRequest,
         delegate: (any URLSessionTaskDelegate)?
     ) async throws -> (Data, URLResponse) {
-        return try await withCheckedThrowingContinuation { continuation in
-            let task = dataTask(with: request) { data, response, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else if let data = data, let response = response {
-                    continuation.resume(returning: (data, response))
-                } else {
-                    continuation.resume(throwing: URLError(.badServerResponse))
+        // Cancelling the caller cancels the task, as URLSession's own
+        // data(for:) does, so the request doesn't run on unobserved.
+        let cancellation = TaskCancellation()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let task = dataTask(with: request) { data, response, error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else if let data = data, let response = response {
+                        continuation.resume(returning: (data, response))
+                    } else if cancellation.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        continuation.resume(throwing: URLError(.badServerResponse))
+                    }
                 }
+                cancellation.attach(task)
+                task.resume()
             }
-            task.resume()
+        } onCancel: {
+            cancellation.cancel()
         }
     }
 
@@ -262,3 +272,30 @@ internal final class StreamingDataTask: URLSessionDataTaskProtocol, @unchecked S
     }
 }
 
+/// Cancels a task that may not exist yet: a cancellation that arrives first
+/// is applied when the task is attached.
+private final class TaskCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionDataTaskProtocol?
+    private var cancelled = false
+
+    var isCancelled: Bool { lock.withLock { cancelled } }
+
+    func attach(_ task: URLSessionDataTaskProtocol) {
+        let cancelNow = lock.withLock { () -> Bool in
+            self.task = task
+            return cancelled
+        }
+        if cancelNow {
+            task.cancel()
+        }
+    }
+
+    func cancel() {
+        let task = lock.withLock { () -> URLSessionDataTaskProtocol? in
+            cancelled = true
+            return self.task
+        }
+        task?.cancel()
+    }
+}
