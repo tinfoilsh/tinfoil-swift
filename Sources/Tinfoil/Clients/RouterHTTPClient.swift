@@ -30,7 +30,7 @@ public final class RouterHTTPClient: Sendable {
     ///     address, as for a local development proxy or a sidecar.
     ///   - attestationRelay: Host, with an optional port, that forwards
     ///     attestation requests to the fallback router
-    ///   - policy: Checks beyond the defaults
+    ///   - verifier: The trust policy; nil selects the defaults
     ///   - userCacheSecret: Scopes the router's prompt cache for the client's
     ///     requests. When unset, it is resolved from
     ///     `TINFOIL_USER_CACHE_SECRET` or a generated value persisted at
@@ -46,13 +46,13 @@ public final class RouterHTTPClient: Sendable {
         transportMode: TransportMode = .ehbp,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
-        policy: VerificationPolicy = VerificationPolicy(),
+        verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
         onEnclaveVerified: EnclaveVerifiedCallback? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) async throws {
         try await self.init(verifying: EnclaveConnection.router(
-            attestor: Attestor(verifier: try GoAttestationVerifier(policy: policy), onEnclaveVerified: onEnclaveVerified),
+            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), onEnclaveVerified: onEnclaveVerified),
             transportMode: transportMode,
             baseURL: baseURL,
             attestationRelay: attestationRelay,

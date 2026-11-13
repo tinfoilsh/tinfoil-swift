@@ -20,20 +20,60 @@ public struct SoftwareIdentity: Sendable, Equatable {
     public let version: String
 }
 
-/// Checks a verification makes beyond the defaults
-public struct VerificationPolicy: Equatable, Sendable {
-    /// Register values the enclave measurement must also match. An empty
-    /// register keeps its default check.
-    public var pinnedRegisters: Verification.Measurement?
-    /// Oldest freshness witness accepted, in seconds. Nil keeps the seven-day
-    /// default; a value must be at least one nanosecond once rounded to whole
-    /// nanoseconds.
-    public var freshnessMaxAge: TimeInterval?
+/// How a verification was performed. The verifier fills it in from its own
+/// state; none of it is attested by or checked against the document.
+public struct VerificationMetadata: Sendable, Equatable {
+    /// The SDK that performed the verification
+    public let verifier: SoftwareIdentity
+    /// When the document was appraised. It is not a freshness guarantee.
+    public let verifiedAt: Date
+}
 
-    public init(pinnedRegisters: Verification.Measurement? = nil, freshnessMaxAge: TimeInterval? = nil) {
-        self.pinnedRegisters = pinnedRegisters
-        self.freshnessMaxAge = freshnessMaxAge
+/// Why a verification accepted a component's reference values. More sources
+/// may be added, so match the ones you handle and tolerate any other.
+public struct ReferenceSource: RawRepresentable, Hashable, Sendable, CustomStringConvertible {
+    /// An endorsement in the document, verified against the trust policy
+    public static let endorsement = ReferenceSource(rawValue: "endorsement")
+    /// A value from the verifier's `EmbeddedReferences`
+    public static let embedded = ReferenceSource(rawValue: "embedded")
+    /// A config that the verifier's `ConfigAuthorizer` approved
+    public static let policy = ReferenceSource(rawValue: "policy")
+
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
     }
+
+    public var description: String { rawValue }
+}
+
+/// The config bound to the hardware. Only an endorsed config has a reference,
+/// signing key hint, registry ID and times; the others are empty or nil.
+public struct ConfigVerification: Sendable, Equatable {
+    public let source: ReferenceSource
+    /// The config's `/org/project/revision` identity, or empty
+    public let name: String
+    /// SHA-256 of the config, lowercase hex
+    public let digest: String
+    public let reference: String
+    public let signingKeyHint: String
+    public let approvalTime: Date?
+    public let registryID: String
+    public let signatureTime: Date?
+}
+
+/// A runtime or platform artifact that a config-based verification accepted.
+/// An embedded artifact has no name, commit or approval time, and an embedded
+/// platform has only a digest.
+public struct ArtifactVerification: Sendable, Equatable {
+    public let source: ReferenceSource
+    public let repo: String
+    public let tag: String
+    public let digest: String
+    public let name: String
+    public let commit: String
+    public let approvalTime: Date?
 }
 
 /// What a verified attestation document proved about an enclave, and who
@@ -62,25 +102,31 @@ public struct Verification: Sendable, Equatable {
     /// or digest
     public let configRepo: String
     public let codeDigest: String
-    public let codeTag: String?
+    /// The release tag of the verified code or runtime, or empty
+    public let codeTag: String
     /// The registers the release fixes, in the enclave measurement's platform
     /// layout, with an empty register for one the release leaves open
     public let codeMeasurement: Measurement?
     /// The hardware quote's authenticated registers
     public let enclaveMeasurement: Measurement?
+    /// The config bound to the hardware. Nil for an enclave verified against
+    /// a code release, which has no config.
+    public let config: ConfigVerification?
+    /// The runtime that a config-based verification accepted
+    public let runtime: ArtifactVerification?
+    /// The platform endorsements that a config-based verification accepted
+    public let platform: ArtifactVerification?
     /// SHA-256 of the enclave TLS certificate's public key, lowercase hex
     public let tlsPublicKeyFingerprint: String
-    /// X25519 key that request bodies are encrypted to, lowercase hex. Absent
+    /// X25519 key that request bodies are encrypted to, lowercase hex. Empty
     /// for an enclave that endorses only a TLS key.
-    public let hpkePublicKey: String?
+    public let hpkePublicKey: String
     /// Every endorsed key, including the two lifted out above
     public let cryptoMaterial: [CryptoMaterial]
     /// No new request may be authorized at or after this instant
     public let freshnessExpiresAt: Date
-    /// When the document was appraised
-    public let verifiedAt: Date
-    /// The SDK that performed the verification
-    public let verifier: SoftwareIdentity
+    /// How the verification was performed
+    public let metadata: VerificationMetadata
 }
 
 extension Verification {
@@ -114,15 +160,20 @@ extension Verification {
         self.init(
             configRepo: decoded.configRepo,
             codeDigest: decoded.codeDigest,
-            codeTag: decoded.codeTag,
+            codeTag: decoded.codeTag ?? "",
             codeMeasurement: decoded.codeMeasurement,
             enclaveMeasurement: decoded.enclaveMeasurement,
+            config: try decoded.config.map { try $0.verification() },
+            runtime: try decoded.runtime.map { try $0.verification() },
+            platform: try decoded.platform.map { try $0.verification() },
             tlsPublicKeyFingerprint: decoded.tlsPublicKeyFP,
-            hpkePublicKey: decoded.hpkePublicKey,
+            hpkePublicKey: decoded.hpkePublicKey ?? "",
             cryptoMaterial: decoded.cryptoMaterial,
             freshnessExpiresAt: try Self.parseDate(decoded.freshnessExpiresAt, field: "freshness_expires_at"),
-            verifiedAt: try Self.parseDate(decoded.verifiedAt, field: "verified_at"),
-            verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion)
+            metadata: VerificationMetadata(
+                verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion),
+                verifiedAt: try Self.parseDate(decoded.verifiedAt, field: "verified_at")
+            )
         )
     }
 
@@ -142,6 +193,9 @@ extension Verification {
         let codeTag: String?
         let codeMeasurement: Measurement?
         let enclaveMeasurement: Measurement?
+        let config: ConfigPayload?
+        let runtime: ArtifactPayload?
+        let platform: ArtifactPayload?
         let tlsPublicKeyFP: String
         let hpkePublicKey: String?
         let cryptoMaterial: [CryptoMaterial]
@@ -154,11 +208,71 @@ extension Verification {
             case codeTag = "code_tag"
             case codeMeasurement = "code_measurement"
             case enclaveMeasurement = "enclave_measurement"
+            case config, runtime, platform
             case tlsPublicKeyFP = "tls_public_key_fp"
             case hpkePublicKey = "hpke_public_key"
             case cryptoMaterial = "crypto_material"
             case freshnessExpiresAt = "freshness_expires_at"
             case verifiedAt = "verified_at"
+        }
+    }
+
+    private struct ConfigPayload: Decodable {
+        let source: String
+        let name: String?
+        let digest: String
+        let reference: String?
+        let signingKeyHint: String?
+        let approvalTime: String?
+        let registryID: String?
+        let signatureTime: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case source, name, digest, reference
+            case signingKeyHint = "signing_key_hint"
+            case approvalTime = "approval_time"
+            case registryID = "registry_id"
+            case signatureTime = "signature_time"
+        }
+
+        func verification() throws -> ConfigVerification {
+            ConfigVerification(
+                source: ReferenceSource(rawValue: source),
+                name: name ?? "",
+                digest: digest,
+                reference: reference ?? "",
+                signingKeyHint: signingKeyHint ?? "",
+                approvalTime: try approvalTime.map { try Verification.parseDate($0, field: "config.approval_time") },
+                registryID: registryID ?? "",
+                signatureTime: try signatureTime.map { try Verification.parseDate($0, field: "config.signature_time") }
+            )
+        }
+    }
+
+    private struct ArtifactPayload: Decodable {
+        let source: String
+        let repo: String?
+        let tag: String?
+        let digest: String
+        let name: String?
+        let commit: String?
+        let approvalTime: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case source, repo, tag, digest, name, commit
+            case approvalTime = "approval_time"
+        }
+
+        func verification() throws -> ArtifactVerification {
+            ArtifactVerification(
+                source: ReferenceSource(rawValue: source),
+                repo: repo ?? "",
+                tag: tag ?? "",
+                digest: digest,
+                name: name ?? "",
+                commit: commit ?? "",
+                approvalTime: try approvalTime.map { try Verification.parseDate($0, field: "approval_time") }
+            )
         }
     }
 

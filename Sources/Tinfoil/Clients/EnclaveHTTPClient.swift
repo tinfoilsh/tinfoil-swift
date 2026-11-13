@@ -42,7 +42,7 @@ public final class EnclaveHTTPClient: Sendable {
     ///     as for a local development proxy or a sidecar.
     ///   - attestationRelay: Host, with an optional port, that forwards
     ///     attestation requests to the enclave
-    ///   - policy: Checks beyond the defaults
+    ///   - verifier: The trust policy; nil selects the defaults
     ///   - userCacheSecret: Scopes the prompt cache of the client's requests.
     ///     Only Tinfoil's router reads it, so it is sent only when set. A
     ///     non-empty `user_cache_secret` string in a request's JSON body
@@ -58,7 +58,7 @@ public final class EnclaveHTTPClient: Sendable {
         transportMode: TransportMode = .tls,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
-        policy: VerificationPolicy = VerificationPolicy(),
+        verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
         onEnclaveVerified: EnclaveVerifiedCallback? = nil,
         onVerificationResult: VerificationResultCallback? = nil
@@ -70,7 +70,7 @@ public final class EnclaveHTTPClient: Sendable {
             baseURL: baseURL,
             attestationRelay: attestationRelay,
             userCacheSecret: userCacheSecret,
-            attestor: Attestor(verifier: try GoAttestationVerifier(policy: policy), onEnclaveVerified: onEnclaveVerified),
+            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), onEnclaveVerified: onEnclaveVerified),
             onVerificationResult: onVerificationResult
         ))
     }
@@ -88,7 +88,8 @@ public final class EnclaveHTTPClient: Sendable {
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
-        try EnclaveConnection(
+        try attestor.checkRepoVerifiability(repo)
+        return try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: enclave,
                 repo: repo,

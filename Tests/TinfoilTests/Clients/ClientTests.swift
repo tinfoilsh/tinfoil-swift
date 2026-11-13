@@ -258,7 +258,7 @@ final class ClientTests: XCTestCase {
         guard case .success(let verification) = captured.value else {
             return XCTFail("A successful verification should be reported, got \(String(describing: captured.value))")
         }
-        XCTAssertEqual(verification.hpkePublicKey?.count, 64, "EHBP needs the enclave's HPKE key")
+        XCTAssertEqual(verification.hpkePublicKey.count, 64, "EHBP needs the enclave's HPKE key")
         XCTAssertGreaterThan(verification.freshnessExpiresAt, Date())
 
         let chatQuery = ChatQuery(

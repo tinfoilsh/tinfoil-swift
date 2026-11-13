@@ -1,53 +1,6 @@
 import Foundation
 import TinfoilGo
 
-extension VerificationPolicy {
-    /// The options JSON `MobileNewVerifier` takes; empty for the defaults.
-    /// The framework validates the rest, such as the shape of pinned
-    /// registers.
-    func optionsJSON() throws -> String {
-        guard pinnedRegisters != nil || freshnessMaxAge != nil else {
-            return ""
-        }
-        let options = Options(
-            pinnedRegisters: pinnedRegisters.map { .init(type: $0.type, registers: $0.registers) },
-            freshnessMaxAgeNs: try freshnessMaxAge.map(Self.nanoseconds)
-        )
-        return String(decoding: try JSONEncoder().encode(options), as: UTF8.self)
-    }
-
-    /// The framework takes the age as an integer count of nanoseconds, and
-    /// reads zero as "keep the default". So an age must be at least one
-    /// nanosecond once rounded: 0, or a positive age under half a nanosecond,
-    /// would otherwise silently select the seven-day default, and nil is the
-    /// way to ask for it. A value with no such count, such as NaN, infinity or
-    /// more than about 292 years, is refused rather than trapping in the
-    /// conversion.
-    private static func nanoseconds(_ seconds: TimeInterval) throws -> Int64 {
-        guard let nanoseconds = Int64(exactly: (seconds * 1_000_000_000).rounded()), nanoseconds > 0 else {
-            throw TinfoilError.configuration(
-                "freshness maximum age must be a positive, finite number of seconds of at least a nanosecond, not \(seconds)"
-            )
-        }
-        return nanoseconds
-    }
-
-    private struct Options: Encodable {
-        struct Measurement: Encodable {
-            let type: String
-            let registers: [String]
-        }
-
-        let pinnedRegisters: Measurement?
-        let freshnessMaxAgeNs: Int64?
-
-        private enum CodingKeys: String, CodingKey {
-            case pinnedRegisters = "pinned_registers"
-            case freshnessMaxAgeNs = "freshness_max_age_ns"
-        }
-    }
-}
-
 /// The TinfoilGo framework's verifier. It makes every trust decision; this
 /// only translates types and errors across the framework boundary.
 final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
@@ -55,9 +8,22 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
     // several threads at once.
     private let verifier: MobileVerifier
 
-    init(policy: VerificationPolicy = VerificationPolicy()) throws {
+    // The framework holds the bridge only through a reference that it
+    // tracks; keeping it here ties its lifetime to the verifier's.
+    private let configAuthorizer: ConfigAuthorizerBridge?
+
+    /// - Parameters:
+    ///   - optionsJSON: The framework's options; empty for the defaults
+    ///   - configAuthorizer: Decides which configs are authorized, in place of
+    ///     their endorsements
+    init(optionsJSON: String = "", configAuthorizer: ConfigAuthorizerBridge? = nil) throws {
         var error: NSError?
-        let verifier = MobileNewVerifier(try policy.optionsJSON(), &error)
+        let verifier: MobileVerifier?
+        if let configAuthorizer {
+            verifier = MobileNewVerifierWithConfigAuthorizer(optionsJSON, configAuthorizer, &error)
+        } else {
+            verifier = MobileNewVerifier(optionsJSON, &error)
+        }
         if let error {
             throw Self.classify(error)
         }
@@ -65,6 +31,19 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
             throw TinfoilError.configuration("TinfoilGo returned no verifier")
         }
         self.verifier = verifier
+        self.configAuthorizer = configAuthorizer
+    }
+
+    var callerAuthorizesConfig: Bool {
+        verifier.callerAuthorizesConfig()
+    }
+
+    func checkRepoVerifiability(_ repo: String) throws {
+        do {
+            try verifier.checkRepoVerifiability(repo)
+        } catch {
+            throw Self.classify(error)
+        }
     }
 
     func newNonce() -> Data {
