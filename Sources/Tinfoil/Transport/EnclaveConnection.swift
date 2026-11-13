@@ -122,11 +122,18 @@ final class EnclaveConnection: Sendable {
     }
 
     /// Refuses a base URL that isn't HTTPS, which would expose request
-    /// headers, or that has no host or carries credentials. Under EHBP, HTTP
-    /// is accepted when the host as written is localhost or a loopback IP
-    /// address, whose traffic never leaves the machine, as for a local
-    /// development proxy or a sidecar.
+    /// headers, or that has no host, carries credentials, or has a query or
+    /// a fragment, even an empty one, since request paths join under it.
+    /// Under EHBP, HTTP is accepted when the host as written is localhost or
+    /// a loopback IP address, whose traffic never leaves the machine, as for
+    /// a local development proxy or a sidecar.
     static func validateBaseURL(_ url: URL, transportMode: TransportMode) throws {
+        // A query or fragment, even an empty one, would not survive joining a
+        // request path under the base URL. The message doesn't echo the URL,
+        // whose query may hold a secret.
+        guard !url.absoluteString.contains(where: { $0 == "?" || $0 == "#" }) else {
+            throw TinfoilError.configuration("invalid base URL: a base URL must not carry a query or a fragment")
+        }
         let scheme = url.scheme?.lowercased()
         guard scheme == "https" || scheme == "http", url.host != nil, url.user == nil, url.password == nil else {
             throw TinfoilError.configuration(
@@ -174,11 +181,13 @@ final class EnclaveConnection: Sendable {
     /// Verifies the enclave, as the public clients do before they return. In
     /// EHBP mode the enclave must also endorse an HPKE key, which every
     /// request is sealed to.
-    func ensureUsable() async throws {
+    @discardableResult
+    func ensureUsable() async throws -> Verification {
         let verified = try await handle.ensureVerified()
         if ehbp != nil {
             _ = try EHBPVerifiedEndpoint(enclaveURL: "https://\(enclave)", verification: verified)
         }
+        return verified
     }
 
     /// Loads a request from the enclave, as `URLSession.data(for:)` does,

@@ -178,6 +178,9 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let path = try connection(network, baseURL: URL(string: "https://enclave.example/v1/")!)
         XCTAssertEqual(path.baseURL.absoluteString, "https://enclave.example/v1/", "TLS accepts a path on the enclave's own origin.")
         assertConfigurationError({ try self.connection(network, transportMode: .ehbp, baseURL: URL(string: "http://proxy.example/")!) })
+        for refused in ["https://proxy.example/api/?", "https://proxy.example/api/?key=secret", "https://proxy.example/api/#", "https://enclave.example/v1#x"] {
+            assertConfigurationError({ try self.connection(network, transportMode: .ehbp, baseURL: URL(string: refused)!) })
+        }
         XCTAssertTrue(network.urls.isEmpty)
     }
 
@@ -223,6 +226,11 @@ final class EnclaveHTTPClientTests: XCTestCase {
         "http://user:secret@localhost/v1",
         "ftp://localhost/v1",
         "/v1",
+        // A query or a fragment, even an empty one, in any mode.
+        "http://localhost/v1?",
+        "http://localhost/v1?key=secret",
+        "http://localhost/v1#",
+        "http://localhost/v1#part",
     ]
 
     func testEHBPAcceptsAnHTTPBaseURLOnlyOnALoopbackHost() throws {
@@ -264,7 +272,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
                 _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", repo: "org/repo", transportMode: mode, baseURL: URL(string: url)!)
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError(let failure) {
-                if mode == .ehbp, url.hasPrefix("http://"), !url.contains("@") {
+                if mode == .ehbp, url.hasPrefix("http://"), !url.contains("@"), !url.contains("?"), !url.contains("#") {
                     XCTAssertTrue(failure.message.contains("loopback"), failure.message)
                 }
             }
