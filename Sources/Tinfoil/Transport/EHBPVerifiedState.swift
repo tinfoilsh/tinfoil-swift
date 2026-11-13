@@ -74,9 +74,6 @@ internal actor EHBPVerifiedState {
         self.now = now
     }
 
-    /// The endpoint to seal a new request to. One whose attestation has
-    /// expired is refreshed first, through the same single-flight refresh as a
-    /// rejected key, so an expired key never seals a request.
     /// Refuses every later request, including the replay of one whose key
     /// was rejected, and cancels a refresh in progress.
     func close() {
@@ -90,12 +87,16 @@ internal actor EHBPVerifiedState {
         }
     }
 
+    /// The endpoint to seal a new request to. One whose attestation has
+    /// expired is refreshed first, through the same single-flight refresh as a
+    /// rejected key, so an expired key never seals a request.
     func current() async throws -> (endpoint: EHBPVerifiedEndpoint, generation: UInt64) {
         try checkOpen()
         if now() < endpoint.expiresAt {
             return (endpoint, generation)
         }
         _ = try await refresh(afterRejectedGeneration: generation)
+        try checkOpen()
         guard now() < endpoint.expiresAt else {
             throw TinfoilError.attestation("refreshed attestation is already past its freshness deadline")
         }
@@ -137,6 +138,8 @@ internal actor EHBPVerifiedState {
 
         do {
             let refreshed = try await waitForSharedTask(operation.task)
+            // A refresh that finishes despite a late close seals nothing.
+            try checkOpen()
             return install(
                 refreshed,
                 from: operation,

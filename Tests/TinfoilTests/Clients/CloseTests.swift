@@ -84,29 +84,44 @@ final class CloseTests: XCTestCase {
         }
     }
 
+    /// A verification in progress when the client closes ends in an error,
+    /// whether its fetch sees the cancellation or its result arrives after
+    /// the close, and is never kept.
     func testClosingCancelsAVerificationInProgress() async throws {
-        let gate = AsyncGate()
-        let handle = EnclaveHandle(
-            enclave: "enclave.example",
-            repo: "org/repo",
-            attestationRelay: nil,
-            attestor: Attestor(verifier: FakeVerifier(), fetch: { url in
-                await gate.wait()
-                try Task.checkCancellation()
-                return Data(FakeNetwork.document("ok", for: url).utf8)
-            }, retryDelay: 0)
-        )
-        let verification = Task { try await handle.reverify() }
-        // Let the verification reach the fetch before closing.
-        try await Task.sleep(nanoseconds: 50_000_000)
+        for observesCancellation in [true, false] {
+            let entered = AsyncGate()
+            let gate = AsyncGate()
+            let handle = EnclaveHandle(
+                enclave: "enclave.example",
+                repo: "org/repo",
+                attestationRelay: nil,
+                attestor: Attestor(verifier: FakeVerifier(), fetch: { url in
+                    await entered.open()
+                    await gate.wait()
+                    if observesCancellation {
+                        try Task.checkCancellation()
+                    }
+                    return Data(FakeNetwork.document("ok", for: url).utf8)
+                }, retryDelay: 0)
+            )
+            let verification = Task { try await handle.reverify() }
+            await entered.wait()
 
-        await handle.close()
-        await gate.open()
+            await handle.close()
+            await gate.open()
 
-        do {
-            _ = try await verification.value
-            XCTFail("the verification in progress must not complete after close")
-        } catch {
+            do {
+                _ = try await verification.value
+                XCTFail("the verification in progress must not complete after close")
+            } catch is CancellationError {
+                XCTAssertTrue(observesCancellation, "Only a fetch that checks sees the cancellation.")
+            } catch TinfoilError.configurationError(let failure) {
+                XCTAssertEqual(failure.message, "the client is closed")
+            } catch {
+                XCTFail("unexpected \(error)")
+            }
+            let current = await handle.current
+            XCTAssertNil(current, "A verification finished after close is not kept.")
         }
     }
 }

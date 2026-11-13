@@ -75,6 +75,9 @@ actor EnclaveHandle {
                         relay: self.attestationRelay,
                         repo: self.repo
                     )
+                    // A verification that finishes despite a late close is
+                    // not kept or used.
+                    try self.checkOpen()
                     self.current = verified
                     self.onVerificationResult?(.success(verified))
                     return verified
@@ -96,6 +99,7 @@ actor EnclaveHandle {
             return current
         }
         let verified = try await reverify()
+        try checkOpen()
         guard now() < verified.freshnessExpiresAt else {
             throw TinfoilError.attestation("verification of \(enclave) is already past its freshness deadline")
         }
