@@ -38,9 +38,9 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
         verifier.callerAuthorizesConfig()
     }
 
-    func checkRepoVerifiability(_ repo: String) throws {
+    func checkPinVerifiability(_ pin: Pin) throws {
         do {
-            try verifier.checkRepoVerifiability(repo)
+            try verifier.checkPinVerifiability(pin.repo ?? "", project: pin.project ?? "")
         } catch {
             throw Self.classify(error)
         }
@@ -65,9 +65,15 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
         return parsed
     }
 
-    func verify(document: Data, nonce: Data, repo: String) throws -> Verification {
+    func verify(document: Data, nonce: Data, pin: Pin) throws -> Verification {
         var error: NSError?
-        let payload = verifier.verify(document, nonce: nonce, repo: repo, error: &error)
+        let payload = verifier.verify(
+            document,
+            nonce: nonce,
+            repo: pin.repo ?? "",
+            project: pin.project ?? "",
+            error: &error
+        )
         if let error {
             throw Self.classify(error)
         }

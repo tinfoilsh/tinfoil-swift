@@ -5,6 +5,9 @@ enum TinfoilConstants {
     /// Default GitHub repository for the inference proxy
     static let defaultGithubRepo = "tinfoilsh/confidential-model-router"
 
+    // Tinfoil owns the router's name in both namespaces.
+    static let routerPin = Pin(repo: defaultGithubRepo, project: defaultGithubRepo)
+
     /// Name this SDK reports in attestation requests and verification records
     static let sdkName = "tinfoil-swift"
 

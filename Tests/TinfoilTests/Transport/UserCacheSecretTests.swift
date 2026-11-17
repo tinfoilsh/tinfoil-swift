@@ -48,7 +48,7 @@ final class UserCacheSecretTests: XCTestCase {
         func connection(secret: String?) throws -> EnclaveConnection {
             try EnclaveHTTPClient.connection(
                 enclave: "enclave.example",
-                repo: "org/repo",
+                pin: Pin(repo: "org/repo"),
                 transportMode: .tls,
                 baseURL: nil,
                 attestationRelay: nil,

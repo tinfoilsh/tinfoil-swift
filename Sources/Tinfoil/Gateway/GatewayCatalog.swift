@@ -26,7 +26,7 @@ public struct CatalogEntry: Sendable, Equatable, Codable {
         else {
             return false
         }
-        return (try? syntax.checkRepoVerifiability(repo)) != nil
+        return (try? syntax.checkPinVerifiability(GatewayCatalog.pin(repo))) != nil
     }
 }
 
@@ -49,6 +49,12 @@ enum GatewayCatalog {
     /// Checks repository syntax with the framework's reference parser; a
     /// framework that can't build a default verifier trusts no entry.
     static let referenceSyntax: GoAttestationVerifier? = try? GoAttestationVerifier()
+
+    /// The pin a replica running reference is verified against
+    static func pin(_ reference: String) -> Pin {
+        // Tinfoil owns model names in both namespaces.
+        Pin(repo: reference, project: reference)
+    }
 
     /// Reads the catalog of the gateway at host, keeping only the entries that
     /// can be routed to.

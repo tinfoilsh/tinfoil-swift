@@ -16,7 +16,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         baseURL: URL? = nil
     ) throws -> EnclaveConnection {
         try EnclaveConnection(
-            handle: EnclaveHandle(enclave: "enclave.example", repo: "org/repo", attestationRelay: nil, attestor: attestor(network)),
+            handle: EnclaveHandle(enclave: "enclave.example", pin: Pin(repo: "org/repo"), attestationRelay: nil, attestor: attestor(network)),
             transportMode: transportMode,
             baseURL: baseURL,
             userCacheSecret: ""
@@ -60,7 +60,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let client = try await EnclaveHTTPClient(verifying: connection(network))
 
         XCTAssertEqual(client.enclave, "enclave.example")
-        XCTAssertEqual(client.repo, "org/repo")
+        XCTAssertEqual(client.pin, Pin(repo: "org/repo"))
         XCTAssertEqual(client.transportMode, .tls, "A named enclave uses pinned TLS by default.")
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"])
         let current = await client.current
@@ -97,7 +97,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let client = try await router(network, onVerificationResult: { results.record($0) })
 
         XCTAssertEqual(client.enclave, "router-a.example")
-        XCTAssertEqual(client.repo, TinfoilConstants.defaultGithubRepo)
+        XCTAssertEqual(client.pin, TinfoilConstants.routerPin)
         XCTAssertEqual(client.transportMode, .ehbp, "A router uses EHBP by default.")
         let discovered = await client.current
         guard results.values.count == 1, case .success(let reported) = results.values[0] else {
@@ -261,7 +261,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         // Not even on the enclave's own host, which TLS reaches over HTTPS.
         assertConfigurationError({
             try EnclaveConnection(
-                handle: EnclaveHandle(enclave: "localhost:8080", repo: "org/repo", attestationRelay: nil, attestor: self.attestor(network)),
+                handle: EnclaveHandle(enclave: "localhost:8080", pin: Pin(repo: "org/repo"), attestationRelay: nil, attestor: self.attestor(network)),
                 transportMode: .tls,
                 baseURL: URL(string: "http://localhost:8080/v1")!,
                 userCacheSecret: ""
@@ -277,7 +277,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let cases: [(TransportMode, String)] = Self.refusedBaseURLs.map { (.ehbp, $0) } + [(.tls, "http://localhost:8080/v1")]
         for (mode, url) in cases {
             do {
-                _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", repo: "org/repo", transportMode: mode, baseURL: URL(string: url)!)
+                _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", pin: Pin(repo: "org/repo"), transportMode: mode, baseURL: URL(string: url)!)
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError(let failure) {
                 if mode == .ehbp, url.hasPrefix("http://"), !url.contains("@"), !url.contains("?"), !url.contains("#") {
@@ -321,7 +321,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
     func testAMissingAPIKeyFailsBeforeAnyNetworkIO() async throws {
         do {
             // An unreachable enclave would fail with a network error.
-            _ = try await EnclaveOpenAIClient(enclave: "127.0.0.1:9", repo: "org/repo")
+            _ = try await EnclaveOpenAIClient(enclave: "127.0.0.1:9", pin: Pin(repo: "org/repo"))
             XCTFail("a client without an API key must not be created")
         } catch TinfoilError.configurationError(let failure) {
             XCTAssertTrue(failure.message.contains("pass apiKey or apiKeyProvider"), failure.message)
@@ -346,7 +346,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
     /// rather than attesting again, while a rejected key verifies again.
     func testTheEHBPKeyComesFromTheHandle() async throws {
         let network = approving()
-        let handle = EnclaveHandle(enclave: "enclave.example", repo: "org/repo", attestationRelay: nil, attestor: attestor(network))
+        let handle = EnclaveHandle(enclave: "enclave.example", pin: Pin(repo: "org/repo"), attestationRelay: nil, attestor: attestor(network))
         let channel = EHBPChannel(
             origin: "https://enclave.example",
             enclaveURL: "https://enclave.example",

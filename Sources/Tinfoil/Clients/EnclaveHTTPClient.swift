@@ -30,13 +30,17 @@ public final class EnclaveHTTPClient: Sendable {
     ///
     /// - Parameters:
     ///   - enclave: Host of the enclave, such as "inference.tinfoil.sh"
-    ///   - repo: The trusted owner/name[@tag][@sha256:digest] that the
-    ///     enclave's config must come from. `nil` accepts any config that the
-    ///     verifier's trust authorizes: with the default verifier, any
-    ///     deployment in Tinfoil's public registry; with `configSigningKeys`,
-    ///     any config those keys approve; with a `configAuthorizer`, which
-    ///     requires `nil`, any config it approves. An empty string is refused, so
-    ///     that a missing value can't widen the trust by accident.
+    ///   - pin: What the enclave must run. `Pin(repo:)` names a GitHub
+    ///     repository, owner/name[@tag][@sha256:digest], whose signed release
+    ///     the enclave must prove; `Pin(project:)` names a config registry
+    ///     project, org/project[@revision][@sha256:digest], that the enclave's
+    ///     config must come from; `Pin(repo:project:)` accepts either.
+    ///     `Pin.none` accepts any config that the verifier's trust
+    ///     authorizes: with the default verifier, any deployment in Tinfoil's
+    ///     public registry; with `configSigningKeys`, any config those keys
+    ///     approve; with a `configAuthorizer`, which requires `Pin.none`, any
+    ///     config it approves. An empty string is refused, so that a missing
+    ///     value can't widen the trust by accident.
     ///   - transportMode: How requests are protected; pinned TLS by default
     ///   - baseURL: Where requests are sent: a path on the enclave's own
     ///     origin, or a proxy on another origin, which requires `.ehbp`.
@@ -59,7 +63,7 @@ public final class EnclaveHTTPClient: Sendable {
     ///     It only observes.
     public convenience init(
         enclave: String,
-        repo: String?,
+        pin: Pin,
         transportMode: TransportMode = .tls,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
@@ -70,7 +74,7 @@ public final class EnclaveHTTPClient: Sendable {
     ) async throws {
         try await self.init(verifying: Self.connection(
             enclave: enclave,
-            repo: repo,
+            pin: pin,
             transportMode: transportMode,
             baseURL: baseURL,
             attestationRelay: attestationRelay,
@@ -80,12 +84,12 @@ public final class EnclaveHTTPClient: Sendable {
         ))
     }
 
-    /// The connection `init(enclave:repo:…)` verifies, built without network
+    /// The connection `init(enclave:pin:…)` verifies, built without network
     /// I/O. Only Tinfoil's router reads the cache secret, so an unset one
     /// stays unset.
     static func connection(
         enclave: String,
-        repo: String?,
+        pin: Pin,
         transportMode: TransportMode,
         baseURL: URL?,
         attestationRelay: String?,
@@ -93,19 +97,18 @@ public final class EnclaveHTTPClient: Sendable {
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
-        // The verifier reads "" as "any config that its trust authorizes";
-        // only nil asks for that here.
-        if repo?.isEmpty == true {
+        // The verifier reads "" as an unset part of the pin; only Pin.none
+        // asks for no pin here.
+        if pin.repo?.isEmpty == true || pin.project?.isEmpty == true {
             throw TinfoilError.configuration(
-                "repo must not be empty; pass nil to accept any config that the verifier's trust authorizes"
+                "a pin's repo and project must not be empty; pass Pin.none to accept any config that the verifier's trust authorizes"
             )
         }
-        let repo = repo ?? ""
-        try attestor.checkRepoVerifiability(repo)
+        try attestor.checkPinVerifiability(pin)
         return try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: enclave,
-                repo: repo,
+                pin: pin,
                 attestationRelay: attestationRelay,
                 attestor: attestor,
                 onVerificationResult: onVerificationResult
@@ -142,10 +145,9 @@ public final class EnclaveHTTPClient: Sendable {
     /// host when `baseURL` is a proxy.
     public var enclave: String { connection.enclave }
 
-    /// The repository the enclave is verified against, with any tag or
-    /// digest pins, or nil when any config that the verifier's trust
-    /// authorizes is accepted
-    public var repo: String? { connection.repo.isEmpty ? nil : connection.repo }
+    /// The pin the enclave is verified against, or `Pin.none` when any config
+    /// that the verifier's trust authorizes is accepted
+    public var pin: Pin { connection.pin }
 
     /// The last successful verification, without checking it. It may have
     /// expired or been rejected; use `ensureVerified()` for one that is valid.

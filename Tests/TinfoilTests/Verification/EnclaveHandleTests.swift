@@ -7,14 +7,14 @@ import Foundation
 final class EnclaveHandleTests: XCTestCase {
     private func handle(
         enclave: String = "enclave.example",
-        repo: String = "org/repo",
+        pin: Pin = Pin(repo: "org/repo"),
         relay: String? = nil,
         network: FakeNetwork,
         clock: ManualClock = ManualClock()
     ) -> EnclaveHandle {
         EnclaveHandle(
             enclave: enclave,
-            repo: repo,
+            pin: pin,
             attestationRelay: relay,
             attestor: Attestor(verifier: FakeVerifier(now: { clock.now }), fetch: { try network.fetch($0) }, retryDelay: 0),
             now: { clock.now }
@@ -29,7 +29,7 @@ final class EnclaveHandleTests: XCTestCase {
 
     func testVerifiesTheConfiguredEnclave() async throws {
         let network = approving()
-        let handle = handle(enclave: "enclave.example", repo: "org/repo", network: network)
+        let handle = handle(enclave: "enclave.example", pin: Pin(repo: "org/repo"), network: network)
 
         let verification = try await handle.reverify()
 
@@ -107,7 +107,7 @@ final class EnclaveHandleTests: XCTestCase {
         let network = approving()
         let handle = EnclaveHandle(
             enclave: "enclave.example",
-            repo: "org/repo",
+            pin: Pin(repo: "org/repo"),
             attestationRelay: nil,
             attestor: Attestor(
                 verifier: FakeVerifier(),
@@ -139,7 +139,7 @@ final class EnclaveHandleTests: XCTestCase {
         }
         let handle = EnclaveHandle(
             enclave: "enclave.example",
-            repo: "org/repo",
+            pin: Pin(repo: "org/repo"),
             attestationRelay: nil,
             attestor: Attestor(verifier: FakeVerifier(), fetch: { try network.fetch($0) }, retryDelay: 0),
             onVerificationResult: { results.record($0) }
@@ -173,7 +173,7 @@ final class EnclaveHandleTests: XCTestCase {
         }
         return EnclaveHandle(
             enclave: "enclave.example",
-            repo: "org/repo",
+            pin: Pin(repo: "org/repo"),
             attestationRelay: nil,
             attestor: Attestor(verifier: FakeVerifier(), fetch: fetch, retryDelay: 0),
             onVerificationResult: onVerificationResult

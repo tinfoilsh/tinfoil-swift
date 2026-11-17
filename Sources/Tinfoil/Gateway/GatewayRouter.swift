@@ -100,7 +100,7 @@ struct GatewayPolicy: Sendable {
                 )
             }
             do {
-                try pinAttestor.checkRepoVerifiability(pin.repo)
+                try pinAttestor.checkPinVerifiability(GatewayCatalog.pin(pin.repo))
             } catch let error as TinfoilError {
                 throw TinfoilError.configuration("model \"\(model)\": \(error.message)")
             }

@@ -10,7 +10,7 @@ import Foundation
 /// attempt once. The run's result goes to `onVerificationResult`.
 actor EnclaveHandle {
     nonisolated let enclave: String
-    nonisolated let repo: String
+    nonisolated let pin: Pin
     private let attestationRelay: String?
     private let attestor: Attestor
     private let onVerificationResult: VerificationResultCallback?
@@ -28,7 +28,7 @@ actor EnclaveHandle {
     ///   router discovery, kept as the current one so it isn't repeated.
     init(
         enclave: String,
-        repo: String,
+        pin: Pin,
         attestationRelay: String?,
         attestor: Attestor,
         initial: Verification? = nil,
@@ -36,7 +36,7 @@ actor EnclaveHandle {
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.enclave = enclave
-        self.repo = repo
+        self.pin = pin
         self.attestationRelay = attestationRelay
         self.attestor = attestor
         self.current = initial
@@ -73,7 +73,7 @@ actor EnclaveHandle {
                     let verified = try await self.attestor.attest(
                         host: self.enclave,
                         relay: self.attestationRelay,
-                        repo: self.repo
+                        pin: self.pin
                     )
                     // A verification that finishes despite a late close is
                     // not kept or used.

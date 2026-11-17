@@ -45,46 +45,46 @@ struct Attestor: Sendable {
     }
 
     /// Whether the verifier takes the config from the caller rather than from
-    /// a repo pin, which rules out discovering a router
+    /// a pin, which rules out discovering a router
     var callerAuthorizesConfig: Bool {
         verifier.callerAuthorizesConfig
     }
 
-    /// Throws the configuration error that every verification against repo
+    /// Throws the configuration error that every verification against pin
     /// would end in, without any I/O.
-    func checkRepoVerifiability(_ repo: String) throws {
-        try verifier.checkRepoVerifiability(repo)
+    func checkPinVerifiability(_ pin: Pin) throws {
+        try verifier.checkPinVerifiability(pin)
     }
 
-    /// Verifies host against repo, fetching through relay when it is not nil.
+    /// Verifies host against pin, fetching through relay when it is not nil.
     /// A failed fetch or verification is retried once against fresh evidence;
     /// a configuration error is not.
-    func attest(host: String, relay: String?, repo: String) async throws -> Verification {
+    func attest(host: String, relay: String?, pin: Pin) async throws -> Verification {
         let verified: Verification
         do {
-            verified = try await verifyOnce(host: host, relay: relay, repo: repo)
+            verified = try await verifyOnce(host: host, relay: relay, pin: pin)
         } catch let error as TinfoilError where error.isRetryable {
             try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
-            verified = try await verifyOnce(host: host, relay: relay, repo: repo)
+            verified = try await verifyOnce(host: host, relay: relay, pin: pin)
         }
         return try accepted(verified, host: host)
     }
 
     /// Returns the host and verification of the first of Tinfoil's routers that
-    /// verifies against the router repository, trying each once, or nil when
+    /// verifies against the router pin, trying each once, or nil when
     /// none does. The caller then uses the fallback router, which it verifies
     /// itself. A router list that cannot be fetched or read leaves only the
     /// fallback, and so does reaching discoveryTimeout, however many routers
     /// are left.
     func discoverRouter() async throws -> DiscoveredRouter? {
-        let discovered = await firstVerifiedRouter(repo: TinfoilConstants.defaultGithubRepo)
+        let discovered = await firstVerifiedRouter(pin: TinfoilConstants.routerPin)
         try Task.checkCancellation()
         return discovered
     }
 
     /// The first discovered router that verifies before discoveryTimeout, or
     /// nil. Reaching the deadline cancels the fetch in flight.
-    private func firstVerifiedRouter(repo: String) async -> DiscoveredRouter? {
+    private func firstVerifiedRouter(pin: Pin) async -> DiscoveredRouter? {
         let deadline = now().advanced(by: .seconds(discoveryTimeout))
         return await withTaskGroup(of: DiscoveredRouter?.self) { group in
             group.addTask {
@@ -94,7 +94,7 @@ struct Attestor: Sendable {
                     guard !Task.isCancelled, now() < deadline else {
                         return nil
                     }
-                    if let verified = try? await attestOnce(host: router, relay: nil, repo: repo) {
+                    if let verified = try? await attestOnce(host: router, relay: nil, pin: pin) {
                         return DiscoveredRouter(host: router, verification: verified)
                     }
                 }
@@ -110,15 +110,15 @@ struct Attestor: Sendable {
         }
     }
 
-    private func attestOnce(host: String, relay: String?, repo: String) async throws -> Verification {
-        try accepted(await verifyOnce(host: host, relay: relay, repo: repo), host: host)
+    private func attestOnce(host: String, relay: String?, pin: Pin) async throws -> Verification {
+        try accepted(await verifyOnce(host: host, relay: relay, pin: pin), host: host)
     }
 
-    private func verifyOnce(host: String, relay: String?, repo: String) async throws -> Verification {
+    private func verifyOnce(host: String, relay: String?, pin: Pin) async throws -> Verification {
         let nonce = verifier.newNonce()
         let url = try verifier.attestationURL(host: host, relay: relay, nonce: nonce)
         let document = try await fetch(url)
-        return try verifier.verify(document: document, nonce: nonce, repo: repo)
+        return try verifier.verify(document: document, nonce: nonce, pin: pin)
     }
 
     /// A rejection is a decision about this evidence, so callers check it

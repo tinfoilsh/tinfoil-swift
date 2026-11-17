@@ -50,7 +50,7 @@ final class AttestorTests: XCTestCase {
         let network = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
 
         _ = try await attestor(FakeVerifier(), network)
-            .attest(host: "enclave.example", relay: nil, repo: "org/repo")
+            .attest(host: "enclave.example", relay: nil, pin: Pin(repo: "org/repo"))
 
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"])
     }
@@ -59,7 +59,7 @@ final class AttestorTests: XCTestCase {
         let network = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
 
         _ = try await attestor(FakeVerifier(), network)
-            .attest(host: "enclave.example", relay: "relay.example", repo: "org/repo")
+            .attest(host: "enclave.example", relay: "relay.example", pin: Pin(repo: "org/repo"))
 
         let url = try XCTUnwrap(network.urls.first)
         XCTAssertEqual(url.host, "relay.example")
@@ -72,7 +72,7 @@ final class AttestorTests: XCTestCase {
             return FakeNetwork.document("ok", for: url)
         }
 
-        _ = try await attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, repo: "org/repo")
+        _ = try await attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, pin: Pin(repo: "org/repo"))
 
         XCTAssertEqual(network.urls.count, 2)
         XCTAssertNotEqual(network.urls[0], network.urls[1], "Each attempt fetches with its own nonce.")
@@ -82,7 +82,7 @@ final class AttestorTests: XCTestCase {
         let network = FakeNetwork { url, _ in FakeNetwork.document("reject", for: url) }
 
         await assertThrows(
-            { try await self.attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, repo: "org/repo") },
+            { try await self.attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, pin: Pin(repo: "org/repo")) },
             { $0 as? TinfoilError == .attestation("rejected") }
         )
         XCTAssertEqual(network.urls.count, 2)
@@ -92,7 +92,7 @@ final class AttestorTests: XCTestCase {
         let network = FakeNetwork { url, _ in FakeNetwork.document("config", for: url) }
 
         await assertThrows(
-            { try await self.attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, repo: "org/repo") },
+            { try await self.attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, pin: Pin(repo: "org/repo")) },
             { $0 as? TinfoilError == .configuration("bad repo") }
         )
         XCTAssertEqual(network.urls.count, 1)
@@ -101,7 +101,7 @@ final class AttestorTests: XCTestCase {
     func testCancellationDuringTheRetryDelay() async {
         let network = FakeNetwork { _, _ in throw TinfoilError.network("unavailable") }
         let attestor = attestor(FakeVerifier(), network, retryDelay: 60)
-        let attempt = Task { try await attestor.attest(host: "enclave.example", relay: nil, repo: "org/repo") }
+        let attempt = Task { try await attestor.attest(host: "enclave.example", relay: nil, pin: Pin(repo: "org/repo")) }
         try? await Task.sleep(nanoseconds: 100_000_000)
         attempt.cancel()
 
@@ -127,7 +127,8 @@ final class AttestorTests: XCTestCase {
             ["atc.tinfoil.sh", "router-a.example", "router-b.example"],
             "Each discovered router is tried once, without a retry."
         )
-        XCTAssertEqual(Set(verifier.repos), [TinfoilConstants.defaultGithubRepo])
+        let router = "tinfoilsh/confidential-model-router"
+        XCTAssertEqual(Set(verifier.pins), [Pin(repo: router, project: router)])
     }
 
     func testDiscoveryFallsBackWhenNoRouterVerifies() async throws {
@@ -227,7 +228,7 @@ final class AttestorTests: XCTestCase {
         }
 
         _ = try await attestor(FakeVerifier(), network, verificationCheck: { verified.record($0.configRepo) })
-            .attest(host: "enclave.example", relay: nil, repo: "org/repo")
+            .attest(host: "enclave.example", relay: nil, pin: Pin(repo: "org/repo"))
 
         XCTAssertEqual(verified.values, ["org/repo"], "A failed attempt is never passed to the callback.")
     }
@@ -238,7 +239,7 @@ final class AttestorTests: XCTestCase {
         await assertThrows(
             {
                 try await self.attestor(FakeVerifier(), network, verificationCheck: { _ in throw Refusal() })
-                    .attest(host: "enclave.example", relay: nil, repo: "org/repo")
+                    .attest(host: "enclave.example", relay: nil, pin: Pin(repo: "org/repo"))
             },
             { error in
                 guard case TinfoilError.attestationError(let failure) = error else { return false }

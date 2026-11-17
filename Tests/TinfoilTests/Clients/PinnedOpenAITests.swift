@@ -57,7 +57,7 @@ final class PinnedOpenAITests: XCTestCase {
         let connection = try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: "enclave.example",
-                repo: "org/repo",
+                pin: Pin(repo: "org/repo"),
                 attestationRelay: nil,
                 attestor: Attestor(verifier: FakeVerifier(), fetch: { try network.fetch($0) }, retryDelay: 0)
             ),

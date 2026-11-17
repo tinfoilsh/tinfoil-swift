@@ -37,7 +37,7 @@ final class VerificationCheckTests: XCTestCase {
         return try await EnclaveHTTPClient(verifying: EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: "enclave.example",
-                repo: "org/repo",
+                pin: Pin(repo: "org/repo"),
                 attestationRelay: nil,
                 attestor: Attestor(
                     verifier: FakeVerifier(),

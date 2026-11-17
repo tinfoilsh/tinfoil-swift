@@ -88,8 +88,9 @@ public final class RouterHTTPClient: Sendable {
     /// when `baseURL` is a proxy.
     public var enclave: String { connection.enclave }
 
-    /// The repository the router is verified against
-    public var repo: String { connection.repo }
+    /// The pin the router is verified against: Tinfoil's router, as a
+    /// repository and as a registry project
+    public var pin: Pin { connection.pin }
 
     /// The last successful verification, without checking it. It may have
     /// expired or been rejected; use `ensureVerified()` for one that is valid.

@@ -15,18 +15,17 @@ protocol AttestationVerifier: Sendable {
     /// port, not a URL.
     func attestationURL(host: String, relay: String?, nonce: Data) throws -> URL
 
-    /// Appraises document, fetched with nonce, against repo, a trusted
-    /// owner/name[@tag][@sha256:digest] reference. Fails with a
+    /// Appraises document, fetched with nonce, against pin. Fails with a
     /// `TinfoilError`, including for a result already past its freshness
     /// deadline.
-    func verify(document: Data, nonce: Data, repo: String) throws -> Verification
+    func verify(document: Data, nonce: Data, pin: Pin) throws -> Verification
 
     /// Whether the caller supplies or approves the config, with an embedded
-    /// config or a config authorizer, rather than a repo pin authenticating
+    /// config or a config authorizer, rather than a pin authenticating
     /// it. Such a verifier needs an explicit enclave.
     var callerAuthorizesConfig: Bool { get }
 
-    /// Throws the configuration error that `verify` would throw for repo
+    /// Throws the configuration error that `verify` would throw for pin
     /// whatever the document, so a client can refuse it before any I/O.
-    func checkRepoVerifiability(_ repo: String) throws
+    func checkPinVerifiability(_ pin: Pin) throws
 }
