@@ -41,15 +41,17 @@ let response = try await client.chats(query: query)
 print(response.choices.first?.message.content ?? "No response")
 ```
 
-`Client` uses one of Tinfoil's routers. To choose the enclave, pin the repo to a tag or digest, send through a proxy, relay attestation, tighten the trust policy or reject verifications, use an `EnclaveOpenAIClient`, which has the same OpenAI methods:
+`Client` uses one of Tinfoil's routers. To choose the enclave, pin what it runs, send through a proxy, relay attestation, tighten the trust policy or reject verifications, use an `EnclaveOpenAIClient`, which has the same OpenAI methods:
 
 ```swift
 let client = try await EnclaveOpenAIClient(
     enclave: "enclave.example.com",
-    repo: "org/repo@v1.2.3",
+    pin: Pin(repo: "org/repo@v1.2.3"),
     apiKey: "YOUR_API_KEY"
 )
 ```
+
+A `Pin` names what the enclave must run: `Pin(repo:)` a GitHub repository, `owner/name[@tag][@sha256:digest]`, and `Pin(project:)` a config registry project, `org/project[@revision][@sha256:digest]`. The two are separate namespaces, so neither is satisfied by the other's evidence; `Pin(repo:project:)` accepts either, and `Pin.none` accepts any config that the verifier's trust authorizes.
 
 `RouterOpenAIClient` does the same for Tinfoil's routers. Each sends through an `EnclaveHTTPClient` or `RouterHTTPClient`, which you can also create directly to send requests of your own with `data(for:)`. Both are verified before they are returned, verify again by themselves when the verification expires or the enclave rejects its key, and can be closed with `close()`. Their doc comments describe the parameters and request rules.
 
@@ -66,7 +68,7 @@ let verifier = try Verifier(
     pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
     freshnessMaxAge: 3600
 )
-let client = try await EnclaveOpenAIClient(enclave: host, repo: repo, verifier: verifier, apiKey: key)
+let client = try await EnclaveOpenAIClient(enclave: host, pin: pin, verifier: verifier, apiKey: key)
 ```
 
 It also takes config registry IDs, config and freshness signing keys, embedded references, and a `configAuthorizer` closure for configs that your application approves. Pass `verificationCheck` to inspect each `Verification` before its keys are used, and throw to reject it.

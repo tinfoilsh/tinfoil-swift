@@ -33,9 +33,9 @@ let client = try await Client(apiKey: key)
 |---|---|
 | `apiKey`, `apiKeyProvider` | the same; one of them is required |
 | `TINFOIL_API_KEY` when `apiKey` is nil | no longer read: pass the key |
-| `githubRepo` with no enclave (Tinfoil's router) | `Client` or `RouterOpenAIClient`; the router's repository is fixed |
-| `githubRepo` with an enclave you name | `EnclaveOpenAIClient(enclave:repo:apiKey:)` |
-| `baseURL` (a proxy) and `attestationBundleURL` | `EnclaveOpenAIClient(enclave:repo:transportMode: .ehbp, baseURL:attestationRelay:apiKey:)`, or `RouterOpenAIClient(transportMode: .ehbp, baseURL:attestationRelay:apiKey:)`; see below |
+| `githubRepo` with no enclave (Tinfoil's router) | `Client` or `RouterOpenAIClient`; the router's pin is fixed |
+| `githubRepo` with an enclave you name | `EnclaveOpenAIClient(enclave:pin:apiKey:)` with `pin: Pin(repo: "org/repo")` |
+| `baseURL` (a proxy) and `attestationBundleURL` | `EnclaveOpenAIClient(enclave:pin:transportMode: .ehbp, baseURL:attestationRelay:apiKey:)`, or `RouterOpenAIClient(transportMode: .ehbp, baseURL:attestationRelay:apiKey:)`; see below |
 | `parsingOptions`, `customHeaders`, `tinfoilEvents` | the same, on every OpenAI client |
 | `userCacheSecret` | the same on `RouterOpenAIClient`, `EnclaveOpenAIClient` and the gateway clients; see "Prompt cache" |
 | `onVerification: (VerificationDocument?) -> Void` | `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, which observes, and `verificationCheck: (Verification) throws -> Void`, which can reject an enclave |
@@ -56,7 +56,7 @@ carry no credentials, query or fragment.
 ```swift
 let client = try await EnclaveOpenAIClient(
     enclave: "enclave.example.com",
-    repo: "org/repo",
+    pin: Pin(repo: "org/repo"),
     transportMode: .ehbp,
     baseURL: URL(string: "https://proxy.example.com/v1/")!,
     attestationRelay: "proxy.example.com",
@@ -79,8 +79,8 @@ initializer returns, so there is no separate `verify()`.
 
 | 0.8.x | now |
 |---|---|
-| `SecureClient(githubRepo:enclaveURL:)` | `try await EnclaveHTTPClient(enclave:repo:)` (the enclave is a host, not a URL) |
-| `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `EnclaveHTTPClient(enclave:repo:attestationRelay:)` |
+| `SecureClient(githubRepo:enclaveURL:)` | `try await EnclaveHTTPClient(enclave:pin:)` (the enclave is a host, not a URL) |
+| `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `EnclaveHTTPClient(enclave:pin:attestationRelay:)` |
 | `verify()` | `ensureVerified()` (valid now, verifying only if needed) or `reverify()` |
 | `verificationDocument`, `verifiedGroundTruth` | `current`, a `Verification` |
 | `verifiedEnclaveURL` | `enclave` and `baseURL` |
@@ -142,7 +142,10 @@ EHBP response and its session recovery token.
 | `TINFOIL_API_KEY` read when no key is given | not read: pass `apiKey` or `apiKeyProvider` |
 | `localizedDescription` of a `TinfoilError` | now led by the category, as in "configuration error: …"; `message` is the text alone |
 | a base URL with `?` or `#` | refused |
-| `repo: ""` on `EnclaveHTTPClient` or `EnclaveOpenAIClient`, accepting any config that the verifier's trust authorizes (by default, Tinfoil's public registry) | `repo: nil`; an empty string is refused, so that a missing value can't widen the trust by accident. `repo` on the client is `nil` in that case |
+| `repo: "org/repo"` on `EnclaveHTTPClient` or `EnclaveOpenAIClient` | `pin: Pin(repo: "org/repo")` for a GitHub repository, or `pin: Pin(project: "org/project")` for a config registry project. The two are separate namespaces: a repository is matched only by its signed release, a project only by a registry deployment. `Pin(repo:project:)` accepts either |
+| `repo: ""` or `repo: nil`, accepting any config that the verifier's trust authorizes (by default, Tinfoil's public registry) | `pin: .none`; an empty string in a pin is refused, so that a missing value can't widen the trust by accident |
+| `repo` on `EnclaveHTTPClient` and `RouterHTTPClient` | `pin`, a `Pin`; the router's names Tinfoil's router as a repository and as a project |
+| a `repo` checked against an embedded config's name | `Pin(project:)` |
 
 `Verifier` takes every trust option of the verifier: pinned registers, a
 freshness bound, config registry IDs, config and freshness signing keys (PEM),
