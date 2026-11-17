@@ -127,8 +127,7 @@ final class AttestorTests: XCTestCase {
             ["atc.tinfoil.sh", "router-a.example", "router-b.example"],
             "Each discovered router is tried once, without a retry."
         )
-        let router = "tinfoilsh/confidential-model-router"
-        XCTAssertEqual(Set(verifier.pins), [Pin(repo: router, project: router)])
+        XCTAssertEqual(Set(verifier.pins), [TinfoilConstants.routerPin])
     }
 
     func testDiscoveryFallsBackWhenNoRouterVerifies() async throws {
