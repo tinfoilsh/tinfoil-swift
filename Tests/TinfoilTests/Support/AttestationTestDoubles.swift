@@ -7,12 +7,11 @@ import Foundation
 final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
     private let lock = NSLock()
     private var issued: UInt8 = 0
-    private var _repos: [String] = []
+    private var _pins: [Pin] = []
     /// The clock a verification's hour of freshness is counted from
     private let now: @Sendable () -> Date
     let callerAuthorizesConfig: Bool
-    /// A repo that checkRepoVerifiability refuses, as a verifier with a config
-    /// authorizer refuses any non-empty repo
+    /// A repo that checkPinVerifiability refuses
     private let refusedRepo: String?
 
     init(
@@ -25,16 +24,16 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         self.refusedRepo = refusedRepo
     }
 
-    func checkRepoVerifiability(_ repo: String) throws {
-        if repo == refusedRepo {
-            throw TinfoilError.configuration("repo \(repo) cannot be verified")
+    func checkPinVerifiability(_ pin: Pin) throws {
+        if let refusedRepo, pin.repo == refusedRepo {
+            throw TinfoilError.configuration("repo \(refusedRepo) cannot be verified")
         }
     }
 
-    var repos: [String] {
+    var pins: [Pin] {
         lock.lock()
         defer { lock.unlock() }
-        return _repos
+        return _pins
     }
 
     func newNonce() -> Data {
@@ -52,10 +51,11 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         return URL(string: url)!
     }
 
-    func verify(document: Data, nonce: Data, repo: String) throws -> Verification {
+    func verify(document: Data, nonce: Data, pin: Pin) throws -> Verification {
         lock.lock()
-        _repos.append(repo)
+        _pins.append(pin)
         lock.unlock()
+        let repo = pin.repo ?? pin.project ?? ""
         let parts = String(decoding: document, as: UTF8.self).split(separator: ":").map(String.init)
         guard parts.count == 2, parts[1] == nonce.hexString else {
             throw TinfoilError.attestation("document is not bound to the nonce")

@@ -21,9 +21,8 @@ final class EnclaveConnection: Sendable {
     /// is a proxy.
     var enclave: String { handle.enclave }
 
-    /// The repository the enclave is verified against, with any tag or
-    /// digest pins
-    var repo: String { handle.repo }
+    /// The pin the enclave is verified against
+    var pin: Pin { handle.pin }
 
     let handle: EnclaveHandle
     /// The prompt-cache secret injected into eligible request bodies, already
@@ -68,7 +67,7 @@ final class EnclaveConnection: Sendable {
         return try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: discovered?.host ?? TinfoilConstants.fallbackEnclave,
-                repo: TinfoilConstants.defaultGithubRepo,
+                pin: TinfoilConstants.routerPin,
                 attestationRelay: attestationRelay,
                 attestor: attestor,
                 initial: discovered?.verification,

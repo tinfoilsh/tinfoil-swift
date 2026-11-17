@@ -11,7 +11,7 @@ public let version = TinfoilConstants.sdkVersion
 ///
 /// It takes only OpenAI-level options and exposes nothing about the route,
 /// so the route can change without breaking callers. To choose the enclave,
-/// pin a repo, tighten the verification policy, send through a proxy or
+/// pin what it runs, tighten the verification policy, send through a proxy or
 /// observe verifications, use `EnclaveOpenAIClient` or `RouterOpenAIClient`.
 public final class Client: OpenAICompatibleClient, Sendable {
     public let openAI: OpenAI

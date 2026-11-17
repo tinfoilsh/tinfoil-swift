@@ -87,25 +87,44 @@ final class VerifierTests: XCTestCase {
         }
     }
 
-    /// A repo that a verifier can never accept is refused before any I/O.
-    func testRepoChecksBeforeIO() throws {
+    /// A pin that a verifier can never accept is refused before any I/O, each
+    /// part in its own namespace.
+    func testPinChecksBeforeIO() throws {
         let authorized = try Verifier(configAuthorizer: { _ in })
         XCTAssertTrue(authorized.backend.callerAuthorizesConfig)
-        XCTAssertNoThrow(try authorized.backend.checkRepoVerifiability(""))
+        XCTAssertNoThrow(try authorized.backend.checkPinVerifiability(Pin.none))
         assertConfigurationError(
-            try authorized.backend.checkRepoVerifiability("org/repo"),
+            try authorized.backend.checkPinVerifiability(Pin(project: "org/repo")),
             containing: "config authorizer cannot authenticate"
         )
+
+        let embedded = try Verifier(embeddedReferences: .init(config: .bytes(fixture.config, name: "/org/project/v1")))
+        XCTAssertNoThrow(try embedded.backend.checkPinVerifiability(Pin(project: "org/project@v1")))
+        assertConfigurationError(
+            try embedded.backend.checkPinVerifiability(Pin(project: "org/other")),
+            containing: "does not match"
+        )
+        assertConfigurationError(
+            try embedded.backend.checkPinVerifiability(Pin(repo: "org/project")),
+            containing: "registry collateral only"
+        )
+
+        let defaults = try Verifier()
+        XCTAssertNoThrow(try defaults.backend.checkPinVerifiability(Pin(repo: "org/repo")))
+        XCTAssertNoThrow(try defaults.backend.checkPinVerifiability(Pin(project: "org/project")))
+        XCTAssertThrowsError(try defaults.backend.checkPinVerifiability(Pin(repo: "not a reference")))
+        XCTAssertThrowsError(try defaults.backend.checkPinVerifiability(Pin(project: "not a reference")))
+
         assertConfigurationError(
             try EnclaveHTTPClient.connection(
                 enclave: "enclave.example",
-                repo: "org/repo",
+                pin: Pin(project: "org/repo"),
                 transportMode: .ehbp,
                 baseURL: nil,
                 attestationRelay: nil,
                 userCacheSecret: nil,
                 attestor: Attestor(verifier: authorized.backend, fetch: { url in
-                    XCTFail("fetched \(url) despite a repo the verifier refuses")
+                    XCTFail("fetched \(url) despite a pin the verifier refuses")
                     throw TinfoilError.network("unreachable")
                 }),
                 onVerificationResult: nil
@@ -114,13 +133,13 @@ final class VerifierTests: XCTestCase {
         )
     }
 
-    /// nil, not "", asks for any config that the verifier's trust authorizes, so a
-    /// missing value can't widen the trust by accident.
-    func testAnEmptyRepoIsRefusedAndNilAcceptsRegistryTrust() throws {
-        func connection(repo: String?, verifier: Verifier) throws -> EnclaveConnection {
+    /// Pin.none, not "", asks for any config that the verifier's trust
+    /// authorizes, so a missing value can't widen the trust by accident.
+    func testAnEmptyPinPartIsRefusedAndNoneAcceptsRegistryTrust() throws {
+        func connection(pin: Pin, verifier: Verifier) throws -> EnclaveConnection {
             try EnclaveHTTPClient.connection(
                 enclave: "enclave.example",
-                repo: repo,
+                pin: pin,
                 transportMode: .ehbp,
                 baseURL: nil,
                 attestationRelay: nil,
@@ -132,10 +151,15 @@ final class VerifierTests: XCTestCase {
                 onVerificationResult: nil
             )
         }
-        assertConfigurationError(try connection(repo: "", verifier: Verifier()), containing: "repo must not be empty")
-        XCTAssertEqual(try connection(repo: nil, verifier: Verifier()).repo, "", "nil reaches the verifier as Go's empty repo.")
-        XCTAssertNoThrow(try connection(repo: nil, verifier: Verifier(configAuthorizer: { _ in })))
-        XCTAssertEqual(try connection(repo: "org/repo@v1", verifier: Verifier()).repo, "org/repo@v1")
+        for empty in [Pin(repo: ""), Pin(project: ""), Pin(repo: "org/repo", project: ""), Pin(repo: "", project: "org/project")] {
+            assertConfigurationError(try connection(pin: empty, verifier: Verifier()), containing: "must not be empty")
+        }
+        XCTAssertEqual(try connection(pin: Pin.none, verifier: Verifier()).pin, Pin.none)
+        XCTAssertNoThrow(try connection(pin: Pin.none, verifier: Verifier(configAuthorizer: { _ in })))
+        XCTAssertEqual(try connection(pin: Pin(repo: "org/repo@v1"), verifier: Verifier()).pin, Pin(repo: "org/repo@v1"))
+        let project = try connection(pin: Pin(project: "org/project@v1"), verifier: Verifier()).pin
+        XCTAssertEqual(project.project, "org/project@v1")
+        XCTAssertNil(project.repo, "A project is not also read as a repository.")
     }
 
     /// A verifier that takes the config from the caller can't pick a router.
@@ -171,7 +195,7 @@ final class VerifierTests: XCTestCase {
                 throw TinfoilError.configuration("config is not on the allow list")
             }
         )
-        XCTAssertThrowsError(try verifier.backend.verify(document: fixture.document, nonce: fixture.nonce, repo: "")) { error in
+        XCTAssertThrowsError(try verifier.backend.verify(document: fixture.document, nonce: fixture.nonce, pin: Pin.none)) { error in
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("expected an attestation error, got \(error)")
             }
@@ -191,7 +215,7 @@ final class VerifierTests: XCTestCase {
             embeddedReferences: .init(runtime: fixture.runtime, platform: fixture.platform),
             configAuthorizer: { seen.add($0) }
         )
-        XCTAssertThrowsError(try verifier.backend.verify(document: fixture.document, nonce: fixture.nonce, repo: "")) { error in
+        XCTAssertThrowsError(try verifier.backend.verify(document: fixture.document, nonce: fixture.nonce, pin: Pin.none)) { error in
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("expected an attestation error, got \(error)")
             }
@@ -208,7 +232,7 @@ final class VerifierTests: XCTestCase {
             configAuthorizer: { seen.add($0) }
         )
         DispatchQueue.concurrentPerform(iterations: 8) { _ in
-            _ = try? verifier.backend.verify(document: fixture.document, nonce: fixture.nonce, repo: "")
+            _ = try? verifier.backend.verify(document: fixture.document, nonce: fixture.nonce, pin: Pin.none)
         }
         XCTAssertEqual(seen.endorsements.count, 8)
     }

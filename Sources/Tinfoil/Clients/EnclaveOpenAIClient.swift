@@ -17,7 +17,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     }
 
     /// Creates an `EnclaveHTTPClient` for `enclave`, verified as
-    /// `EnclaveHTTPClient.init(enclave:repo:…)` verifies it, and an OpenAI
+    /// `EnclaveHTTPClient.init(enclave:pin:…)` verifies it, and an OpenAI
     /// client over it. The API key is checked before any network I/O.
     ///
     /// The enclave parameters, `transportMode` included, are those of
@@ -38,7 +38,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     ///     values of the `X-Tinfoil-Events` header
     public convenience init(
         enclave: String,
-        repo: String?,
+        pin: Pin,
         transportMode: TransportMode = .tls,
         baseURL: URL? = nil,
         attestationRelay: String? = nil,
@@ -56,7 +56,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         let staticApiKey = try OpenAI.apiKey(apiKey, provider: apiKeyProvider)
         let httpClient = try await EnclaveHTTPClient(
             enclave: enclave,
-            repo: repo,
+            pin: pin,
             transportMode: transportMode,
             baseURL: baseURL,
             attestationRelay: attestationRelay,
@@ -78,7 +78,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
 
     /// Creates an OpenAI client that sends through `httpClient`, in its
     /// transport mode. It does no network I/O: the client was
-    /// verified when it was created. See `init(enclave:repo:…)` for the other
+    /// verified when it was created. See `init(enclave:pin:…)` for the other
     /// parameters.
     public init(
         httpClient: EnclaveHTTPClient,

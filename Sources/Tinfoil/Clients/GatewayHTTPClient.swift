@@ -99,11 +99,12 @@ public final class GatewayHTTPClient: Sendable {
             catalog: source,
             secret: UserCacheSecret.resolve(explicit: userCacheSecret),
             makeReplica: { replica, attestor in
-                try attestor.checkRepoVerifiability(replica.reference)
+                let pin = GatewayCatalog.pin(replica.reference)
+                try attestor.checkPinVerifiability(pin)
                 return try EnclaveConnection(
                     handle: EnclaveHandle(
                         enclave: replica.host,
-                        repo: replica.reference,
+                        pin: pin,
                         attestationRelay: relay,
                         attestor: attestor,
                         onVerificationResult: onVerificationResult

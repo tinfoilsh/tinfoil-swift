@@ -16,7 +16,7 @@ final class CloseTests: XCTestCase {
         try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: "enclave.example",
-                repo: "org/repo",
+                pin: Pin(repo: "org/repo"),
                 attestationRelay: nil,
                 attestor: Attestor(verifier: FakeVerifier(), fetch: { try network.fetch($0) }, retryDelay: 0)
             ),
@@ -104,7 +104,7 @@ final class CloseTests: XCTestCase {
             let reported = Box<[Result<Verification, TinfoilError>]>(value: [])
             let handle = EnclaveHandle(
                 enclave: "enclave.example",
-                repo: "org/repo",
+                pin: Pin(repo: "org/repo"),
                 attestationRelay: nil,
                 attestor: Attestor(verifier: FakeVerifier(), fetch: { url in
                     await entered.open()
