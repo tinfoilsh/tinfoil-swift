@@ -80,7 +80,7 @@ initializer returns, so there is no separate `verify()`.
 | 0.8.x | now |
 |---|---|
 | `SecureClient(githubRepo:enclaveURL:)` | `try await EnclaveHTTPClient(enclave:pin:)` (the enclave is a host, not a URL) |
-| `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `EnclaveHTTPClient(enclave:pin:attestationRelay:)` |
+| `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `try await EnclaveHTTPClient(enclave:pin:attestationRelay:)` |
 | `verify()` | `ensureVerified()` (valid now, verifying only if needed) or `reverify()` |
 | `verificationDocument`, `verifiedGroundTruth` | `current`, a `Verification` |
 | `verifiedEnclaveURL` | `enclave` and `baseURL` |
