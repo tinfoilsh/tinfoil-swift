@@ -81,10 +81,11 @@ func refuseUnsealedTraffic(_ request: URLRequest) throws {
 }
 
 /// Follows a redirect only within one origin: a redirect elsewhere would
-/// carry the request's unsealed headers and sealed body to a server the
-/// client isn't bound to.
-/// URLSession then returns the redirect response itself, which
+/// carry the request's unsealed headers to a server the client isn't bound
+/// to. URLSession then returns the redirect response itself, which
 /// `refusedRedirect` turns into an error.
+/// This applies to a request without a body. The EHBP client refuses every
+/// redirect that answers a sealed request, within the origin or not.
 final class EHBPRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
     let origin: String
 
@@ -134,6 +135,10 @@ private final class EHBPSessions: @unchecked Sendable {
     }
 }
 
+/// The message for a redirect that answered a sealed request, which the
+/// EHBP client refuses: nothing authenticates where it points.
+let sealedRequestRedirected = "refusing redirect: an EHBP request with a sealed body is not redirected"
+
 /// The error for a redirect response the session didn't follow. A redirect
 /// within the origin is followed, so one that reaches the caller led
 /// elsewhere.
@@ -171,7 +176,8 @@ private func makePinnedVerifiedState(
 
 /// How every EHBP request is sent: sealed to the current key, replayed once
 /// under a refreshed key if the enclave rejects it, and refused if it was
-/// redirected off its origin.
+/// redirected off its origin or, when it carries a sealed body, redirected
+/// at all.
 private enum EHBPReplayPolicy {
     static let maximumAttempts = 2
 
@@ -212,6 +218,8 @@ private enum EHBPReplayPolicy {
                     attempt: attempt
                 )
                 continue
+            } catch let error as EHBPError where error.code == .unexpectedRedirect {
+                throw TinfoilError.configuration(sealedRequestRedirected)
             }
             if let response = sent.response as? HTTPURLResponse, let refusal = refusedRedirect(response, origin: baseURL) {
                 throw refusal

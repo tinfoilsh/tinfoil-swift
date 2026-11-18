@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 import Foundation
 import OpenAI
 import EHBP
@@ -59,6 +60,8 @@ final class LocalTestServer: @unchecked Sendable {
         var includeNonce: Bool
         /// Sent as the Location header, for redirects
         var location: String? = nil
+        /// Overrides the server's `sealingKey` for this response
+        var sealingKey: Curve25519.KeyAgreement.PrivateKey? = nil
     }
 
     var responseNonce: String = Data(repeating: 0xAB, count: 32).hexString
@@ -66,6 +69,10 @@ final class LocalTestServer: @unchecked Sendable {
     var responseStatusCode: Int = 200
     var responseContentType: String = "application/json"
     var includeResponseNonce = true
+    /// The private key requests are sealed to. With it, a response that
+    /// carries the nonce and has no body is sent as one sealed empty chunk,
+    /// the least a successful EHBP response holds.
+    var sealingKey: Curve25519.KeyAgreement.PrivateKey?
     /// Responses served in order, one per request, before falling back to the
     /// default fields above.
     var queuedResponses: [Response] = []
@@ -204,7 +211,7 @@ final class LocalTestServer: @unchecked Sendable {
             customResponse = responseHandler?(request)
         }
 
-        let response = buildHTTPResponse(customResponse)
+        let response = buildHTTPResponse(customResponse, for: requestStore.lastRequest)
         _ = response.withUnsafeBytes { ptr in
             send(clientSocket, ptr.baseAddress, response.count, 0)
         }
@@ -250,7 +257,30 @@ final class LocalTestServer: @unchecked Sendable {
         return CapturedHTTPRequest(method: method, path: path, headers: headers, body: body)
     }
 
-    private func buildHTTPResponse(_ customResponse: Response? = nil) -> Data {
+    private func sealedEmptyChunk(for request: CapturedHTTPRequest?, key: Curve25519.KeyAgreement.PrivateKey) -> Data? {
+        guard let encapsulatedKey = request?.headers[EHBPProtocol.encapsulatedKeyHeader].flatMap(Data.init(hexString:)),
+              let nonce = Data(hexString: responseNonce),
+              let recipient = try? HPKE.Recipient(
+                  privateKey: key,
+                  ciphersuite: .init(kem: .Curve25519_HKDF_SHA256, kdf: .HKDF_SHA256, aead: .AES_GCM_256),
+                  info: Data(EHBPConstants.hpkeRequestInfo.utf8),
+                  encapsulatedKey: encapsulatedKey
+              ),
+              let secret = try? recipient.exportSecret(
+                  context: Data(EHBPConstants.exportLabel.utf8), outputByteCount: EHBPConstants.exportLength
+              ),
+              let material = try? deriveResponseKeys(
+                  exportedSecret: secret.withUnsafeBytes { Data($0) },
+                  requestEnc: encapsulatedKey, responseNonce: nonce
+              ),
+              let ciphertext = try? encryptChunk(keyMaterial: material, seq: 0, plaintext: Data()) else {
+            return nil
+        }
+        var length = UInt32(ciphertext.count).bigEndian
+        return Data(bytes: &length, count: EHBPConstants.responseLengthPrefixBytes) + ciphertext
+    }
+
+    private func buildHTTPResponse(_ customResponse: Response? = nil, for request: CapturedHTTPRequest? = nil) -> Data {
         let next = customResponse ?? (queuedResponses.isEmpty
             ? Response(
                 statusCode: responseStatusCode,
@@ -259,6 +289,11 @@ final class LocalTestServer: @unchecked Sendable {
                 includeNonce: includeResponseNonce
             )
             : queuedResponses.removeFirst())
+        var body = next.body
+        if next.includeNonce, body.isEmpty, let key = next.sealingKey ?? sealingKey,
+           let sealed = sealedEmptyChunk(for: request, key: key) {
+            body = sealed
+        }
         var response = "HTTP/1.1 \(next.statusCode) OK\r\n"
         response += "Content-Type: \(next.contentType)\r\n"
         if let location = next.location {
@@ -267,12 +302,12 @@ final class LocalTestServer: @unchecked Sendable {
         if next.includeNonce {
             response += "\(EHBPProtocol.responseNonceHeader): \(responseNonce)\r\n"
         }
-        response += "Content-Length: \(next.body.count)\r\n"
+        response += "Content-Length: \(body.count)\r\n"
         response += "Connection: close\r\n"
         response += "\r\n"
 
         var responseData = Data(response.utf8)
-        responseData.append(next.body)
+        responseData.append(body)
         return responseData
     }
 }
@@ -281,15 +316,18 @@ final class EHBPTests: XCTestCase {
 
     // MARK: - Test Constants
 
-    /// A valid 32-byte X25519 public key for testing
-    private let testPublicKey = Data(repeating: 0x42, count: 32)
+    private let testPrivateKey = Curve25519.KeyAgreement.PrivateKey()
+    /// The key a request is sealed to after a rotation
+    private let rotatedPrivateKey = Curve25519.KeyAgreement.PrivateKey()
+
+    private var testPublicKey: Data { testPrivateKey.publicKey.rawRepresentation }
 
     private var server: LocalTestServer!
 
     override func setUp() async throws {
         try await super.setUp()
         server = LocalTestServer()
-        server.responseBody = makeEncryptedResponse()
+        server.sealingKey = testPrivateKey
         try server.start()
     }
 
@@ -649,7 +687,6 @@ final class EHBPTests: XCTestCase {
 
     func testARecoverableResponseCarriesItsRequestsToken() async throws {
         server.responseContentType = "text/event-stream"
-        server.responseBody = makeEncryptedResponse()
 
         let recoverable = try await pinnedSession().recoverableBytes(for: chatRequest())
 
@@ -666,7 +703,6 @@ final class EHBPTests: XCTestCase {
 
     func testConcurrentRecoverableRequestsEachGetTheirOwnToken() async throws {
         server.responseContentType = "text/event-stream"
-        server.responseBody = makeEncryptedResponse()
         let session = pinnedSession()
 
         async let first = session.recoverableBytes(for: chatRequest())
@@ -680,7 +716,7 @@ final class EHBPTests: XCTestCase {
     func testARecoverableRequestReplayedAfterAKeyRejectionCarriesTheReplaysToken() async throws {
         server.queuedResponses = [
             .init(statusCode: 422, contentType: "application/problem+json", body: Self.keyConfigProblemBody, includeNonce: false),
-            .init(statusCode: 200, contentType: "text/event-stream", body: makeEncryptedResponse(), includeNonce: true),
+            .init(statusCode: 200, contentType: "text/event-stream", body: Data(), includeNonce: true, sealingKey: rotatedPrivateKey),
         ]
         let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: makeRotatingState(refreshCounter: AsyncCounter()))
 
@@ -735,7 +771,8 @@ final class EHBPTests: XCTestCase {
     )
 
     private func makeRotatingState(refreshCounter: AsyncCounter) -> EHBPVerifiedState {
-        EHBPVerifiedState(
+        let rotatedPublicKey = rotatedPrivateKey.publicKey.rawRepresentation
+        return EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(
                 enclaveURL: "https://old-router.example",
                 publicKey: testPublicKey
@@ -744,7 +781,7 @@ final class EHBPTests: XCTestCase {
                 await refreshCounter.increment()
                 return EHBPVerifiedEndpoint(
                     enclaveURL: "https://new-router.example",
-                    publicKey: Data(repeating: 0x43, count: 32)
+                    publicKey: rotatedPublicKey
                 )
             }
         )
@@ -1045,8 +1082,9 @@ final class EHBPTests: XCTestCase {
             .init(
                 statusCode: 200,
                 contentType: "text/event-stream",
-                body: makeEncryptedResponse(),
-                includeNonce: true
+                body: Data(),
+                includeNonce: true,
+                sealingKey: rotatedPrivateKey
             )
         ]
 
@@ -1111,17 +1149,19 @@ final class EHBPTests: XCTestCase {
         XCTAssertFalse(URLSession.ehbp(baseURL: "https://enclave.example:8443") === session)
     }
 
-    func testARedirectWithinTheOriginIsFollowed() async throws {
+    func testARedirectWithinTheOriginIsRefusedForASealedRequest() async throws {
         server.queuedResponses = [redirect(to: "/v1/moved")]
         let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey)
         ))
 
-        // The stub server can't seal a response, so the followed request
-        // fails; what matters is that it was sent where it was redirected.
-        _ = try? await session.data(for: chatRequest(), delegate: nil)
-
-        XCTAssertEqual(server.requestStore.requests.map(\.path), ["/v1/chat/completions", "/v1/moved"])
+        do {
+            _ = try await session.data(for: chatRequest(), delegate: nil)
+            XCTFail("a redirect that answers a sealed request must not be followed")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertEqual(failure.message, sealedRequestRedirected)
+        }
+        XCTAssertEqual(server.requestStore.requests.map(\.path), ["/v1/chat/completions"], "Nothing is sent where the redirect points.")
     }
 
     func testAStreamingRedirectToAnotherOriginIsRefused() async throws {
@@ -2731,17 +2771,6 @@ final class EHBPTests: XCTestCase {
         if let bodyString = bodyString {
             XCTAssertFalse(bodyString.contains("Secret tool output result"), "Client.runSubmitToolOutputs() body MUST be encrypted")
         }
-    }
-
-    // MARK: - Helpers
-
-    /// Creates a minimal encrypted response structure for testing
-    /// This is not cryptographically valid but allows the test to proceed
-    private func makeEncryptedResponse() -> Data {
-        var data = Data()
-        let chunkLength: UInt32 = 0
-        data.append(contentsOf: withUnsafeBytes(of: chunkLength.bigEndian) { Array($0) })
-        return data
     }
 }
 
