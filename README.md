@@ -51,7 +51,7 @@ let client = try await EnclaveOpenAIClient(
 )
 ```
 
-A `Pin` names what the enclave must run: `Pin(repo:)` a GitHub repository, `owner/name[@tag][@sha256:digest]`, and `Pin(project:)` a config registry project, `org/project[@revision][@sha256:digest]`. The two are separate namespaces, so neither is satisfied by the other's evidence; `Pin(repo:project:)` accepts either, and `Pin.none` accepts any config that the verifier's trust authorizes.
+A `Pin` names what the enclave must run: `Pin(repo:)` a GitHub repository, `owner/name[@tag][@sha256:digest]`, and `Pin(project:)` a config registry project, `org/project[@revision][@sha256:digest]`. The two are separate namespaces, so neither is satisfied by the other's evidence; `Pin(repo:project:)` accepts either, and `Pin.none` accepts any config that the verifier's trust authorizes, which the default verifier refuses because its trust is the whole public registry.
 
 `RouterOpenAIClient` does the same for Tinfoil's routers. Each sends through an `EnclaveHTTPClient` or `RouterHTTPClient`, which you can also create directly to send requests of your own with `data(for:)`. Both are verified before they are returned, verify again by themselves when the verification expires or the enclave rejects its key, and can be closed with `close()`. Their doc comments describe the parameters and request rules.
 
