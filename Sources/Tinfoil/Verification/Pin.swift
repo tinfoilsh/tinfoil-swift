@@ -9,6 +9,8 @@ public struct Pin: Sendable, Hashable {
     public let project: String?
 
     /// No pin: any config that the verifier's trust authorizes is accepted.
+    /// The default verifier refuses it, since its trust is the whole public
+    /// registry.
     public static let none = Pin()
 
     public init(repo: String) {

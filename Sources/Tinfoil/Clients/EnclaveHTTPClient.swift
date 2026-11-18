@@ -36,11 +36,12 @@ public final class EnclaveHTTPClient: Sendable {
     ///     project, org/project[@revision][@sha256:digest], that the enclave's
     ///     config must come from; `Pin(repo:project:)` accepts either.
     ///     `Pin.none` accepts any config that the verifier's trust
-    ///     authorizes: with the default verifier, any deployment in Tinfoil's
-    ///     public registry; with `configSigningKeys`, any config those keys
+    ///     authorizes: with `configSigningKeys`, any config those keys
     ///     approve; with a `configAuthorizer`, which requires `Pin.none`, any
-    ///     config it approves. An empty string is refused, so that a missing
-    ///     value can't widen the trust by accident.
+    ///     config it approves. The default verifier refuses `Pin.none`, which
+    ///     would accept any deployment in Tinfoil's public registry. An empty
+    ///     string is refused, so that a missing value can't widen the trust
+    ///     by accident.
     ///   - transportMode: How requests are protected; pinned TLS by default
     ///   - baseURL: Where requests are sent: a path on the enclave's own
     ///     origin, or a proxy on another origin, which requires `.ehbp`.

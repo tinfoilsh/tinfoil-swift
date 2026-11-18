@@ -134,8 +134,9 @@ final class VerifierTests: XCTestCase {
     }
 
     /// Pin.none, not "", asks for any config that the verifier's trust
-    /// authorizes, so a missing value can't widen the trust by accident.
-    func testAnEmptyPinPartIsRefusedAndNoneAcceptsRegistryTrust() throws {
+    /// authorizes, so a missing value can't widen the trust by accident. The
+    /// default trust is the whole public registry, so it needs a pin.
+    func testAnEmptyPinPartIsRefusedAndNoneNeedsConfiguredTrust() throws {
         func connection(pin: Pin, verifier: Verifier) throws -> EnclaveConnection {
             try EnclaveHTTPClient.connection(
                 enclave: "enclave.example",
@@ -154,8 +155,8 @@ final class VerifierTests: XCTestCase {
         for empty in [Pin(repo: ""), Pin(project: ""), Pin(repo: "org/repo", project: ""), Pin(repo: "", project: "org/project")] {
             assertConfigurationError(try connection(pin: empty, verifier: Verifier()), containing: "must not be empty")
         }
-        XCTAssertEqual(try connection(pin: Pin.none, verifier: Verifier()).pin, Pin.none)
-        XCTAssertNoThrow(try connection(pin: Pin.none, verifier: Verifier(configAuthorizer: { _ in })))
+        assertConfigurationError(try connection(pin: Pin.none, verifier: Verifier()), containing: "pin names nothing")
+        XCTAssertEqual(try connection(pin: Pin.none, verifier: Verifier(configAuthorizer: { _ in })).pin, Pin.none)
         XCTAssertEqual(try connection(pin: Pin(repo: "org/repo@v1"), verifier: Verifier()).pin, Pin(repo: "org/repo@v1"))
         let project = try connection(pin: Pin(project: "org/project@v1"), verifier: Verifier()).pin
         XCTAssertEqual(project.project, "org/project@v1")
