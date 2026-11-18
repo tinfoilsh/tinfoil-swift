@@ -143,7 +143,7 @@ EHBP response and its session recovery token.
 | `localizedDescription` of a `TinfoilError` | now led by the category, as in "configuration error: …"; `message` is the text alone |
 | a base URL with `?` or `#` | refused |
 | `repo: "org/repo"` on `EnclaveHTTPClient` or `EnclaveOpenAIClient` | `pin: Pin(repo: "org/repo")` for a GitHub repository, or `pin: Pin(project: "org/project")` for a config registry project. The two are separate namespaces: a repository is matched only by its signed release, a project only by a registry deployment. `Pin(repo:project:)` accepts either |
-| `repo: ""` or `repo: nil`, accepting any config that the verifier's trust authorizes | `pin: .none` with a verifier whose config trust is configured; the default verifier refuses it, since it would accept any deployment in Tinfoil's public registry. An empty string in a pin is refused, so that a missing value can't widen the trust by accident |
+| `repo: ""` or `repo: nil`, accepting any config that the verifier's trust authorizes | `pin: .none` with a verifier that sets `configRegistryIDs`, `configSigningKeys` or a `configAuthorizer`; the default verifier refuses it, since it would accept any deployment in Tinfoil's public registry. An empty string in a pin is refused, so that a missing value can't widen the trust by accident |
 | `repo` on `EnclaveHTTPClient` and `RouterHTTPClient` | `pin`, a `Pin`; the router's names Tinfoil's router as a repository and as a project |
 | a `repo` checked against an embedded config's name | `Pin(project:)` |
 
