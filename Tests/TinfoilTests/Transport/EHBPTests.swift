@@ -1111,17 +1111,19 @@ final class EHBPTests: XCTestCase {
         XCTAssertFalse(URLSession.ehbp(baseURL: "https://enclave.example:8443") === session)
     }
 
-    func testARedirectWithinTheOriginIsFollowed() async throws {
+    func testARedirectWithinTheOriginIsRefusedForASealedRequest() async throws {
         server.queuedResponses = [redirect(to: "/v1/moved")]
         let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey)
         ))
 
-        // The stub server can't seal a response, so the followed request
-        // fails; what matters is that it was sent where it was redirected.
-        _ = try? await session.data(for: chatRequest(), delegate: nil)
-
-        XCTAssertEqual(server.requestStore.requests.map(\.path), ["/v1/chat/completions", "/v1/moved"])
+        do {
+            _ = try await session.data(for: chatRequest(), delegate: nil)
+            XCTFail("a redirect that answers a sealed request must not be followed")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertEqual(failure.message, sealedRequestRedirected)
+        }
+        XCTAssertEqual(server.requestStore.requests.map(\.path), ["/v1/chat/completions"], "Nothing is sent where the redirect points.")
     }
 
     func testAStreamingRedirectToAnotherOriginIsRefused() async throws {
