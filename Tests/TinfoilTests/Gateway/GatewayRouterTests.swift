@@ -85,14 +85,19 @@ final class GatewayRouterTests: XCTestCase {
         /// Hosts that a request was sealed to, in the order of the sends
         var sealedTo: [String] { lock.withLock { _sealedTo } }
 
+        /// Pins for the two models the default catalog lists
+        static let pins: [String: (repo: String, attestor: Attestor?)] = [
+            "m": ("tinfoilsh/model-repo", nil),
+            "other": ("tinfoilsh/other-repo", nil),
+        ]
+
         func router(
-            pins: [String: (repo: String, attestor: Attestor?)] = [:],
-            pinnedOnly: Bool = false,
+            pins: [String: (repo: String, attestor: Attestor?)] = Harness.pins,
             attestor: Attestor = Attestor(verifier: FakeVerifier())
         ) throws -> GatewayRouter {
             try GatewayRouter(
                 baseURL: GatewayRouterTests.base,
-                policy: GatewayPolicy(pins: pins, pinnedOnly: pinnedOnly, attestor: attestor),
+                policy: GatewayPolicy(pins: pins, attestor: attestor),
                 catalog: {
                     self.lock.withLock { self._catalogReads += 1 }
                     return self.catalog
@@ -158,7 +163,7 @@ final class GatewayRouterTests: XCTestCase {
 
         XCTAssertEqual(response.response.statusCode, 200)
         let replica = try XCTUnwrap(harness.replicas.first)
-        XCTAssertEqual(replica.replica, GatewayRouter.Replica(host: "d.example", reference: "tinfoilsh/model-repo", pinnedModel: ""))
+        XCTAssertEqual(replica.replica, GatewayRouter.Replica(host: "d.example", reference: "tinfoilsh/model-repo", pinnedModel: "m"))
         let sent = try XCTUnwrap(replica.sent.first)
         XCTAssertEqual(sent.value(forHTTPHeaderField: GatewayRequest.sealHeader), "d.example")
         XCTAssertEqual(sent.value(forHTTPHeaderField: GatewayRequest.modelHeader), "m")
@@ -284,7 +289,7 @@ final class GatewayRouterTests: XCTestCase {
         harness.catalog["malformed"] = CatalogEntry(repo: "tinfoilsh/", hosts: ["x.example"])
         let all = try await harness.router().models()
         XCTAssertEqual(all, ["m", "other"])
-        let pinned = try await harness.router(pins: ["m": ("tinfoilsh/model-repo@v1", nil)], pinnedOnly: true).models()
+        let pinned = try await harness.router(pins: ["m": ("tinfoilsh/model-repo@v1", nil)]).models()
         XCTAssertEqual(pinned, ["m"])
     }
 
@@ -311,11 +316,11 @@ final class GatewayRouterTests: XCTestCase {
 
     func testRequestsForUnservedModelsAreRefused() async throws {
         let harness = Harness()
-        let pinnedOnly = try harness.router(pins: ["other": ("tinfoilsh/other-repo", nil)], pinnedOnly: true)
-        await assertError({ $0.message == #"model "m" is not pinned"# }) { try await pinnedOnly.open(self.chat()) }
+        let router = try harness.router(pins: ["other": ("tinfoilsh/other-repo", nil), "missing": ("tinfoilsh/missing", nil)])
+        await assertError({ $0.message == #"model "m" is not pinned"# }) { try await router.open(self.chat()) }
         await assertError({
             $0.message == #"model "missing" has no valid bare tinfoilsh/ repository with replicas in the gateway catalog"#
-        }) { try await harness.router().open(self.chat("missing")) }
+        }) { try await router.open(self.chat("missing")) }
         XCTAssertTrue(harness.replicas.isEmpty)
     }
 
@@ -332,17 +337,17 @@ final class GatewayRouterTests: XCTestCase {
         }
         let authorizing = Attestor(verifier: FakeVerifier(callerAuthorizesConfig: true))
         let refusing = Attestor(verifier: FakeVerifier(refusedRepo: "tinfoilsh/bad"))
-        XCTAssertEqual(message { try GatewayPolicy(pins: [:], pinnedOnly: true, attestor: refusing) },
-                       "pinned-only mode requires at least one model pin")
-        XCTAssertEqual(message { try GatewayPolicy(pins: [:], pinnedOnly: false, attestor: authorizing) },
+        XCTAssertEqual(message { try GatewayPolicy(pins: [:], attestor: refusing) },
+                       "a gateway client requires at least one model pin")
+        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("tinfoilsh/x", nil)], attestor: authorizing) },
                        "caller-authorized config requires a direct enclave client")
-        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("tinfoilsh/x", authorizing)], pinnedOnly: false, attestor: refusing) },
+        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("tinfoilsh/x", authorizing)], attestor: refusing) },
                        #"model "m": caller-authorized config requires a direct enclave client"#)
-        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("someone/x", nil)], pinnedOnly: false, attestor: refusing) },
+        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("someone/x", nil)], attestor: refusing) },
                        #"model pin "m" repository "someone/x" must belong to tinfoilsh/"#)
-        XCTAssertEqual(message { try GatewayPolicy(pins: [" ": ("tinfoilsh/x", nil)], pinnedOnly: false, attestor: refusing) },
+        XCTAssertEqual(message { try GatewayPolicy(pins: [" ": ("tinfoilsh/x", nil)], attestor: refusing) },
                        #"model pin " " repository "tinfoilsh/x" must belong to tinfoilsh/"#)
-        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("tinfoilsh/bad", nil)], pinnedOnly: false, attestor: refusing) },
+        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("tinfoilsh/bad", nil)], attestor: refusing) },
                        #"model "m": repo tinfoilsh/bad cannot be verified"#)
     }
 

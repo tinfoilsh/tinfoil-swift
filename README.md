@@ -75,7 +75,7 @@ It also takes config registry IDs, config and freshness signing keys, embedded r
 
 ### Gateway (experimental)
 
-`GatewayOpenAIClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. Models can be pinned to repositories with `modelPins`. The gateway API may change in a later release.
+`GatewayOpenAIClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. Only the models pinned to repositories with `modelPins` are served. The gateway API may change in a later release.
 
 ## Documentation
 

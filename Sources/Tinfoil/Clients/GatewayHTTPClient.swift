@@ -28,15 +28,14 @@ public final class GatewayHTTPClient: Sendable {
     /// that the catalog doesn't list fails.
     ///
     /// - Parameters:
-    ///   - modelPins: Pins models to repositories. With `pinnedModelsOnly`,
-    ///     only pinned models are served, which requires at least one pin.
-    ///   - pinnedModelsOnly: Serve only the pinned models
+    ///   - modelPins: Pins models to repositories. Only pinned models are
+    ///     served, so at least one pin is required.
     ///   - baseURL: The gateway's base URL; nil selects Tinfoil's gateway. It
     ///     must be HTTPS, and is treated as a directory: a path without a
     ///     trailing slash gets one. Request paths join under it, so a URL with
     ///     credentials, a query or a fragment, even an empty one, is refused.
-    ///   - verifier: The trust policy for unpinned models, and pinned ones
-    ///     without their own; nil selects the defaults. A policy whose config
+    ///   - verifier: The trust policy for pins without their own; nil
+    ///     selects the defaults. A policy whose config
     ///     the caller supplies or approves is refused: replicas are verified
     ///     against repositories.
     ///   - userCacheSecret: The default prompt-cache scope of the client's
@@ -51,8 +50,8 @@ public final class GatewayHTTPClient: Sendable {
     ///     an opaque random value, not a raw user ID or API key: the gateway
     ///     sees a cache prefix keyed on it, and could test guesses of a
     ///     guessable secret and then of the prompt.
-    ///   - verificationCheck: Called with each replica's verification, for
-    ///     pinned and unpinned models, before its keys are used; throw to
+    ///   - verificationCheck: Called with each replica's verification,
+    ///     before its keys are used; throw to
     ///     reject it, and the next replica of the model is tried.
     ///   - onVerificationResult: Called with each replica verification's final
     ///     result. It only observes.
@@ -61,8 +60,7 @@ public final class GatewayHTTPClient: Sendable {
     ///     seconds while the client is used; a failed refresh keeps the last
     ///     catalog fetched.
     public convenience init(
-        modelPins: [String: ModelPin] = [:],
-        pinnedModelsOnly: Bool = false,
+        modelPins: [String: ModelPin],
         baseURL: URL? = nil,
         verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
@@ -83,7 +81,6 @@ public final class GatewayHTTPClient: Sendable {
         }
         let policy = try GatewayPolicy(
             pins: modelPins.mapValues { pin in (repo: pin.repo, attestor: try pin.verifier.map { try attestor($0) }) },
-            pinnedOnly: pinnedModelsOnly,
             attestor: attestor(verifier)
         )
         let source: @Sendable () async throws -> Catalog
