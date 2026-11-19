@@ -9,7 +9,6 @@ final class GatewayClientTests: XCTestCase {
     private func assertRefusedBeforeIO(
         _ expected: String,
         modelPins: [String: ModelPin] = [:],
-        pinnedModelsOnly: Bool = false,
         baseURL: URL? = nil,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -17,7 +16,6 @@ final class GatewayClientTests: XCTestCase {
         do {
             _ = try await GatewayHTTPClient(
                 modelPins: modelPins,
-                pinnedModelsOnly: pinnedModelsOnly,
                 baseURL: baseURL,
                 userCacheSecret: "test-secret",
                 catalog: {
@@ -38,7 +36,7 @@ final class GatewayClientTests: XCTestCase {
         await assertRefusedBeforeIO("must not carry a query or a fragment", baseURL: URL(string: "https://gw.example/v1/?")!)
         await assertRefusedBeforeIO("must not carry a query or a fragment", baseURL: URL(string: "https://gw.example/v1/#x")!)
         await assertRefusedBeforeIO("carry no credentials", baseURL: URL(string: "https://user:pass@gw.example/v1/")!)
-        await assertRefusedBeforeIO("pinned-only mode requires at least one model pin", pinnedModelsOnly: true)
+        await assertRefusedBeforeIO("requires at least one model pin")
         await assertRefusedBeforeIO("must belong to tinfoilsh/", modelPins: ["m": ModelPin(repo: "someone/model")])
         await assertRefusedBeforeIO(#"model "m""#, modelPins: ["m": ModelPin(repo: "tinfoilsh/")])
     }
@@ -76,7 +74,7 @@ final class GatewayClientTests: XCTestCase {
     }
 
     func testTheDefaultsNameTinfoilsGateway() async throws {
-        let client = try await GatewayHTTPClient(userCacheSecret: "pinned", catalog: { [:] })
+        let client = try await GatewayHTTPClient(modelPins: ["m": ModelPin(repo: "tinfoilsh/model")], userCacheSecret: "pinned", catalog: { [:] })
         XCTAssertEqual(client.baseURL.absoluteString, "https://inference-gateway.tinfoil.sh/v1/")
         let models = try await client.models()
         XCTAssertEqual(models, [])
@@ -90,14 +88,25 @@ final class GatewayClientTests: XCTestCase {
 
     // MARK: - Live
 
+    /// One snapshot of the live gateway's catalog. A test pins every model
+    /// in it and gives the client the same snapshot, so the two can't drift
+    /// apart.
+    private func liveCatalog() async throws -> Catalog {
+        let host = try XCTUnwrap(GatewayHTTPClient.defaultBaseURL.host)
+        return try await GatewayCatalog.fetch(host: host)
+    }
+
     /// Fetches the gateway's catalog and verifies a replica through it, which
     /// needs no API key.
     func testLiveGatewayVerifiesAReplica() async throws {
         try requireLiveIntegration()
         let results = Box<[Result<Verification, TinfoilError>]>(value: [])
+        let catalog = try await liveCatalog()
         let client = try await GatewayHTTPClient(
+            modelPins: catalog.mapValues { ModelPin(repo: $0.repo) },
             userCacheSecret: "test-secret",
-            onVerificationResult: { results.value.append($0) }
+            onVerificationResult: { results.value.append($0) },
+            catalog: { catalog }
         )
         let models = try await client.models()
         let model = try XCTUnwrap(models.first, "the gateway's catalog lists no routable model")
@@ -109,7 +118,7 @@ final class GatewayClientTests: XCTestCase {
         let current = await client.current
         XCTAssertEqual(current.count, 1)
         XCTAssertEqual(current.first?.verification, verification)
-        XCTAssertEqual(current.first?.pinnedModel, "")
+        XCTAssertEqual(current.first?.pinnedModel, model)
         if case .success = results.value.last {} else {
             XCTFail("the verification should be reported, got \(results.value)")
         }
@@ -123,8 +132,11 @@ final class GatewayClientTests: XCTestCase {
         guard let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"], !apiKey.isEmpty else {
             throw XCTSkip("set TINFOIL_API_KEY to send inference through the gateway")
         }
+        let catalog = try await liveCatalog()
         let client = try await GatewayOpenAIClient(
+            modelPins: catalog.mapValues { ModelPin(repo: $0.repo) },
             userCacheSecret: "test-secret",
+            catalog: { catalog },
             apiKey: apiKey
         )
         let models = try await client.httpClient.models()

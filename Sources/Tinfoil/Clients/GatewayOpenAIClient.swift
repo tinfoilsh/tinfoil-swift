@@ -29,8 +29,7 @@ public final class GatewayOpenAIClient: OpenAICompatibleClient, Sendable {
     /// The gateway parameters are those of `GatewayHTTPClient`, and the
     /// OpenAI parameters those of `EnclaveOpenAIClient`, which describe them.
     public convenience init(
-        modelPins: [String: ModelPin] = [:],
-        pinnedModelsOnly: Bool = false,
+        modelPins: [String: ModelPin],
         baseURL: URL? = nil,
         verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
@@ -47,7 +46,6 @@ public final class GatewayOpenAIClient: OpenAICompatibleClient, Sendable {
         let staticApiKey = try OpenAI.apiKey(apiKey, provider: apiKeyProvider)
         let httpClient = try await GatewayHTTPClient(
             modelPins: modelPins,
-            pinnedModelsOnly: pinnedModelsOnly,
             baseURL: baseURL,
             verifier: verifier,
             userCacheSecret: userCacheSecret,

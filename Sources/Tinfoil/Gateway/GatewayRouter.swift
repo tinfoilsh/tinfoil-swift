@@ -35,8 +35,7 @@ public struct ReplicaVerification: Sendable, Equatable {
     public let models: [String]
     /// The repository the replica was verified against
     public let reference: String
-    /// The model whose pin the replica was verified under, or "" for an
-    /// unpinned model
+    /// The model whose pin the replica was verified under
     public let pinnedModel: String
     /// The replica's last successful verification
     public let verification: Verification
@@ -73,15 +72,12 @@ struct GatewayPolicy: Sendable {
     }
 
     let pins: [String: Pin]
-    let pinnedOnly: Bool
-    /// The policy for unpinned models
-    let attestor: Attestor
 
     /// - Parameter pins: Each pinned model's repository and its own policy,
     ///   or nil to inherit `attestor`
-    init(pins: [String: (repo: String, attestor: Attestor?)], pinnedOnly: Bool, attestor: Attestor) throws {
-        if pinnedOnly && pins.isEmpty {
-            throw TinfoilError.configuration("pinned-only mode requires at least one model pin")
+    init(pins: [String: (repo: String, attestor: Attestor?)], attestor: Attestor) throws {
+        if pins.isEmpty {
+            throw TinfoilError.configuration("a gateway client requires at least one model pin")
         }
         // Replicas are verified against repository pins, so a policy whose
         // config the caller supplies or approves has nothing to check.
@@ -107,8 +103,6 @@ struct GatewayPolicy: Sendable {
             checked[model] = Pin(repo: pin.repo, attestor: pinAttestor)
         }
         self.pins = checked
-        self.pinnedOnly = pinnedOnly
-        self.attestor = attestor
     }
 
     private static let callerAuthorizedConfig = "caller-authorized config requires a direct enclave client"
@@ -116,17 +110,13 @@ struct GatewayPolicy: Sendable {
     /// The hosts that serve model and the replica, without its host, that a
     /// request for it is verified as
     func resolve(_ model: String, in catalog: Catalog) throws -> (hosts: [String], replica: GatewayRouter.Replica) {
-        let pin = pins[model]
-        if pinnedOnly && pin == nil {
+        guard let pin = pins[model] else {
             throw TinfoilError.configuration("model \"\(model)\" is not pinned")
         }
         guard let entry = catalog[model], entry.isTrusted else {
             throw TinfoilError.configuration(
                 "model \"\(model)\" has no valid bare \(GatewayCatalog.trustedRepoOwner) repository with replicas in the gateway catalog"
             )
-        }
-        guard let pin else {
-            return (entry.hosts, GatewayRouter.Replica(host: "", reference: entry.repo, pinnedModel: ""))
         }
         let repo = pin.repo.split(separator: "@", maxSplits: 1).first.map(String.init) ?? pin.repo
         guard entry.repo == repo else {
@@ -136,8 +126,11 @@ struct GatewayPolicy: Sendable {
     }
 
     /// The policy a replica is verified under
-    func attestor(for replica: GatewayRouter.Replica) -> Attestor {
-        pins[replica.pinnedModel]?.attestor ?? attestor
+    func attestor(for replica: GatewayRouter.Replica) throws -> Attestor {
+        guard let pin = pins[replica.pinnedModel] else {
+            throw TinfoilError.configuration("model \"\(replica.pinnedModel)\" is not pinned")
+        }
+        return pin.attestor
     }
 }
 
@@ -145,8 +138,7 @@ struct GatewayPolicy: Sendable {
 /// prefixes keep a conversation on one replica across requests.
 actor GatewayRouter {
     /// A replica as verified: its host, the repository, and the pinned model
-    /// whose policy applies ("" for an unpinned model). One host can be
-    /// verified under several.
+    /// whose policy applies. One host can be verified under several.
     struct Replica: Hashable, Sendable {
         var host: String
         let reference: String
