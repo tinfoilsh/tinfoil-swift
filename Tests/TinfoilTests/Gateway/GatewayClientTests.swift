@@ -88,11 +88,12 @@ final class GatewayClientTests: XCTestCase {
 
     // MARK: - Live
 
-    /// Pins every model the live gateway lists to the repository its catalog
-    /// names.
-    private func livePins() async throws -> [String: ModelPin] {
+    /// One snapshot of the live gateway's catalog. A test pins every model
+    /// in it and gives the client the same snapshot, so the two can't drift
+    /// apart.
+    private func liveCatalog() async throws -> Catalog {
         let host = try XCTUnwrap(GatewayHTTPClient.defaultBaseURL.host)
-        return try await GatewayCatalog.fetch(host: host).mapValues { ModelPin(repo: $0.repo) }
+        return try await GatewayCatalog.fetch(host: host)
     }
 
     /// Fetches the gateway's catalog and verifies a replica through it, which
@@ -100,10 +101,12 @@ final class GatewayClientTests: XCTestCase {
     func testLiveGatewayVerifiesAReplica() async throws {
         try requireLiveIntegration()
         let results = Box<[Result<Verification, TinfoilError>]>(value: [])
+        let catalog = try await liveCatalog()
         let client = try await GatewayHTTPClient(
-            modelPins: try await livePins(),
+            modelPins: catalog.mapValues { ModelPin(repo: $0.repo) },
             userCacheSecret: "test-secret",
-            onVerificationResult: { results.value.append($0) }
+            onVerificationResult: { results.value.append($0) },
+            catalog: { catalog }
         )
         let models = try await client.models()
         let model = try XCTUnwrap(models.first, "the gateway's catalog lists no routable model")
@@ -129,9 +132,11 @@ final class GatewayClientTests: XCTestCase {
         guard let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"], !apiKey.isEmpty else {
             throw XCTSkip("set TINFOIL_API_KEY to send inference through the gateway")
         }
+        let catalog = try await liveCatalog()
         let client = try await GatewayOpenAIClient(
-            modelPins: try await livePins(),
+            modelPins: catalog.mapValues { ModelPin(repo: $0.repo) },
             userCacheSecret: "test-secret",
+            catalog: { catalog },
             apiKey: apiKey
         )
         let models = try await client.httpClient.models()
