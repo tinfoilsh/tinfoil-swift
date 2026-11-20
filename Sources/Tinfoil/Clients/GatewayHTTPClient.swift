@@ -25,11 +25,20 @@ public final class GatewayHTTPClient: Sendable {
     /// configuration is checked before any network I/O. A model's replicas
     /// are verified on its first request, so creating the client doesn't
     /// check that the catalog lists the pinned models; a request for a model
-    /// that the catalog doesn't list fails.
+    /// that the catalog doesn't list fails. Without a non-empty
+    /// `userCacheSecret`, the client uses the secret that is generated once
+    /// per process; when it can't be generated, this throws
+    /// `SecureRandomError`, before any network I/O.
     ///
     /// - Parameter options: The client's options; each one's default applies
     ///   when it is not set
     public convenience init(options: GatewayOptions = GatewayOptions()) async throws {
+        try await self.init(options: options, processSecret: UserCacheSecret.processSecret)
+    }
+
+    /// The public initializer, with the process's secret taken from
+    /// `processSecret`.
+    convenience init(options: GatewayOptions, processSecret: UserCacheSecret.ProcessSecret) async throws {
         let verificationCheck = options.verificationCheck
         let onVerificationResult = options.onVerificationResult
         let base = Self.directory(options.url ?? Self.defaultURL)
@@ -40,6 +49,7 @@ public final class GatewayHTTPClient: Sendable {
         guard let relay = Self.authority(of: base) else {
             throw TinfoilError.configuration("invalid gateway URL: the gateway URL has no host")
         }
+        let secret = try UserCacheSecret.resolve(explicit: options.userCacheSecret, process: processSecret)
         let attestor = { (policy: Policy) throws -> Attestor in
             Attestor(verifier: try GoAttestationVerifier(trust: nil, policy: policy), verificationCheck: verificationCheck)
         }
@@ -59,7 +69,7 @@ public final class GatewayHTTPClient: Sendable {
             baseURL: base,
             policy: policy,
             catalog: source,
-            secret: UserCacheSecret.resolve(explicit: options.userCacheSecret),
+            secret: secret,
             makeReplica: { replica, attestor in
                 let pin = GatewayCatalog.pin(replica.reference)
                 try attestor.checkPinVerifiability(pin)
