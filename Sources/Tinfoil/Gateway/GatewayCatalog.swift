@@ -61,7 +61,7 @@ enum GatewayCatalog {
     static func fetch(
         host: String,
         fetch: @Sendable (URL) async throws -> Data = {
-            try await AttestationFetcher(timeout: fetchTimeout, maximumBodyBytes: maximumBytes).fetch($0)
+            try await DocumentFetcher(timeout: fetchTimeout, maximumBodyBytes: maximumBytes).fetch($0)
         }
     ) async throws -> Catalog {
         // host is an authority: a host with an optional port, nothing else.

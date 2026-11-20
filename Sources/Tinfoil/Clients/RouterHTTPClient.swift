@@ -10,54 +10,32 @@ import FoundationNetworking
 /// once the verification expires or the router rejects its key.
 ///
 /// It exists only while the router is Tinfoil's default route. For inference
-/// that doesn't depend on the route, use `Client`.
+/// that doesn't depend on the route, use `OpenAIClient(apiKey:…)`.
 public final class RouterHTTPClient: Sendable {
     let connection: EnclaveConnection
 
-    /// Picks the first of Tinfoil's routers that verifies, and otherwise the
-    /// fallback router, and verifies it. Routers are tried for at most 30
-    /// seconds before falling back, and each call discovers again. With an
-    /// attestation relay, the relay is asked for the fallback router instead.
-    /// The configuration is checked before any network I/O.
+    /// Picks the first router of the list, in a random order, that verifies,
+    /// and otherwise the fallback router, and verifies it. Routers are tried
+    /// for at most 30 seconds before falling back, and each call discovers
+    /// again, whatever the options. The configuration is checked before any
+    /// network I/O.
     ///
-    /// - Parameters:
-    ///   - transportMode: How requests are protected; pinned TLS by default
-    ///   - baseURL: A proxy requests are sent to, which requires `.ehbp`
-    ///     because the router's origin isn't known before discovery.
-    ///     Requests carry `X-Tinfoil-Enclave-Url` so it can forward them. It
-    ///     must be HTTPS, since EHBP doesn't seal headers such as the API
-    ///     key, or `http` when the host is `localhost` or a loopback IP
-    ///     address, as for a local development proxy or a sidecar.
-    ///   - attestationRelay: Host, with an optional port, that forwards
-    ///     attestation requests to the fallback router
-    ///   - verifier: The trust policy; nil selects the defaults
-    ///   - userCacheSecret: Scopes the router's prompt cache for the client's
-    ///     requests. When unset, a random secret generated once per process
-    ///     and shared by its clients is used, so cache hits aren't shared
-    ///     across processes; pass one to keep it stable. A non-empty
-    ///     `user_cache_secret` string in a request's JSON body overrides it.
-    ///     Use an opaque random value, not a raw user ID or API key.
-    ///   - verificationCheck: Called each time a router's evidence verifies,
-    ///     before its keys are used; throw to reject it, and discovery moves
-    ///     to the next router.
-    ///   - onVerificationResult: Called with each verification's final result.
-    ///     It only observes.
-    public convenience init(
-        transportMode: TransportMode = .tls,
-        baseURL: URL? = nil,
-        attestationRelay: String? = nil,
-        verifier: Verifier? = nil,
-        userCacheSecret: String? = nil,
-        verificationCheck: VerificationCheck? = nil,
-        onVerificationResult: VerificationResultCallback? = nil
-    ) async throws {
+    /// - Parameter options: The client's options; each one's default applies
+    ///   when it is not set
+    public convenience init(options: RouterOptions = RouterOptions()) async throws {
+        try options.fetchAttestation?.relayURL.map { try EnclaveConnection.validateRelayURL($0) }
+        try options.fetchRouterList?.relayURL.map { try EnclaveConnection.validateRelayURL($0) }
         try await self.init(verifying: EnclaveConnection.router(
-            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck),
-            transportMode: transportMode,
-            baseURL: baseURL,
-            attestationRelay: attestationRelay,
-            userCacheSecret: userCacheSecret,
-            onVerificationResult: onVerificationResult
+            attestor: Attestor(
+                verifier: try GoAttestationVerifier(trust: nil, policy: options.policy),
+                verificationCheck: options.verificationCheck,
+                fetchAttestation: options.fetchAttestation,
+                fetchRouterList: options.fetchRouterList
+            ),
+            transportMode: options.transport.mode,
+            baseURL: options.transport.proxyURL,
+            userCacheSecret: options.userCacheSecret,
+            onVerificationResult: options.onVerificationResult
         ))
     }
 
@@ -77,20 +55,16 @@ public final class RouterHTTPClient: Sendable {
     }
 
     /// How the client protects its requests
-    public var transportMode: TransportMode { connection.transportMode }
+    public var transport: Transport { connection.transport }
 
-    /// The URL requests are sent to: the `baseURL` the client was created
-    /// with, or the router's own origin. Relative URLs passed to
-    /// `data(for:)` resolve against it.
+    /// The URL that requests are sent to: the EHBP proxy URL, or the
+    /// router's own origin when the client connects directly. Relative URLs
+    /// passed to `data(for:)` resolve against it.
     public var baseURL: URL { connection.baseURL }
 
     /// The host of the router the client chose. It stays the router's host
-    /// when `baseURL` is a proxy.
+    /// when requests go through a proxy.
     public var enclave: String { connection.enclave }
-
-    /// The pin the router is verified against: Tinfoil's router, as a
-    /// repository and as a registry project
-    public var pin: Pin { connection.pin }
 
     /// The last successful verification, without checking it. It may have
     /// expired or been rejected; use `ensureVerified()` for one that is valid.

@@ -330,14 +330,9 @@ final class GatewayRouterTests: XCTestCase {
                 return "\(error)"
             }
         }
-        let authorizing = Attestor(verifier: FakeVerifier(callerAuthorizesConfig: true))
         let refusing = Attestor(verifier: FakeVerifier(refusedRepo: "tinfoilsh/bad"))
         XCTAssertEqual(message { try GatewayPolicy(pins: [:], pinnedOnly: true, attestor: refusing) },
                        "pinned-only mode requires at least one model pin")
-        XCTAssertEqual(message { try GatewayPolicy(pins: [:], pinnedOnly: false, attestor: authorizing) },
-                       "caller-authorized config requires a direct enclave client")
-        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("tinfoilsh/x", authorizing)], pinnedOnly: false, attestor: refusing) },
-                       #"model "m": caller-authorized config requires a direct enclave client"#)
         XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("someone/x", nil)], pinnedOnly: false, attestor: refusing) },
                        #"model pin "m" repository "someone/x" must belong to tinfoilsh/"#)
         XCTAssertEqual(message { try GatewayPolicy(pins: [" ": ("tinfoilsh/x", nil)], pinnedOnly: false, attestor: refusing) },

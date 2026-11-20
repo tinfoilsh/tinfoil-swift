@@ -439,7 +439,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
 
     func testLivePinnedRequest() async throws {
         try requireLiveIntegration()
-        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, pin: TinfoilConstants.routerPin)
+        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, trust: .either(repo: TinfoilConstants.defaultGithubRepo, project: TinfoilConstants.defaultGithubRepo))
 
         let (data, response) = try await client.data(from: URL(string: "/health")!)
 
@@ -450,7 +450,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
     /// A streamed response comes over a connection pinned to the attested key.
     func testLivePinnedStream() async throws {
         try requireLiveIntegration()
-        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, pin: TinfoilConstants.routerPin)
+        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, trust: .either(repo: TinfoilConstants.defaultGithubRepo, project: TinfoilConstants.defaultGithubRepo))
         let verification = try await client.ensureVerified()
         let request = URLRequest(url: URL(string: "https://\(TinfoilConstants.fallbackEnclave)/health")!)
 

@@ -10,20 +10,16 @@ final class GatewayClientTests: XCTestCase {
         _ expected: String,
         modelPins: [String: ModelPin] = [:],
         pinnedModelsOnly: Bool = false,
-        baseURL: URL? = nil,
+        url: URL? = nil,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         do {
             _ = try await GatewayHTTPClient(
-                modelPins: modelPins,
-                pinnedModelsOnly: pinnedModelsOnly,
-                baseURL: baseURL,
-                userCacheSecret: "test-secret",
-                catalog: {
+                options: .init(modelPins: modelPins, pinnedModelsOnly: pinnedModelsOnly, url: url, userCacheSecret: "test-secret", catalog: {
                     XCTFail("the catalog was read despite a refused configuration", file: file, line: line)
                     return [:]
-                }
+                })
             )
             XCTFail("expected \(expected)", file: file, line: line)
         } catch TinfoilError.configurationError(let failure) {
@@ -34,13 +30,14 @@ final class GatewayClientTests: XCTestCase {
     }
 
     func testTheConfigurationIsCheckedBeforeAnyNetworkIO() async {
-        await assertRefusedBeforeIO("the gateway base URL must use HTTPS", baseURL: URL(string: "http://localhost/v1/")!)
-        await assertRefusedBeforeIO("must not carry a query or a fragment", baseURL: URL(string: "https://gw.example/v1/?")!)
-        await assertRefusedBeforeIO("must not carry a query or a fragment", baseURL: URL(string: "https://gw.example/v1/#x")!)
-        await assertRefusedBeforeIO("carry no credentials", baseURL: URL(string: "https://user:pass@gw.example/v1/")!)
+        await assertRefusedBeforeIO("the gateway URL must use HTTPS", url: URL(string: "http://localhost/v1/")!)
+        await assertRefusedBeforeIO("must not carry a query or a fragment", url: URL(string: "https://gw.example/v1/?")!)
+        await assertRefusedBeforeIO("must not carry a query or a fragment", url: URL(string: "https://gw.example/v1/#x")!)
+        await assertRefusedBeforeIO("carry no credentials", url: URL(string: "https://user:pass@gw.example/v1/")!)
         await assertRefusedBeforeIO("pinned-only mode requires at least one model pin", pinnedModelsOnly: true)
         await assertRefusedBeforeIO("must belong to tinfoilsh/", modelPins: ["m": ModelPin(repo: "someone/model")])
         await assertRefusedBeforeIO(#"model "m""#, modelPins: ["m": ModelPin(repo: "tinfoilsh/")])
+        await assertRefusedBeforeIO("freshness maximum age", modelPins: ["m": ModelPin(repo: "tinfoilsh/model", policy: Policy(freshnessMaxAge: -1))])
     }
 
     func testTheRelayKeepsThePortAndBracketsAnIPv6Host() {
@@ -58,32 +55,15 @@ final class GatewayClientTests: XCTestCase {
         XCTAssertEqual(directory("https://gw.example"), "https://gw.example")
     }
 
-    func testACallerAuthorizedVerifierIsRefused() async throws {
-        let authorizing = try Verifier(configAuthorizer: { _ in })
-        for (verifier, pin) in [(authorizing, nil), (nil, authorizing)] as [(Verifier?, Verifier?)] {
-            do {
-                _ = try await GatewayHTTPClient(
-                    modelPins: ["m": ModelPin(repo: "tinfoilsh/model", verifier: pin)],
-                    verifier: verifier,
-                    userCacheSecret: "pinned",
-                    catalog: { [:] }
-                )
-                XCTFail("expected the refusal")
-            } catch TinfoilError.configurationError(let failure) {
-                XCTAssertTrue(failure.message.contains("caller-authorized config requires a direct enclave client"), failure.message)
-            }
-        }
-    }
-
     func testTheDefaultsNameTinfoilsGateway() async throws {
-        let client = try await GatewayHTTPClient(userCacheSecret: "pinned", catalog: { [:] })
+        let client = try await GatewayHTTPClient(options: .init(userCacheSecret: "pinned", catalog: { [:] }))
         XCTAssertEqual(client.baseURL.absoluteString, "https://inference-gateway.tinfoil.sh/v1/")
         let models = try await client.models()
         XCTAssertEqual(models, [])
-        let openAI = try GatewayOpenAIClient(httpClient: client, apiKey: "test-key")
+        let openAI = try OpenAIClient(httpClient: client, apiKey: "test-key")
         XCTAssertEqual(openAI.openAI.configuration.host, "inference-gateway.tinfoil.sh")
         XCTAssertEqual(openAI.openAI.configuration.timeoutInterval, 60, "The default idle timeout")
-        let patient = try GatewayOpenAIClient(httpClient: client, apiKey: "test-key", timeoutInterval: 600)
+        let patient = try OpenAIClient(httpClient: client, apiKey: "test-key", timeoutInterval: 600)
         XCTAssertEqual(patient.openAI.configuration.timeoutInterval, 600)
         XCTAssertEqual(openAI.openAI.configuration.basePath, "/v1")
     }
@@ -96,8 +76,7 @@ final class GatewayClientTests: XCTestCase {
         try requireLiveIntegration()
         let results = Box<[Result<Verification, TinfoilError>]>(value: [])
         let client = try await GatewayHTTPClient(
-            userCacheSecret: "test-secret",
-            onVerificationResult: { results.value.append($0) }
+            options: .init(userCacheSecret: "test-secret", onVerificationResult: { results.value.append($0) })
         )
         let models = try await client.models()
         let model = try XCTUnwrap(models.first, "the gateway's catalog lists no routable model")
@@ -123,18 +102,16 @@ final class GatewayClientTests: XCTestCase {
         guard let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"], !apiKey.isEmpty else {
             throw XCTSkip("set TINFOIL_API_KEY to send inference through the gateway")
         }
-        let client = try await GatewayOpenAIClient(
-            userCacheSecret: "test-secret",
-            apiKey: apiKey
-        )
-        let models = try await client.httpClient.models()
+        let gateway = try await GatewayHTTPClient(options: .init(userCacheSecret: "test-secret"))
+        let client = try OpenAIClient(httpClient: gateway, apiKey: apiKey)
+        let models = try await gateway.models()
         let model = try XCTUnwrap(models.first { $0.contains("llama") || $0.contains("gpt-oss") } ?? models.first)
         let result = try await client.chats(query: ChatQuery(
             messages: [.user(.init(content: .string("Reply with the single word: ready")))],
             model: model
         ))
         XCTAssertFalse((result.choices.first?.message.content ?? "").isEmpty)
-        let current = await client.httpClient.current
+        let current = await gateway.current
         XCTAssertEqual(current.first?.models, [model])
     }
 }
@@ -147,7 +124,7 @@ final class GatewayExperimentalSurfaceTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/Tinfoil")
         let files = try FileManager.default.contentsOfDirectory(at: sources.appendingPathComponent("Gateway"), includingPropertiesForKeys: nil)
-            + ["GatewayHTTPClient.swift", "GatewayOpenAIClient.swift"].map { sources.appendingPathComponent("Clients/\($0)") }
+            + ["GatewayHTTPClient.swift"].map { sources.appendingPathComponent("Clients/\($0)") }
         var exports: Set<String> = []
         for file in files {
             let lines = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
@@ -164,6 +141,6 @@ final class GatewayExperimentalSurfaceTests: XCTestCase {
                 XCTAssertTrue(documentation.contains { $0.contains("Experimental:") }, "\(name) is not marked experimental")
             }
         }
-        XCTAssertEqual(exports, ["CatalogEntry", "Catalog", "ModelPin", "ReplicaVerification", "GatewayHTTPClient", "GatewayOpenAIClient"])
+        XCTAssertEqual(exports, ["CatalogEntry", "Catalog", "ModelPin", "ReplicaVerification", "GatewayHTTPClient", "GatewayOptions"])
     }
 }

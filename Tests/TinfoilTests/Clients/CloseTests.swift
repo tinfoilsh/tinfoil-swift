@@ -73,7 +73,7 @@ final class CloseTests: XCTestCase {
                 streamed.value += 1
                 throw TinfoilError.network("no network in this test")
             }))
-            let client = try EnclaveOpenAIClient(httpClient: httpClient, apiKey: "test-key")
+            let client = try OpenAIClient(httpClient: httpClient, apiKey: "test-key")
             let fetches = network.urls.count
 
             await httpClient.close()
@@ -86,7 +86,7 @@ final class CloseTests: XCTestCase {
 
     func testClosingAnOpenAIClientClosesItsHTTPClient() async throws {
         let httpClient = try await EnclaveHTTPClient(verifying: connection(approving(), transportMode: .tls))
-        let client = try EnclaveOpenAIClient(httpClient: httpClient, apiKey: "test-key")
+        let client = try OpenAIClient(httpClient: httpClient, apiKey: "test-key")
 
         await client.close()
 

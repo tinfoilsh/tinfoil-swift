@@ -9,8 +9,8 @@ final class DocumentationExamplesTests: XCTestCase {
         _ = [readmeExamples, migrationExamples] as [Any]
     }
 
-    private func readmeExamples(key: String, host: String, pin: Pin, registers: [String]) async throws {
-        let client = try await Client(apiKey: "YOUR_API_KEY")
+    private func readmeExamples(key: String, host: String, trust: Trust, registers: [String]) async throws {
+        let client = try await OpenAIClient(apiKey: "YOUR_API_KEY")
         let query = ChatQuery(
             messages: [.user(.init(content: .string("Hello, world!")))],
             model: "gpt-oss-120b"
@@ -18,30 +18,35 @@ final class DocumentationExamplesTests: XCTestCase {
         let response = try await client.chats(query: query)
         print(response.choices.first?.message.content ?? "No response")
 
-        _ = try await EnclaveOpenAIClient(
-            enclave: "enclave.example.com",
-            pin: Pin(repo: "org/repo@v1.2.3"),
-            apiKey: "YOUR_API_KEY"
-        )
+        let enclave = try await EnclaveHTTPClient(enclave: "enclave.example.com", trust: .repo("org/repo@v1.2.3"))
+        _ = try OpenAIClient(httpClient: enclave, apiKey: "YOUR_API_KEY")
 
-        let verifier = try Verifier(
+        let policy = Policy(
             pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
             freshnessMaxAge: 3600
         )
-        _ = try await EnclaveOpenAIClient(enclave: host, pin: pin, verifier: verifier, apiKey: key)
+        _ = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(policy: policy))
+
+        let origin = URL(string: "https://app.example/tinfoil")!
+        _ = try await RouterHTTPClient(options: .init(
+            transport: .ehbp(proxyURL: origin.appendingPathComponent("proxy")),
+            fetchAttestation: .relay(origin),
+            fetchRouterList: .relay(origin)
+        ))
     }
 
     private func migrationExamples(key: String) async throws {
-        _ = try await Client(apiKey: key)
-        _ = try await EnclaveOpenAIClient(
+        _ = try await OpenAIClient(apiKey: key)
+        let proxied = try await EnclaveHTTPClient(
             enclave: "enclave.example.com",
-            pin: Pin(repo: "org/repo"),
-            transportMode: .ehbp,
-            baseURL: URL(string: "https://proxy.example.com/v1/")!,
-            attestationRelay: "proxy.example.com",
-            apiKey: key
+            trust: .repo("org/repo"),
+            options: .init(
+                transport: .ehbp(proxyURL: URL(string: "https://app.example/tinfoil/proxy")!),
+                fetchAttestation: .relay(URL(string: "https://app.example/tinfoil")!)
+            )
         )
-        let http = try await EnclaveHTTPClient(enclave: "enclave.example.com", pin: Pin(repo: "org/repo"))
+        _ = try OpenAIClient(httpClient: proxied, apiKey: key)
+        let http = try await EnclaveHTTPClient(enclave: "enclave.example.com", trust: .repo("org/repo"))
         _ = try await http.ensureVerified()
         _ = try await http.data(from: URL(string: "/v1/models")!)
         await http.close()

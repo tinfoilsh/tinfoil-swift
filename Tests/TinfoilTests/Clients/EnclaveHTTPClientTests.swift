@@ -27,14 +27,12 @@ final class EnclaveHTTPClientTests: XCTestCase {
         _ network: FakeNetwork,
         transportMode: TransportMode = .ehbp,
         baseURL: URL? = nil,
-        relay: String? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) async throws -> RouterHTTPClient {
         try await RouterHTTPClient(verifying: EnclaveConnection.router(
             attestor: attestor(network),
             transportMode: transportMode,
             baseURL: baseURL,
-            attestationRelay: relay,
             userCacheSecret: "test-secret",
             onVerificationResult: onVerificationResult
         ))
@@ -60,8 +58,8 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let client = try await EnclaveHTTPClient(verifying: connection(network))
 
         XCTAssertEqual(client.enclave, "enclave.example")
-        XCTAssertEqual(client.pin, Pin(repo: "org/repo"))
-        XCTAssertEqual(client.transportMode, .tls, "A named enclave uses pinned TLS by default.")
+        XCTAssertEqual(client.trust.repo, "org/repo")
+        XCTAssertEqual(client.transport, .tls, "A named enclave uses pinned TLS by default.")
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"])
         let current = await client.current
         XCTAssertNotNil(current)
@@ -97,8 +95,8 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let client = try await router(network, onVerificationResult: { results.record($0) })
 
         XCTAssertEqual(client.enclave, "router-a.example")
-        XCTAssertEqual(client.pin, TinfoilConstants.routerPin)
-        XCTAssertEqual(client.transportMode, .ehbp, "A router uses EHBP by default.")
+        XCTAssertEqual(client.connection.pin, TinfoilConstants.routerPin)
+        XCTAssertEqual(client.transport, .ehbp(), "The test helper selects EHBP.")
         let discovered = await client.current
         guard results.values.count == 1, case .success(let reported) = results.values[0] else {
             return XCTFail("expected discovery's verification to be reported once, got \(results.values)")
@@ -136,21 +134,8 @@ final class EnclaveHTTPClientTests: XCTestCase {
         )
     }
 
-    func testARelayIsAskedForTheFallbackRouterWithoutDiscovery() async throws {
-        let network = approving()
-
-        let client = try await router(network, relay: "relay.example")
-
-        XCTAssertEqual(client.enclave, TinfoilConstants.fallbackEnclave)
-        let url = try XCTUnwrap(network.urls.first)
-        XCTAssertEqual(network.urls.count, 1, "A relay does not run discovery.")
-        XCTAssertEqual(url.host, "relay.example")
-        XCTAssertTrue(url.query?.contains("enclave=\(TinfoilConstants.fallbackEnclave)") ?? false)
-    }
-
     func testARoutersBaseURLIsCheckedBeforeDiscovery() async {
         let cases: [(TransportMode, String)] = [
-            (.tls, "https://proxy.example/"),  // needs EHBP: the router's origin isn't known
             (.ehbp, "http://proxy.example/"),
             (.ehbp, "https://user:secret@proxy.example/"),
             (.ehbp, "https:proxy.example/"),
@@ -171,12 +156,9 @@ final class EnclaveHTTPClientTests: XCTestCase {
     func testBaseURLRulesAreCheckedBeforeAnyNetworkIO() throws {
         let network = approving()
         let proxy = URL(string: "https://proxy.example/api/")!
-        assertConfigurationError({ try self.connection(network, baseURL: proxy) })
         let proxied = try connection(network, transportMode: .ehbp, baseURL: proxy)
         XCTAssertEqual(proxied.baseURL, proxy, "EHBP keeps bodies sealed through a proxy.")
         XCTAssertEqual(proxied.enclave, "enclave.example", "The enclave stays the one verified.")
-        let path = try connection(network, baseURL: URL(string: "https://enclave.example/v1/")!)
-        XCTAssertEqual(path.baseURL.absoluteString, "https://enclave.example/v1/", "TLS accepts a path on the enclave's own origin.")
         assertConfigurationError({ try self.connection(network, transportMode: .ehbp, baseURL: URL(string: "http://proxy.example/")!) })
         let refusals = ["https://proxy.example/api/?", "https://proxy.example/api/?key=secret", "https://proxy.example/api/#", "https://enclave.example/v1#x", "https://enclave.example/v1?key=secret"]
         for mode in [TransportMode.tls, .ehbp] { for refused in refusals {
@@ -270,26 +252,58 @@ final class EnclaveHTTPClientTests: XCTestCase {
         XCTAssertTrue(network.urls.isEmpty)
     }
 
-    /// The public initializers check the base URL before any network I/O:
+    /// The public initializers check the proxy URL before any network I/O:
     /// the enclave and the router's relay are unreachable, so reaching them
     /// would fail with a network error instead.
-    func testThePublicInitializersRefuseAnHTTPBaseURLOffLoopback() async throws {
-        let cases: [(TransportMode, String)] = Self.refusedBaseURLs.map { (.ehbp, $0) } + [(.tls, "http://localhost:8080/v1")]
-        for (mode, url) in cases {
+    func testThePublicInitializersRefuseAnHTTPProxyURLOffLoopback() async throws {
+        for url in Self.refusedBaseURLs {
+            let transport = Transport.ehbp(proxyURL: URL(string: url)!)
             do {
-                _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", pin: Pin(repo: "org/repo"), transportMode: mode, baseURL: URL(string: url)!)
+                _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", trust: .repo("org/repo"), options: .init(transport: transport))
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError(let failure) {
-                if mode == .ehbp, url.hasPrefix("http://"), !url.contains("@"), !url.contains("?"), !url.contains("#") {
+                if url.hasPrefix("http://"), !url.contains("@"), !url.contains("?"), !url.contains("#") {
                     XCTAssertTrue(failure.message.contains("loopback"), failure.message)
                 }
             }
             do {
-                _ = try await RouterHTTPClient(transportMode: mode, baseURL: URL(string: url)!, attestationRelay: "127.0.0.1:9")
+                _ = try await RouterHTTPClient(options: .init(
+                    transport: transport,
+                    fetchAttestation: AttestationFetcher { _, _ in throw TinfoilError.network("no network in this test") },
+                    fetchRouterList: RouterListFetcher { XCTFail("discovery ran despite a refused proxy URL"); return [] }
+                ))
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError {
             }
         }
+    }
+
+    /// A proxy URL on the enclave's own origin is no proxy, and is refused
+    /// before any network I/O, with or without the default port.
+    func testAProxyURLOnTheEnclavesOwnOriginIsRefused() async throws {
+        for url in ["https://127.0.0.1:9/relay", "https://enclave.example:443", "https://ENCLAVE.example/relay/"] {
+            let enclave = url.contains("127.0.0.1") ? "127.0.0.1:9" : "enclave.example"
+            do {
+                _ = try await EnclaveHTTPClient(
+                    enclave: enclave,
+                    trust: .repo("org/repo"),
+                    options: .init(transport: .ehbp(proxyURL: URL(string: url)!))
+                )
+                XCTFail("\(url) must be refused")
+            } catch TinfoilError.configurationError(let failure) {
+                XCTAssertTrue(failure.message.contains("the enclave's own origin"), failure.message)
+            }
+        }
+    }
+
+    func testTheTransportsAreValues() {
+        let proxy = URL(string: "https://proxy.example/relay")!
+        XCTAssertNil(Transport.tls.proxyURL)
+        XCTAssertNil(Transport.ehbp().proxyURL)
+        XCTAssertEqual(Transport.ehbp(proxyURL: proxy).proxyURL, proxy)
+        XCTAssertNotEqual(Transport.tls, Transport.ehbp())
+        XCTAssertEqual(EnclaveOptions().transport, .tls, "TLS is the default.")
+        XCTAssertEqual(RouterOptions().transport, .tls, "TLS is the default.")
     }
 
     func testARouterAcceptsAnHTTPBaseURLOnLoopback() async throws {
@@ -312,16 +326,16 @@ final class EnclaveHTTPClientTests: XCTestCase {
     func testOpenAIClientsUseTheHTTPClientsTransport() async throws {
         for mode in [TransportMode.tls, .ehbp] {
             let httpClient = try await EnclaveHTTPClient(verifying: connection(approving(), transportMode: mode))
-            let client = try EnclaveOpenAIClient(httpClient: httpClient, apiKey: "test-key")
+            let client = try OpenAIClient(httpClient: httpClient, apiKey: "test-key")
             XCTAssertTrue(client.httpClient === httpClient)
-            XCTAssertEqual(client.httpClient.transportMode, mode)
+            XCTAssertEqual(httpClient.transport.mode, mode)
         }
     }
 
     func testAMissingAPIKeyFailsBeforeAnyNetworkIO() async throws {
         do {
-            // An unreachable enclave would fail with a network error.
-            _ = try await EnclaveOpenAIClient(enclave: "127.0.0.1:9", pin: Pin(repo: "org/repo"))
+            // The router's discovery would fail with a network error.
+            _ = try await OpenAIClient()
             XCTFail("a client without an API key must not be created")
         } catch TinfoilError.configurationError(let failure) {
             XCTAssertTrue(failure.message.contains("pass apiKey or apiKeyProvider"), failure.message)
