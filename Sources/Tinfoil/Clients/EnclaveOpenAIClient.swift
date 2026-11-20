@@ -20,10 +20,8 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     /// `EnclaveHTTPClient.init(enclave:pin:…)` verifies it, and an OpenAI
     /// client over it. The API key is checked before any network I/O.
     ///
-    /// The enclave parameters, `transportMode` included, are those of
-    /// `EnclaveHTTPClient`, which describes them. Pinned TLS protects whole
-    /// requests and needs a direct connection; EHBP seals bodies, so they stay
-    /// private through a proxy `baseURL`.
+    /// `enclave`, `pin` and `options` are those of `EnclaveHTTPClient`, which
+    /// describes them.
     /// - Parameters:
     ///   - apiKey: The API key; required unless `apiKeyProvider` is given
     ///   - apiKeyProvider: Supplies the API key for each request, as for a
@@ -39,13 +37,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     public convenience init(
         enclave: String,
         pin: Pin,
-        transportMode: TransportMode = .tls,
-        baseURL: URL? = nil,
-        attestationRelay: String? = nil,
-        verifier: Verifier? = nil,
-        userCacheSecret: String? = nil,
-        verificationCheck: VerificationCheck? = nil,
-        onVerificationResult: VerificationResultCallback? = nil,
+        options: EnclaveOptions = EnclaveOptions(),
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
@@ -57,13 +49,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         let httpClient = try await EnclaveHTTPClient(
             enclave: enclave,
             pin: pin,
-            transportMode: transportMode,
-            baseURL: baseURL,
-            attestationRelay: attestationRelay,
-            verifier: verifier,
-            userCacheSecret: userCacheSecret,
-            verificationCheck: verificationCheck,
-            onVerificationResult: onVerificationResult
+            options: options
         )
         try self.init(
             httpClient: httpClient,

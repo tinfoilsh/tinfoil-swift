@@ -24,17 +24,10 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
     /// `RouterHTTPClient.init(…)` does, and an OpenAI client over it. The API
     /// key is checked before any network I/O.
     ///
-    /// The router parameters, `transportMode` included, are those of
-    /// `RouterHTTPClient`, and the OpenAI parameters those of
-    /// `EnclaveOpenAIClient`, which describe them.
+    /// `options` are those of `RouterHTTPClient`, and the OpenAI parameters
+    /// those of `EnclaveOpenAIClient`, which describe them.
     public convenience init(
-        transportMode: TransportMode = .tls,
-        baseURL: URL? = nil,
-        attestationRelay: String? = nil,
-        verifier: Verifier? = nil,
-        userCacheSecret: String? = nil,
-        verificationCheck: VerificationCheck? = nil,
-        onVerificationResult: VerificationResultCallback? = nil,
+        options: RouterOptions = RouterOptions(),
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
@@ -43,15 +36,7 @@ public final class RouterOpenAIClient: OpenAICompatibleClient, Sendable {
         tinfoilEvents: Set<TinfoilEvent> = []
     ) async throws {
         let staticApiKey = try OpenAI.apiKey(apiKey, provider: apiKeyProvider)
-        let httpClient = try await RouterHTTPClient(
-            transportMode: transportMode,
-            baseURL: baseURL,
-            attestationRelay: attestationRelay,
-            verifier: verifier,
-            userCacheSecret: userCacheSecret,
-            verificationCheck: verificationCheck,
-            onVerificationResult: onVerificationResult
-        )
+        let httpClient = try await RouterHTTPClient(options: options)
         try self.init(
             httpClient: httpClient,
             apiKey: staticApiKey,

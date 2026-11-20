@@ -12,8 +12,7 @@ final class TinfoilIntegrationTests: XCTestCase {
 
         _ = try await RouterOpenAIClient(
             httpClient: RouterHTTPClient(
-                userCacheSecret: "test-secret",
-                onVerificationResult: { result in captured.value = result }
+                options: .init(userCacheSecret: "test-secret", onVerificationResult: { result in captured.value = result })
             ),
             apiKey: "test-key"
         )
@@ -52,8 +51,7 @@ final class TinfoilIntegrationTests: XCTestCase {
         do {
             _ = try await RouterOpenAIClient(
                 httpClient: RouterHTTPClient(
-                    attestationRelay: "127.0.0.1:9",
-                    userCacheSecret: "test-secret"
+                    options: .init(attestationRelay: "127.0.0.1:9", userCacheSecret: "test-secret")
                 ),
                 apiKey: "test-key"
             )

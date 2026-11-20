@@ -92,7 +92,7 @@ final class ClientTests: XCTestCase {
         try skipIfNoAPIKey()
 
         let client = try await RouterOpenAIClient(
-            httpClient: RouterHTTPClient(userCacheSecret: Self.testUserCacheSecret),
+            httpClient: RouterHTTPClient(options: .init(userCacheSecret: Self.testUserCacheSecret)),
             apiKey: try getAPIKey()
         )
 
@@ -131,7 +131,7 @@ final class ClientTests: XCTestCase {
     func testCreateFailsForAnUnreachableEnclave() async throws {
         do {
             _ = try await EnclaveOpenAIClient(
-                httpClient: EnclaveHTTPClient(enclave: "127.0.0.1:9", pin: TinfoilConstants.routerPin, transportMode: .ehbp),
+                httpClient: EnclaveHTTPClient(enclave: "127.0.0.1:9", pin: TinfoilConstants.routerPin, options: .init(transportMode: .ehbp)),
                 apiKey: "test-key"
             )
             XCTFail("Should have failed to fetch attestation from an unreachable enclave")
@@ -254,8 +254,7 @@ final class ClientTests: XCTestCase {
 
         let client = try await RouterOpenAIClient(
             httpClient: RouterHTTPClient(
-                userCacheSecret: Self.testUserCacheSecret,
-                onVerificationResult: { result in captured.value = result }
+                options: .init(userCacheSecret: Self.testUserCacheSecret, onVerificationResult: { result in captured.value = result })
             ),
             apiKey: try getAPIKey()
         )
@@ -285,8 +284,7 @@ final class ClientTests: XCTestCase {
                 httpClient: EnclaveHTTPClient(
                     enclave: "127.0.0.1:9",
                     pin: TinfoilConstants.routerPin,
-                    transportMode: .ehbp,
-                    onVerificationResult: { result in captured.value = result }
+                    options: .init(transportMode: .ehbp, onVerificationResult: { result in captured.value = result })
                 ),
                 apiKey: "test-key"
             )
@@ -300,7 +298,7 @@ final class ClientTests: XCTestCase {
 
     func testDiscoveredRouterVerifies() async throws {
         try requireLiveIntegration()
-        let client = try await RouterHTTPClient(userCacheSecret: Self.testUserCacheSecret)
+        let client = try await RouterHTTPClient(options: .init(userCacheSecret: Self.testUserCacheSecret))
 
         let verification = try await client.reverify()
 

@@ -42,46 +42,25 @@ public final class EnclaveHTTPClient: Sendable {
     ///     would accept any deployment in Tinfoil's public registry. An empty
     ///     string is refused, so that a missing value can't widen the trust
     ///     by accident.
-    ///   - transportMode: How requests are protected; pinned TLS by default
-    ///   - baseURL: Where requests are sent: a path on the enclave's own
-    ///     origin, or a proxy on another origin, which requires `.ehbp`.
-    ///     Requests to a proxy carry `X-Tinfoil-Enclave-Url` so it can
-    ///     forward them to the enclave. It must be HTTPS, since EHBP doesn't
-    ///     seal headers such as the API key; under `.ehbp`, `http` is also
-    ///     accepted when the host is `localhost` or a loopback IP address,
-    ///     as for a local development proxy or a sidecar.
-    ///   - attestationRelay: Host, with an optional port, that forwards
-    ///     attestation requests to the enclave
-    ///   - verifier: The trust policy; nil selects the defaults
-    ///   - userCacheSecret: Scopes the prompt cache of the client's requests.
-    ///     Only Tinfoil's router reads it, so it is sent only when set. A
-    ///     non-empty `user_cache_secret` string in a request's JSON body
-    ///     overrides it. Use an opaque random value, not a raw user ID or API
-    ///     key.
-    ///   - verificationCheck: Called each time the enclave's evidence
-    ///     verifies, before its keys are used; throw to reject it.
-    ///   - onVerificationResult: Called with each verification's final result.
-    ///     It only observes.
+    ///   - options: The client's options; each one's default applies when it
+    ///     is not set
     public convenience init(
         enclave: String,
         pin: Pin,
-        transportMode: TransportMode = .tls,
-        baseURL: URL? = nil,
-        attestationRelay: String? = nil,
-        verifier: Verifier? = nil,
-        userCacheSecret: String? = nil,
-        verificationCheck: VerificationCheck? = nil,
-        onVerificationResult: VerificationResultCallback? = nil
+        options: EnclaveOptions = EnclaveOptions()
     ) async throws {
         try await self.init(verifying: Self.connection(
             enclave: enclave,
             pin: pin,
-            transportMode: transportMode,
-            baseURL: baseURL,
-            attestationRelay: attestationRelay,
-            userCacheSecret: userCacheSecret,
-            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck),
-            onVerificationResult: onVerificationResult
+            transportMode: options.transportMode,
+            baseURL: options.baseURL,
+            attestationRelay: options.attestationRelay,
+            userCacheSecret: options.userCacheSecret,
+            attestor: Attestor(
+                verifier: try options.verifier?.backend ?? GoAttestationVerifier(),
+                verificationCheck: options.verificationCheck
+            ),
+            onVerificationResult: options.onVerificationResult
         ))
     }
 

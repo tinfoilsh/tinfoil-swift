@@ -28,7 +28,7 @@ final class DocumentationExamplesTests: XCTestCase {
             pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
             freshnessMaxAge: 3600
         )
-        _ = try await EnclaveOpenAIClient(enclave: host, pin: pin, verifier: verifier, apiKey: key)
+        _ = try await EnclaveOpenAIClient(enclave: host, pin: pin, options: .init(verifier: verifier), apiKey: key)
     }
 
     private func migrationExamples(key: String) async throws {
@@ -36,9 +36,7 @@ final class DocumentationExamplesTests: XCTestCase {
         _ = try await EnclaveOpenAIClient(
             enclave: "enclave.example.com",
             pin: Pin(repo: "org/repo"),
-            transportMode: .ehbp,
-            baseURL: URL(string: "https://proxy.example.com/v1/")!,
-            attestationRelay: "proxy.example.com",
+            options: .init(transportMode: .ehbp, baseURL: URL(string: "https://proxy.example.com/v1/")!, attestationRelay: "proxy.example.com"),
             apiKey: key
         )
         let http = try await EnclaveHTTPClient(enclave: "enclave.example.com", pin: Pin(repo: "org/repo"))

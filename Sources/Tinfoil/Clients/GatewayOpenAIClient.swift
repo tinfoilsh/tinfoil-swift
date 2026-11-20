@@ -26,17 +26,10 @@ public final class GatewayOpenAIClient: OpenAICompatibleClient, Sendable {
     /// `GatewayHTTPClient.init(…)` does, and an OpenAI client over it. The
     /// API key is checked before any network I/O.
     ///
-    /// The gateway parameters are those of `GatewayHTTPClient`, and the
-    /// OpenAI parameters those of `EnclaveOpenAIClient`, which describe them.
+    /// `options` are those of `GatewayHTTPClient`, and the OpenAI parameters
+    /// those of `EnclaveOpenAIClient`, which describe them.
     public convenience init(
-        modelPins: [String: ModelPin] = [:],
-        pinnedModelsOnly: Bool = false,
-        baseURL: URL? = nil,
-        verifier: Verifier? = nil,
-        userCacheSecret: String? = nil,
-        verificationCheck: VerificationCheck? = nil,
-        onVerificationResult: VerificationResultCallback? = nil,
-        catalog: (@Sendable () -> Catalog)? = nil,
+        options: GatewayOptions = GatewayOptions(),
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
@@ -45,16 +38,7 @@ public final class GatewayOpenAIClient: OpenAICompatibleClient, Sendable {
         tinfoilEvents: Set<TinfoilEvent> = []
     ) async throws {
         let staticApiKey = try OpenAI.apiKey(apiKey, provider: apiKeyProvider)
-        let httpClient = try await GatewayHTTPClient(
-            modelPins: modelPins,
-            pinnedModelsOnly: pinnedModelsOnly,
-            baseURL: baseURL,
-            verifier: verifier,
-            userCacheSecret: userCacheSecret,
-            verificationCheck: verificationCheck,
-            onVerificationResult: onVerificationResult,
-            catalog: catalog
-        )
+        let httpClient = try await GatewayHTTPClient(options: options)
         try self.init(
             httpClient: httpClient,
             apiKey: staticApiKey,

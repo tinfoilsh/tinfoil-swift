@@ -277,7 +277,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let cases: [(TransportMode, String)] = Self.refusedBaseURLs.map { (.ehbp, $0) } + [(.tls, "http://localhost:8080/v1")]
         for (mode, url) in cases {
             do {
-                _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", pin: Pin(repo: "org/repo"), transportMode: mode, baseURL: URL(string: url)!)
+                _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", pin: Pin(repo: "org/repo"), options: .init(transportMode: mode, baseURL: URL(string: url)!))
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError(let failure) {
                 if mode == .ehbp, url.hasPrefix("http://"), !url.contains("@"), !url.contains("?"), !url.contains("#") {
@@ -285,7 +285,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
                 }
             }
             do {
-                _ = try await RouterHTTPClient(transportMode: mode, baseURL: URL(string: url)!, attestationRelay: "127.0.0.1:9")
+                _ = try await RouterHTTPClient(options: .init(transportMode: mode, baseURL: URL(string: url)!, attestationRelay: "127.0.0.1:9"))
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError {
             }

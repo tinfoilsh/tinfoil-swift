@@ -20,44 +20,19 @@ public final class RouterHTTPClient: Sendable {
     /// attestation relay, the relay is asked for the fallback router instead.
     /// The configuration is checked before any network I/O.
     ///
-    /// - Parameters:
-    ///   - transportMode: How requests are protected; pinned TLS by default
-    ///   - baseURL: A proxy requests are sent to, which requires `.ehbp`
-    ///     because the router's origin isn't known before discovery.
-    ///     Requests carry `X-Tinfoil-Enclave-Url` so it can forward them. It
-    ///     must be HTTPS, since EHBP doesn't seal headers such as the API
-    ///     key, or `http` when the host is `localhost` or a loopback IP
-    ///     address, as for a local development proxy or a sidecar.
-    ///   - attestationRelay: Host, with an optional port, that forwards
-    ///     attestation requests to the fallback router
-    ///   - verifier: The trust policy; nil selects the defaults
-    ///   - userCacheSecret: Scopes the router's prompt cache for the client's
-    ///     requests. When unset, a random secret generated once per process
-    ///     and shared by its clients is used, so cache hits aren't shared
-    ///     across processes; pass one to keep it stable. A non-empty
-    ///     `user_cache_secret` string in a request's JSON body overrides it.
-    ///     Use an opaque random value, not a raw user ID or API key.
-    ///   - verificationCheck: Called each time a router's evidence verifies,
-    ///     before its keys are used; throw to reject it, and discovery moves
-    ///     to the next router.
-    ///   - onVerificationResult: Called with each verification's final result.
-    ///     It only observes.
-    public convenience init(
-        transportMode: TransportMode = .tls,
-        baseURL: URL? = nil,
-        attestationRelay: String? = nil,
-        verifier: Verifier? = nil,
-        userCacheSecret: String? = nil,
-        verificationCheck: VerificationCheck? = nil,
-        onVerificationResult: VerificationResultCallback? = nil
-    ) async throws {
+    /// - Parameter options: The client's options; each one's default applies
+    ///   when it is not set
+    public convenience init(options: RouterOptions = RouterOptions()) async throws {
         try await self.init(verifying: EnclaveConnection.router(
-            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck),
-            transportMode: transportMode,
-            baseURL: baseURL,
-            attestationRelay: attestationRelay,
-            userCacheSecret: userCacheSecret,
-            onVerificationResult: onVerificationResult
+            attestor: Attestor(
+                verifier: try options.verifier?.backend ?? GoAttestationVerifier(),
+                verificationCheck: options.verificationCheck
+            ),
+            transportMode: options.transportMode,
+            baseURL: options.baseURL,
+            attestationRelay: options.attestationRelay,
+            userCacheSecret: options.userCacheSecret,
+            onVerificationResult: options.onVerificationResult
         ))
     }
 
