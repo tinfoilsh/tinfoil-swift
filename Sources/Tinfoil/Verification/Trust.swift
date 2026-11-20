@@ -56,7 +56,7 @@ public struct Trust: Sendable {
     ///
     /// - Parameter project: A config registry project,
     ///   `org/project[@revision][@sha256:digest]`, that restricts the configs
-    ///   that are accepted; nil accepts any config that `keys` sign.
+    ///   that are accepted; nil or empty accepts any config that `keys` sign.
     public static func signedBy(keys: [String], project: String? = nil) -> Trust {
         Trust(kind: .signedBy(keys: keys, project: project))
     }
@@ -105,7 +105,7 @@ public struct Trust: Sendable {
         case let .project(project, _), let .either(_, project):
             return project
         case let .signedBy(_, project):
-            return project
+            return project?.isEmpty == true ? nil : project
         case .repo, .authorizedBy, .embeddedConfig:
             return nil
         }
@@ -131,13 +131,8 @@ public struct Trust: Sendable {
             }
             return Pin(project: project)
         case let .signedBy(_, project):
-            guard let project else {
+            guard let project, !project.isEmpty else {
                 return .none
-            }
-            guard !project.isEmpty else {
-                throw TinfoilError.configuration(
-                    "a signed-by trust's project must not be empty; leave it nil to accept any config that the keys sign"
-                )
             }
             return Pin(project: project)
         case .authorizedBy, .embeddedConfig:

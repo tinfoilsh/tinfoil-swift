@@ -96,7 +96,8 @@ final class PolicyTests: XCTestCase {
         assertConfigurationError(try Trust.repo("").pin(), containing: "requires a repository")
         assertConfigurationError(try Trust.project("").pin(), containing: "requires a project")
         assertConfigurationError(try Trust.project("org/project", registryIDs: []).pin(), containing: "must not be empty")
-        assertConfigurationError(try Trust.signedBy(keys: [key], project: "").pin(), containing: "must not be empty")
+        XCTAssertEqual(try Trust.signedBy(keys: [key], project: "").pin(), Pin.none, "An empty project accepts any config that the keys sign.")
+        XCTAssertNil(Trust.signedBy(keys: [key], project: "").project)
         assertConfigurationError(try Trust.either(repo: "", project: "org/project").pin(), containing: "requires both")
         assertConfigurationError(try Trust.either(repo: "org/repo", project: "").pin(), containing: "requires both")
 
