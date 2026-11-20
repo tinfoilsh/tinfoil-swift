@@ -56,6 +56,21 @@ The trust argument names who vouches for the config that the enclave runs: `.rep
 
 The enclave and router clients pin each TLS connection to the attested key by default (`transport: .tls`), which protects the whole request and response. With `transport: .ehbp(proxyURL:)`, request and response bodies are sealed to the attested key instead, so they stay private through the proxy; the method, URL and headers are not sealed, and neither is a request without a body or its response. `OpenAIClient` adds the API path, `/v1/` by default (`OpenAIOptions.apiPath`), under the proxy URL or, without one, the origin of the enclave or router that the HTTP client verified. The gateway client always uses EHBP, since the gateway sits between the client and the replica.
 
+### Relays: reaching only your own origin
+
+A client normally fetches each enclave's attestation document from the enclave, and the router client fetches its list of routers from `https://atc.tinfoil.sh/routers`. To reach only your own origin, for example to keep the user's IP address from enclaves or behind a network policy that allows one host, send requests through an EHBP proxy and fetch both through relays on the same origin:
+
+```swift
+let origin = URL(string: "https://app.example/tinfoil")!
+let router = try await RouterHTTPClient(options: .init(
+    transport: .ehbp(proxyURL: origin.appendingPathComponent("proxy")),
+    fetchAttestation: .relay(origin),
+    fetchRouterList: .relay(origin)
+))
+```
+
+The attestation relay serves `GET {url}/.well-known/tinfoil-attestation?nonce={hex}&enclave={host}` by forwarding it to `https://{host}/.well-known/tinfoil-attestation?nonce={hex}` and returning the body unchanged; it should forward only to enclave hosts that you expect. The router-list relay serves `GET {url}/routers` from `https://atc.tinfoil.sh/routers`. Neither is trusted: every document is verified as a directly fetched one is, and the list only proposes routers, which discovery still verifies in a random order. With EHBP, though, a router host that the list names receives the request headers, so the list's source is trusted not to name an impostor. `AttestationFetcher { host, nonce in … }` and `RouterListFetcher { … }` take closures of your own instead.
+
 ### Verification policy
 
 A `Policy` sets what an enclave must prove on top of its trust. Every HTTP client takes one as the `policy` option of its options value, and an `OpenAIClient` uses its HTTP client's:

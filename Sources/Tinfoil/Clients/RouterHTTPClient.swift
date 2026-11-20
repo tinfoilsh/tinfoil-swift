@@ -14,23 +14,26 @@ import FoundationNetworking
 public final class RouterHTTPClient: Sendable {
     let connection: EnclaveConnection
 
-    /// Picks the first of Tinfoil's routers that verifies, and otherwise the
-    /// fallback router, and verifies it. Routers are tried for at most 30
-    /// seconds before falling back, and each call discovers again. With an
-    /// attestation relay, the relay is asked for the fallback router instead.
-    /// The configuration is checked before any network I/O.
+    /// Picks the first router of the list, in a random order, that verifies,
+    /// and otherwise the fallback router, and verifies it. Routers are tried
+    /// for at most 30 seconds before falling back, and each call discovers
+    /// again, whatever the options. The configuration is checked before any
+    /// network I/O.
     ///
     /// - Parameter options: The client's options; each one's default applies
     ///   when it is not set
     public convenience init(options: RouterOptions = RouterOptions()) async throws {
+        try options.fetchAttestation?.relayURL.map { try EnclaveConnection.validateRelayURL($0) }
+        try options.fetchRouterList?.relayURL.map { try EnclaveConnection.validateRelayURL($0) }
         try await self.init(verifying: EnclaveConnection.router(
             attestor: Attestor(
                 verifier: try GoAttestationVerifier(trust: nil, policy: options.policy),
-                verificationCheck: options.verificationCheck
+                verificationCheck: options.verificationCheck,
+                fetchAttestation: options.fetchAttestation,
+                fetchRouterList: options.fetchRouterList
             ),
             transportMode: options.transport.mode,
             baseURL: options.transport.proxyURL,
-            attestationRelay: options.attestationRelay,
             userCacheSecret: options.userCacheSecret,
             onVerificationResult: options.onVerificationResult
         ))

@@ -26,6 +26,13 @@ final class DocumentationExamplesTests: XCTestCase {
             freshnessMaxAge: 3600
         )
         _ = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(policy: policy))
+
+        let origin = URL(string: "https://app.example/tinfoil")!
+        _ = try await RouterHTTPClient(options: .init(
+            transport: .ehbp(proxyURL: origin.appendingPathComponent("proxy")),
+            fetchAttestation: .relay(origin),
+            fetchRouterList: .relay(origin)
+        ))
     }
 
     private func migrationExamples(key: String) async throws {
@@ -33,7 +40,10 @@ final class DocumentationExamplesTests: XCTestCase {
         let proxied = try await EnclaveHTTPClient(
             enclave: "enclave.example.com",
             trust: .repo("org/repo"),
-            options: .init(transport: .ehbp(proxyURL: URL(string: "https://proxy.example.com/")!), attestationRelay: "proxy.example.com")
+            options: .init(
+                transport: .ehbp(proxyURL: URL(string: "https://app.example/tinfoil/proxy")!),
+                fetchAttestation: .relay(URL(string: "https://app.example/tinfoil")!)
+            )
         )
         _ = try OpenAIClient(httpClient: proxied, apiKey: key)
         let http = try await EnclaveHTTPClient(enclave: "enclave.example.com", trust: .repo("org/repo"))

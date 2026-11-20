@@ -50,7 +50,6 @@ final class UserCacheSecretTests: XCTestCase {
             pin: Pin(repo: "org/repo"),
             transportMode: .tls,
             baseURL: nil,
-            attestationRelay: nil,
             attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
             onVerificationResult: nil
         )
@@ -67,12 +66,11 @@ final class UserCacheSecretTests: XCTestCase {
     }
 
     func testDiscoveringARouterUsesTheProcessSecret() async throws {
-        // A relay skips discovery's network I/O; the route is still Tinfoil's router.
+        // Discovery finds no router, so the fallback, Tinfoil's router, is used.
         let connection = try await EnclaveConnection.router(
             attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
             transportMode: .ehbp,
             baseURL: nil,
-            attestationRelay: "relay.example",
             userCacheSecret: nil,
             onVerificationResult: nil
         )

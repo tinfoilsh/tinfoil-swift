@@ -51,7 +51,10 @@ final class TinfoilIntegrationTests: XCTestCase {
         do {
             _ = try await OpenAIClient(
                 httpClient: RouterHTTPClient(
-                    options: .init(attestationRelay: "127.0.0.1:9", userCacheSecret: "test-secret")
+                    options: .init(
+                        userCacheSecret: "test-secret",
+                        fetchAttestation: .relay(URL(string: "http://127.0.0.1:9")!)
+                    )
                 ),
                 apiKey: "test-key"
             )

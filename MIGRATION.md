@@ -35,7 +35,7 @@ let client = try await OpenAIClient(apiKey: key)
 | `TINFOIL_API_KEY` when `apiKey` is nil | no longer read: pass the key |
 | `githubRepo` with no enclave (Tinfoil's router) | `OpenAIClient(apiKey:)`, or `OpenAIClient(httpClient:apiKey:)` over a `RouterHTTPClient`; the router's trust is fixed |
 | `githubRepo` with an enclave you name | `OpenAIClient(httpClient:apiKey:)` over `EnclaveHTTPClient(enclave:trust:)` with `trust: .repo("org/repo")` |
-| `baseURL` (a proxy) and `attestationBundleURL` | the HTTP client's `options: .init(transport: .ehbp(proxyURL:), attestationRelay:)`; see below |
+| `baseURL` (a proxy) and `attestationBundleURL` | the HTTP client's `options: .init(transport: .ehbp(proxyURL:), fetchAttestation: .relay(_:))`; see below |
 | `parsingOptions`, `customHeaders`, `tinfoilEvents` | the same, on `OpenAIClient` |
 | `userCacheSecret` | the `userCacheSecret` option of `RouterHTTPClient` and `GatewayHTTPClient`; see "Prompt cache" |
 | `onVerification: (VerificationDocument?) -> Void` | `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, which observes, and `verificationCheck: (Verification) throws -> Void`, which can reject an enclave |
@@ -44,8 +44,8 @@ let client = try await OpenAIClient(apiKey: key)
 
 0.8.x fetched an attestation bundle from `attestationBundleURL` (by default
 `https://atc.tinfoil.sh/attestation`). Now each client fetches the enclave's
-attestation from the enclave itself, or through the host that you pass as
-`attestationRelay`, which forwards attestation requests to it.
+attestation from the enclave itself, or through a relay that you pass as
+`fetchAttestation: .relay(url)`, which forwards attestation requests to it.
 
 To send requests through a proxy, pass `transport: .ehbp(proxyURL:)`: request
 bodies are sealed to the enclave's attested key, and requests carry
@@ -59,8 +59,8 @@ let proxied = try await EnclaveHTTPClient(
     enclave: "enclave.example.com",
     trust: .repo("org/repo"),
     options: .init(
-        transport: .ehbp(proxyURL: URL(string: "https://proxy.example.com/")!),
-        attestationRelay: "proxy.example.com"
+        transport: .ehbp(proxyURL: URL(string: "https://app.example/tinfoil/proxy")!),
+        fetchAttestation: .relay(URL(string: "https://app.example/tinfoil")!)
     )
 )
 let client = try OpenAIClient(httpClient: proxied, apiKey: key)
@@ -82,7 +82,7 @@ initializer returns, so there is no separate `verify()`.
 | 0.8.x | now |
 |---|---|
 | `SecureClient(githubRepo:enclaveURL:)` | `try await EnclaveHTTPClient(enclave:trust:)` (the enclave is a host, not a URL) |
-| `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `try await EnclaveHTTPClient(enclave:trust:options: .init(attestationRelay:))` |
+| `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `try await EnclaveHTTPClient(enclave:trust:options: .init(fetchAttestation: .relay(_:)))` |
 | `verify()` | `ensureVerified()` (valid now, verifying only if needed) or `reverify()` |
 | `verificationDocument`, `verifiedGroundTruth` | `current`, a `Verification` |
 | `verifiedEnclaveURL` | `enclave` and `baseURL` |
@@ -185,6 +185,8 @@ model pin, are still checked before any network I/O.
 | `Client(apiKey:)` | `OpenAIClient(apiKey:)` |
 | the OpenAI client's base URL from the HTTP client's `baseURL` | set by the SDK: `OpenAIOptions.apiPath`, `/v1/` by default, under the proxy URL or the enclave's origin; the gateway's URL for a gateway client |
 | `userCacheSecret` on an enclave client | gone: the enclave client sends bodies as they are; set `user_cache_secret` per request |
+| `attestationRelay: "relay.example"`, a host that serves `/.well-known/tinfoil-attestation?nonce=…&enclave=…` | `fetchAttestation: .relay(URL(string: "https://relay.example")!)`, a URL whose path is where the relay is mounted, or `AttestationFetcher { host, nonce in … }` |
+| a router client with `attestationRelay`, which skipped discovery and asked the relay for the fallback router | discovery always runs, and fetches every router's document through `fetchAttestation`; set `fetchRouterList: .relay(url)` to fetch the list through `{url}/routers` too |
 
 `OpenAIClient.httpClient` is an `any AttestedHTTPClient`; cast it to the
 concrete client for that client's own members.

@@ -82,14 +82,18 @@ public final class EnclaveHTTPClient: Sendable {
         options: EnclaveOptions = EnclaveOptions()
     ) async throws {
         let pin = try trust.pin()
+        try options.fetchAttestation?.relayURL.map { try EnclaveConnection.validateRelayURL($0) }
         let verifier = try GoAttestationVerifier(trust: trust, policy: options.policy)
         try await self.init(verifying: Self.connection(
             enclave: enclave,
             pin: pin,
             transportMode: options.transport.mode,
             baseURL: options.transport.proxyURL,
-            attestationRelay: options.attestationRelay,
-            attestor: Attestor(verifier: verifier, verificationCheck: options.verificationCheck),
+            attestor: Attestor(
+                verifier: verifier,
+                verificationCheck: options.verificationCheck,
+                fetchAttestation: options.fetchAttestation
+            ),
             onVerificationResult: options.onVerificationResult
         ), trust: trust)
     }
@@ -102,7 +106,6 @@ public final class EnclaveHTTPClient: Sendable {
         pin: Pin,
         transportMode: TransportMode,
         baseURL: URL?,
-        attestationRelay: String?,
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
@@ -114,7 +117,7 @@ public final class EnclaveHTTPClient: Sendable {
             handle: EnclaveHandle(
                 enclave: enclave,
                 pin: pin,
-                attestationRelay: attestationRelay,
+                attestationRelay: nil,
                 attestor: attestor,
                 onVerificationResult: onVerificationResult
             ),

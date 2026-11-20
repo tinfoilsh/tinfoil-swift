@@ -18,6 +18,12 @@ struct Attestor: Sendable {
     private let discoveryTimeout: TimeInterval
     private let now: @Sendable () -> ContinuousClock.Instant
     private let verificationCheck: VerificationCheck?
+    /// The caller's way of obtaining documents, in place of `fetch`
+    private let fetchAttestation: AttestationFetcher?
+    /// The caller's way of obtaining the router list, in place of `fetch`
+    private let fetchRouterList: RouterListFetcher?
+    /// Orders the router list before discovery tries it
+    private let shuffle: @Sendable ([String]) -> [String]
 
     /// - Parameters:
     ///   - retryDelay: Wait before the one retry of a failed fetch or
@@ -28,13 +34,22 @@ struct Attestor: Sendable {
     ///     a change to the wall clock cannot move it.
     ///   - verificationCheck: The caller's check on each enclave whose evidence
     ///     verifies.
+    ///   - fetchAttestation: How documents are obtained; nil fetches them with
+    ///     `fetch`, directly from each enclave.
+    ///   - fetchRouterList: How the router list is obtained; nil fetches
+    ///     Tinfoil's with `fetch`.
+    ///   - shuffle: Orders the router list; a uniformly random order by
+    ///     default, so that clients spread across routers.
     init(
         verifier: any AttestationVerifier,
-        fetch: @escaping Fetch = { try await AttestationFetcher().fetch($0) },
+        fetch: @escaping Fetch = { try await DocumentFetcher().fetch($0) },
         retryDelay: TimeInterval = 1,
         discoveryTimeout: TimeInterval = 30,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
-        verificationCheck: VerificationCheck? = nil
+        verificationCheck: VerificationCheck? = nil,
+        fetchAttestation: AttestationFetcher? = nil,
+        fetchRouterList: RouterListFetcher? = nil,
+        shuffle: @escaping @Sendable ([String]) -> [String] = { $0.shuffled() }
     ) {
         self.verifier = verifier
         self.fetch = fetch
@@ -42,6 +57,9 @@ struct Attestor: Sendable {
         self.discoveryTimeout = discoveryTimeout
         self.now = now
         self.verificationCheck = verificationCheck
+        self.fetchAttestation = fetchAttestation
+        self.fetchRouterList = fetchRouterList
+        self.shuffle = shuffle
     }
 
     /// Throws the configuration error that every verification against pin
@@ -64,9 +82,9 @@ struct Attestor: Sendable {
         return try accepted(verified, host: host)
     }
 
-    /// Returns the host and verification of the first of Tinfoil's routers that
-    /// verifies against the router pin, trying each once, or nil when
-    /// none does. The caller then uses the fallback router, which it verifies
+    /// Returns the host and verification of the first router of the list, in
+    /// a random order, that verifies against the router pin, trying each
+    /// once, or nil when none does. The caller then uses the fallback router, which it verifies
     /// itself. A router list that cannot be fetched or read leaves only the
     /// fallback, and so does reaching discoveryTimeout, however many routers
     /// are left.
@@ -110,8 +128,12 @@ struct Attestor: Sendable {
 
     private func verifyOnce(host: String, relay: String?, pin: Pin) async throws -> Verification {
         let nonce = verifier.newNonce()
-        let url = try verifier.attestationURL(host: host, relay: relay, nonce: nonce)
-        let document = try await fetch(url)
+        let document: Data
+        if let fetchAttestation {
+            document = try await fetchAttestation(host: host, nonce: nonce)
+        } else {
+            document = try await fetch(verifier.attestationURL(host: host, relay: relay, nonce: nonce))
+        }
         return try verifier.verify(document: document, nonce: nonce, pin: pin)
     }
 
@@ -129,13 +151,18 @@ struct Attestor: Sendable {
         return verification
     }
 
-    /// The router list is untrusted: each entry is only a host to try, and
-    /// is verified like any other.
+    /// The router list, in the order that discovery tries it. The list is
+    /// untrusted: each entry is only a host to try, and is verified like any
+    /// other. A list that can't be obtained or read, for any reason, is
+    /// empty.
     private func discoveredRouters() async -> [String] {
-        guard let list = try? await fetch(TinfoilConstants.routerListURL) else {
-            return []
+        let list: [String]?
+        if let fetchRouterList {
+            list = try? await fetchRouterList.fetch()
+        } else {
+            list = try? await RouterListFetcher.parseRouterList(fetch(TinfoilConstants.routerListURL))
         }
-        return (try? JSONDecoder().decode([String].self, from: list)) ?? []
+        return shuffle(list ?? [])
     }
 }
 

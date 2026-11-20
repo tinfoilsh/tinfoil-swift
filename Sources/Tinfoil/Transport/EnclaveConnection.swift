@@ -40,16 +40,15 @@ final class EnclaveConnection: Sendable {
     private let send: PinnedTLS.Send
     private let stream: PinnedTLS.Stream
 
-    /// A connection to the first of Tinfoil's routers that verifies, and
+    /// A connection to the first router that discovery verifies, and
     /// otherwise to the fallback router, which is left unverified for the
-    /// caller to verify. With an attestation relay, the relay is asked for the
-    /// fallback router instead. An unset `userCacheSecret` falls back to the
-    /// process's generated secret, since this is Tinfoil's router.
+    /// caller to verify. Discovery always runs. An unset `userCacheSecret`
+    /// falls back to the process's generated secret, since this is Tinfoil's
+    /// router.
     static func router(
         attestor: Attestor,
         transportMode: TransportMode,
         baseURL: URL?,
-        attestationRelay: String?,
         userCacheSecret: String?,
         onVerificationResult: VerificationResultCallback?
     ) async throws -> EnclaveConnection {
@@ -57,7 +56,7 @@ final class EnclaveConnection: Sendable {
         if let baseURL {
             try validateBaseURL(baseURL, transportMode: transportMode)
         }
-        let discovered = attestationRelay == nil ? try await attestor.discoverRouter() : nil
+        let discovered = try await attestor.discoverRouter()
         if let discovered {
             onVerificationResult?(.success(discovered.verification))
         }
@@ -65,7 +64,7 @@ final class EnclaveConnection: Sendable {
             handle: EnclaveHandle(
                 enclave: discovered?.host ?? TinfoilConstants.fallbackEnclave,
                 pin: TinfoilConstants.routerPin,
-                attestationRelay: attestationRelay,
+                attestationRelay: nil,
                 attestor: attestor,
                 initial: discovered?.verification,
                 onVerificationResult: onVerificationResult
@@ -115,6 +114,17 @@ final class EnclaveConnection: Sendable {
             throw TinfoilError.configuration(
                 "invalid proxy URL: \(enclaveOrigin) is the enclave's own origin; leave the proxy URL nil to connect directly"
             )
+        }
+    }
+
+    /// Refuses a relay URL under the rules of an EHBP proxy URL: HTTPS, or
+    /// HTTP to a loopback host, with a host and without credentials, a query
+    /// or a fragment.
+    static func validateRelayURL(_ url: URL) throws {
+        do {
+            try validateBaseURL(url, transportMode: .ehbp)
+        } catch let error as TinfoilError {
+            throw TinfoilError.configuration("invalid relay URL: \(error.message)")
         }
     }
 

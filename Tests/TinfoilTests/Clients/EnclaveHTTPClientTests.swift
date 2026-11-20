@@ -27,14 +27,12 @@ final class EnclaveHTTPClientTests: XCTestCase {
         _ network: FakeNetwork,
         transportMode: TransportMode = .ehbp,
         baseURL: URL? = nil,
-        relay: String? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) async throws -> RouterHTTPClient {
         try await RouterHTTPClient(verifying: EnclaveConnection.router(
             attestor: attestor(network),
             transportMode: transportMode,
             baseURL: baseURL,
-            attestationRelay: relay,
             userCacheSecret: "test-secret",
             onVerificationResult: onVerificationResult
         ))
@@ -134,18 +132,6 @@ final class EnclaveHTTPClientTests: XCTestCase {
             2,
             "The fallback's verification is retried once."
         )
-    }
-
-    func testARelayIsAskedForTheFallbackRouterWithoutDiscovery() async throws {
-        let network = approving()
-
-        let client = try await router(network, relay: "relay.example")
-
-        XCTAssertEqual(client.enclave, TinfoilConstants.fallbackEnclave)
-        let url = try XCTUnwrap(network.urls.first)
-        XCTAssertEqual(network.urls.count, 1, "A relay does not run discovery.")
-        XCTAssertEqual(url.host, "relay.example")
-        XCTAssertTrue(url.query?.contains("enclave=\(TinfoilConstants.fallbackEnclave)") ?? false)
     }
 
     func testARoutersBaseURLIsCheckedBeforeDiscovery() async {
@@ -281,7 +267,11 @@ final class EnclaveHTTPClientTests: XCTestCase {
                 }
             }
             do {
-                _ = try await RouterHTTPClient(options: .init(transport: transport, attestationRelay: "127.0.0.1:9"))
+                _ = try await RouterHTTPClient(options: .init(
+                    transport: transport,
+                    fetchAttestation: AttestationFetcher { _, _ in throw TinfoilError.network("no network in this test") },
+                    fetchRouterList: RouterListFetcher { XCTFail("discovery ran despite a refused proxy URL"); return [] }
+                ))
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError {
             }
@@ -297,7 +287,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
                 _ = try await EnclaveHTTPClient(
                     enclave: enclave,
                     trust: .repo("org/repo"),
-                    options: .init(transport: .ehbp(proxyURL: URL(string: url)!), attestationRelay: "127.0.0.1:9")
+                    options: .init(transport: .ehbp(proxyURL: URL(string: url)!))
                 )
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError(let failure) {
