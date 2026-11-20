@@ -14,7 +14,7 @@ final class EnclaveConnection: Sendable {
     /// Where requests go through, when not directly to the enclave
     let proxyURL: URL?
 
-    /// How the client protects its requests, and the proxy it sends through
+    /// How the client protects its requests, and the proxy that it sends through
     var transport: Transport {
         transportMode == .ehbp ? .ehbp(proxyURL: proxyURL) : .tls
     }

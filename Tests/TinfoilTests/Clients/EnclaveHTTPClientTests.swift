@@ -98,7 +98,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
 
         XCTAssertEqual(client.enclave, "router-a.example")
         XCTAssertEqual(client.connection.pin, TinfoilConstants.routerPin)
-        XCTAssertEqual(client.transport, .ehbp(), "A router uses EHBP by default.")
+        XCTAssertEqual(client.transport, .ehbp(), "The test helper selects EHBP.")
         let discovered = await client.current
         guard results.values.count == 1, case .success(let reported) = results.values[0] else {
             return XCTFail("expected discovery's verification to be reported once, got \(results.values)")

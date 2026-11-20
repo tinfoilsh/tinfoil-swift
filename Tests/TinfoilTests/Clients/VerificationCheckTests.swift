@@ -137,6 +137,7 @@ final class VerificationCheckTests: XCTestCase {
             ("/api/", "/openai/v1", "/api/openai/v1/chat/completions"),
         ]
         for (path, apiPath, expected) in cases {
+            server.requestStore.clear()
             let client = try await OpenAIClient(httpClient: client(path: path), options: .init(apiPath: apiPath), apiKey: "test-key")
             // The stub server can't seal a response, so the request fails;
             // what matters is where it was sent.

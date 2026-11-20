@@ -14,8 +14,8 @@ public struct Policy: Sendable, Equatable {
     /// enclave on the other.
     public var pinnedRegisters: Verification.Measurement?
     /// The oldest freshness witness accepted, in seconds. Zero selects the
-    /// seven-day default; a negative age is refused, and so is a positive one
-    /// under a nanosecond, which the verifier would read as zero.
+    /// seven-day default; a negative age is refused, and a positive age must
+    /// be at least one nanosecond once rounded to whole nanoseconds.
     public var freshnessMaxAge: TimeInterval
     /// Who vouches for the runtime and platform artifacts; artifacts that
     /// Tinfoil's public keys endorse by default

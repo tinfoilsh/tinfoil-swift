@@ -66,6 +66,11 @@ public struct OpenAIOptions: Sendable, Equatable {
 /// An OpenAI-compatible client whose requests go through an
 /// `AttestedHTTPClient`, protected as that client protects its own: over TLS
 /// pinned to the attested key, or with bodies sealed by EHBP.
+///
+/// Over a `GatewayHTTPClient`, only requests that name a model can be
+/// routed, so methods without one, such as `models()` or the assistants and
+/// files endpoints, fail with `TinfoilError.configurationError`; for the
+/// models that the gateway serves, use `GatewayHTTPClient.models()`.
 public final class OpenAIClient: OpenAICompatibleClient, Sendable {
     public let openAI: OpenAI
     /// The attested client that requests go through. Cast it to its concrete
