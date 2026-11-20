@@ -9,11 +9,6 @@ public struct EnclaveOptions: Sendable {
     /// The verification policy that applies on top of the client's trust;
     /// the default policy keeps every default
     public var policy: Policy
-    /// Scopes the prompt cache of the client's requests. Only Tinfoil's
-    /// router reads it, so it is sent only when set. A non-empty
-    /// `user_cache_secret` string in a request's JSON body overrides it. Use
-    /// an opaque random value, not a raw user ID or API key.
-    public var userCacheSecret: String?
     /// Called each time the enclave's evidence verifies, before its keys are
     /// used; throw to reject it.
     public var verificationCheck: VerificationCheck?
@@ -27,13 +22,11 @@ public struct EnclaveOptions: Sendable {
         transport: Transport = .tls,
         attestationRelay: String? = nil,
         policy: Policy = Policy(),
-        userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) {
         self.transport = transport
         self.policy = policy
-        self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck
         self.attestationRelay = attestationRelay
         self.onVerificationResult = onVerificationResult

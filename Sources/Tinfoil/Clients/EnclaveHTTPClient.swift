@@ -51,6 +51,11 @@ enum TransportMode: Sendable, Equatable {
 /// It is verified before its initializer returns, and verifies again by
 /// itself before a request once the verification expires or the enclave
 /// rejects its key.
+///
+/// It sends request bodies as they are: it never adds or changes a
+/// `user_cache_secret` member, so a caller that points it at Tinfoil's
+/// router and wants a scoped prompt cache sets that member in each request
+/// body.
 public final class EnclaveHTTPClient: Sendable {
     let connection: EnclaveConnection
 
@@ -84,22 +89,20 @@ public final class EnclaveHTTPClient: Sendable {
             transportMode: options.transport.mode,
             baseURL: options.transport.proxyURL,
             attestationRelay: options.attestationRelay,
-            userCacheSecret: options.userCacheSecret,
             attestor: Attestor(verifier: verifier, verificationCheck: options.verificationCheck),
             onVerificationResult: options.onVerificationResult
         ), trust: trust)
     }
 
     /// The connection `init(enclave:trust:options:)` verifies, built without
-    /// network I/O. Only Tinfoil's router reads the cache secret, so an unset
-    /// one stays unset.
+    /// network I/O. It sends request bodies as they are: it never adds or
+    /// changes a `user_cache_secret` member.
     static func connection(
         enclave: String,
         pin: Pin,
         transportMode: TransportMode,
         baseURL: URL?,
         attestationRelay: String?,
-        userCacheSecret: String?,
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
@@ -117,7 +120,8 @@ public final class EnclaveHTTPClient: Sendable {
             ),
             transportMode: transportMode,
             baseURL: baseURL,
-            userCacheSecret: userCacheSecret ?? ""
+            // The client sends bodies as they are.
+            userCacheSecret: ""
         )
     }
 

@@ -153,7 +153,6 @@ final class PolicyTests: XCTestCase {
                 transportMode: .ehbp,
                 baseURL: nil,
                 attestationRelay: nil,
-                userCacheSecret: nil,
                 attestor: Attestor(verifier: authorized, fetch: { url in
                     XCTFail("fetched \(url) despite a pin the verifier refuses")
                     throw TinfoilError.network("unreachable")
