@@ -25,10 +25,7 @@ final class DocumentationExamplesTests: XCTestCase {
             pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
             freshnessMaxAge: 3600
         )
-        _ = try OpenAIClient(
-            httpClient: await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(policy: policy)),
-            apiKey: key
-        )
+        _ = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(policy: policy))
     }
 
     private func migrationExamples(key: String) async throws {

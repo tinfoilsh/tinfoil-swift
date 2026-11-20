@@ -30,7 +30,7 @@ Or in Xcode, File > Add Packages, enter `https://github.com/tinfoilsh/tinfoil-sw
 import Tinfoil
 
 // Enclave verification and encryption happen automatically.
-let client = try await Client(apiKey: "YOUR_API_KEY")
+let client = try await OpenAIClient(apiKey: "YOUR_API_KEY")
 
 let query = ChatQuery(
     messages: [.user(.init(content: .string("Hello, world!")))],
@@ -41,46 +41,43 @@ let response = try await client.chats(query: query)
 print(response.choices.first?.message.content ?? "No response")
 ```
 
-`Client` uses one of Tinfoil's routers. To choose the enclave, pin what it runs, send through a proxy, relay attestation, tighten the trust policy or reject verifications, use an `EnclaveOpenAIClient`, which has the same OpenAI methods:
+`OpenAIClient(apiKey:)` uses one of Tinfoil's routers. The SDK is layered: an HTTP client carries the route, its verification and its transport, and an `OpenAIClient` is built over one of them. To choose the enclave, name what it must run, send through a proxy, relay attestation, tighten the verification policy or reject verifications, create an `EnclaveHTTPClient` and build the `OpenAIClient` over it:
 
 ```swift
-let client = try await EnclaveOpenAIClient(
-    enclave: "enclave.example.com",
-    pin: Pin(repo: "org/repo@v1.2.3"),
-    apiKey: "YOUR_API_KEY"
-)
+let enclave = try await EnclaveHTTPClient(enclave: "enclave.example.com", trust: .repo("org/repo@v1.2.3"))
+let client = try OpenAIClient(httpClient: enclave, apiKey: "YOUR_API_KEY")
 ```
 
-A `Pin` names what the enclave must run: `Pin(repo:)` a GitHub repository, `owner/name[@tag][@sha256:digest]`, and `Pin(project:)` a config registry project, `org/project[@revision][@sha256:digest]`. The two are separate namespaces, so neither is satisfied by the other's evidence; `Pin(repo:project:)` accepts either, and `Pin.none` accepts any config that the verifier's trust authorizes, which the default verifier refuses because its trust is the whole public registry.
+The trust argument names who vouches for the config that the enclave runs: `.repo(_:)` a GitHub repository, `owner/name[@tag][@sha256:digest]`, whose signed release the enclave must prove; `.project(_:registryIDs:)` a config registry project, `org/project[@revision][@sha256:digest]`; `.signedBy(keys:project:)` configs that your keys sign; `.authorizedBy(_:)` configs that your closure approves; `.embeddedConfig(_:name:)` the exact config bytes that you supply; and `.either(repo:project:)` either of a repository and a project, for the migration to registry projects.
 
-`RouterOpenAIClient` does the same for Tinfoil's routers. Each sends through an `EnclaveHTTPClient` or `RouterHTTPClient`, which you can also create directly to send requests of your own with `data(for:)`. Both are verified before they are returned, verify again by themselves when the verification expires or the enclave rejects its key, and can be closed with `close()`. Their doc comments describe the parameters and request rules.
+`RouterHTTPClient` does the same for Tinfoil's routers, and `GatewayHTTPClient` for the gateway. Each can also send requests of your own with `data(for:)`. The enclave and router clients are verified before they are returned, verify again by themselves when the verification expires or the enclave rejects its key, and can be closed with `close()`. Their doc comments describe the options and request rules.
 
 ### Transport
 
-The enclave and router clients, and `Client`, pin each TLS connection to the attested key by default (`transportMode: .tls`), which protects the whole request and response. With `transportMode: .ehbp`, request and response bodies are sealed to the attested key instead, so they stay private through a proxy that you pass as `baseURL`; the method, URL and headers are not sealed. The gateway clients always use EHBP, since the gateway sits between the client and the replica.
+The enclave and router clients pin each TLS connection to the attested key by default (`transport: .tls`), which protects the whole request and response. With `transport: .ehbp(proxyURL:)`, request and response bodies are sealed to the attested key instead, so they stay private through the proxy; the method, URL and headers are not sealed. `OpenAIClient` adds the API path, `/v1/` by default (`OpenAIOptions.apiPath`), under the proxy URL or the enclave's origin. The gateway client always uses EHBP, since the gateway sits between the client and the replica.
 
-### Trust policy
+### Verification policy
 
-A `Verifier` sets what an enclave must prove, and every client takes one as `verifier`:
+A `Policy` sets what an enclave must prove on top of its trust, and every client takes one as the `policy` option:
 
 ```swift
-let verifier = try Verifier(
+let policy = Policy(
     pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
     freshnessMaxAge: 3600
 )
-let client = try await EnclaveOpenAIClient(enclave: host, pin: pin, verifier: verifier, apiKey: key)
+let enclave = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(policy: policy))
 ```
 
-It also takes config registry IDs, config and freshness signing keys, embedded references, and a `configAuthorizer` closure for configs that your application approves. Pass `verificationCheck` to inspect each `Verification` before its keys are used, and throw to reject it.
+It also takes the runtime and platform artifacts' trust (`artifacts: .endorsed(freshnessKeys:)` or `.embedded(runtime:platform:freshnessKeys:)`). Pass the `verificationCheck` option to inspect each `Verification` before its keys are used, and throw to reject it.
 
 ### Gateway (experimental)
 
-`GatewayOpenAIClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. Models can be pinned to repositories with `modelPins`. The gateway API may change in a later release.
+`GatewayHTTPClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. Models can be pinned to repositories with the `modelPins` option. The gateway API may change in a later release.
 
 ## Documentation
 
 - [Swift SDK documentation](https://docs.tinfoil.sh/sdk/swift-sdk) and the [proxy server guide](https://docs.tinfoil.sh/guides/proxy-server).
-- Multi-user services must scope prompt caches to each end user, with a per-request `user_cache_secret` in `extraBody`, or by passing `userCacheSecret` when creating a router or gateway client, such as `RouterOpenAIClient` or `GatewayOpenAIClient`. The router reads the secret; the gateway clients derive a cache salt from it on the device and send the salt, not the secret, in a JSON request body. Without one, the router and gateway clients, and `Client`, use a random secret generated once per process and shared by its clients; the SDK reads no environment variable or file for it. See [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
+- Multi-user services must scope prompt caches to each end user, with a per-request `user_cache_secret` in `extraBody`, or with the `userCacheSecret` option of a `RouterHTTPClient` or `GatewayHTTPClient`. The router reads the secret; the gateway client derives a cache salt from it on the device and sends the salt, not the secret, in a JSON request body. Without one, the router and gateway clients use a random secret that is generated once per process and that its clients share; the SDK reads no environment variable or file for it. An `EnclaveHTTPClient` sends bodies as they are, so set the field per request when it points at a router. See [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
 - `audioCreateSpeechStream(query:options:)` delivers decrypted audio in chunks that can split PCM samples or frames. The stream buffers without bound, so consume it promptly.
 - All OpenAI methods and types are unchanged; see the [MacPaw OpenAI SDK](https://github.com/MacPaw/OpenAI).
 
