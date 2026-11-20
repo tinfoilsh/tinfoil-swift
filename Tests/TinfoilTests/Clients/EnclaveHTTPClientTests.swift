@@ -336,16 +336,16 @@ final class EnclaveHTTPClientTests: XCTestCase {
     func testOpenAIClientsUseTheHTTPClientsTransport() async throws {
         for mode in [TransportMode.tls, .ehbp] {
             let httpClient = try await EnclaveHTTPClient(verifying: connection(approving(), transportMode: mode))
-            let client = try EnclaveOpenAIClient(httpClient: httpClient, apiKey: "test-key")
+            let client = try OpenAIClient(httpClient: httpClient, apiKey: "test-key")
             XCTAssertTrue(client.httpClient === httpClient)
-            XCTAssertEqual(client.httpClient.transport.mode, mode)
+            XCTAssertEqual(httpClient.transport.mode, mode)
         }
     }
 
     func testAMissingAPIKeyFailsBeforeAnyNetworkIO() async throws {
         do {
-            // An unreachable enclave would fail with a network error.
-            _ = try await EnclaveOpenAIClient(enclave: "127.0.0.1:9", trust: .repo("org/repo"))
+            // The router's discovery would fail with a network error.
+            _ = try await OpenAIClient()
             XCTFail("a client without an API key must not be created")
         } catch TinfoilError.configurationError(let failure) {
             XCTAssertTrue(failure.message.contains("pass apiKey or apiKeyProvider"), failure.message)

@@ -10,7 +10,7 @@ import FoundationNetworking
 /// once the verification expires or the router rejects its key.
 ///
 /// It exists only while the router is Tinfoil's default route. For inference
-/// that doesn't depend on the route, use `Client`.
+/// that doesn't depend on the route, use `OpenAIClient(apiKey:…)`.
 public final class RouterHTTPClient: Sendable {
     let connection: EnclaveConnection
 

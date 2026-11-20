@@ -1,10 +1,9 @@
 import Foundation
 
 /// An OpenAI-compatible client whose requests reach only a verified
-/// enclave, protected by the client's transport mode: over TLS pinned to the
-/// attested key, or with bodies sealed by EHBP. `Client`,
-/// `EnclaveOpenAIClient`, `RouterOpenAIClient` and `GatewayOpenAIClient`
-/// share its OpenAI methods, which pass through to `openAI`.
+/// enclave, protected by its HTTP client's transport: over TLS pinned to the
+/// attested key, or with bodies sealed by EHBP. `OpenAIClient` takes its
+/// OpenAI methods, which pass through to `openAI`.
 public protocol OpenAICompatibleClient: Sendable {
     /// The OpenAI client every request goes through, built so that its
     /// requests are protected in the same way. Use it for an OpenAI method
@@ -179,40 +178,6 @@ extension OpenAI {
         return apiKey
     }
 
-    /// An OpenAI client over a verified connection, protected by its
-    /// transport mode: every request goes over a connection pinned to the
-    /// attested TLS key, or has its body sealed with EHBP.
-    static func attested(
-        apiKey: String?,
-        apiKeyProvider: (@Sendable () -> String?)?,
-        connection: EnclaveConnection,
-        parsingOptions: ParsingOptions,
-        customHeaders: [String: String],
-        timeoutInterval: TimeInterval,
-        tinfoilEvents: Set<TinfoilEvent>
-    ) throws -> OpenAI {
-        let session: URLSessionProtocol
-        let streamingFactory: URLSessionFactory
-        if let ehbp = connection.ehbp {
-            session = ehbp.session
-            streamingFactory = ehbp.streamingFactory
-        } else {
-            session = StreamingSession(delegate: nil, open: connection.open)
-            streamingFactory = PinnedSessionFactory(connection: connection)
-        }
-        return try sealed(
-            apiKey: apiKey,
-            apiKeyProvider: apiKeyProvider,
-            baseURL: connection.baseURL.absoluteString,
-            session: session,
-            streamingFactory: streamingFactory,
-            parsingOptions: parsingOptions,
-            customHeaders: customHeaders,
-            timeoutInterval: timeoutInterval,
-            tinfoilEvents: tinfoilEvents
-        )
-    }
-
     /// Sets up the OpenAI client over the given sessions. Requests go to
     /// `baseURL`, under its path if it has one, and under `/v1` for a bare
     /// origin.
@@ -260,16 +225,16 @@ extension OpenAI {
     }
 }
 
-/// Makes the OpenAI client's streaming sessions over a connection's pinned
-/// TLS, so a streamed response arrives as the enclave sends it.
+/// Makes the OpenAI client's streaming sessions over an attested client's
+/// `open`, so that a streamed response arrives as the enclave sends it.
 final class PinnedSessionFactory: URLSessionFactory, Sendable {
-    private let connection: EnclaveConnection
+    private let open: StreamingSession.Open
 
-    init(connection: EnclaveConnection) {
-        self.connection = connection
+    init(open: @escaping StreamingSession.Open) {
+        self.open = open
     }
 
     func makeUrlSession(delegate: URLSessionDataDelegateProtocol) -> URLSessionProtocol {
-        StreamingSession(delegate: delegate, open: connection.open)
+        StreamingSession(delegate: delegate, open: open)
     }
 }

@@ -60,10 +60,10 @@ final class GatewayClientTests: XCTestCase {
         XCTAssertEqual(client.baseURL.absoluteString, "https://inference-gateway.tinfoil.sh/v1/")
         let models = try await client.models()
         XCTAssertEqual(models, [])
-        let openAI = try GatewayOpenAIClient(httpClient: client, apiKey: "test-key")
+        let openAI = try OpenAIClient(httpClient: client, apiKey: "test-key")
         XCTAssertEqual(openAI.openAI.configuration.host, "inference-gateway.tinfoil.sh")
         XCTAssertEqual(openAI.openAI.configuration.timeoutInterval, 60, "The default idle timeout")
-        let patient = try GatewayOpenAIClient(httpClient: client, apiKey: "test-key", timeoutInterval: 600)
+        let patient = try OpenAIClient(httpClient: client, apiKey: "test-key", timeoutInterval: 600)
         XCTAssertEqual(patient.openAI.configuration.timeoutInterval, 600)
         XCTAssertEqual(openAI.openAI.configuration.basePath, "/v1")
     }
@@ -102,18 +102,16 @@ final class GatewayClientTests: XCTestCase {
         guard let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"], !apiKey.isEmpty else {
             throw XCTSkip("set TINFOIL_API_KEY to send inference through the gateway")
         }
-        let client = try await GatewayOpenAIClient(
-            options: .init(userCacheSecret: "test-secret"),
-            apiKey: apiKey
-        )
-        let models = try await client.httpClient.models()
+        let gateway = try await GatewayHTTPClient(options: .init(userCacheSecret: "test-secret"))
+        let client = try OpenAIClient(httpClient: gateway, apiKey: apiKey)
+        let models = try await gateway.models()
         let model = try XCTUnwrap(models.first { $0.contains("llama") || $0.contains("gpt-oss") } ?? models.first)
         let result = try await client.chats(query: ChatQuery(
             messages: [.user(.init(content: .string("Reply with the single word: ready")))],
             model: model
         ))
         XCTAssertFalse((result.choices.first?.message.content ?? "").isEmpty)
-        let current = await client.httpClient.current
+        let current = await gateway.current
         XCTAssertEqual(current.first?.models, [model])
     }
 }
@@ -126,7 +124,7 @@ final class GatewayExperimentalSurfaceTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/Tinfoil")
         let files = try FileManager.default.contentsOfDirectory(at: sources.appendingPathComponent("Gateway"), includingPropertiesForKeys: nil)
-            + ["GatewayHTTPClient.swift", "GatewayOpenAIClient.swift"].map { sources.appendingPathComponent("Clients/\($0)") }
+            + ["GatewayHTTPClient.swift"].map { sources.appendingPathComponent("Clients/\($0)") }
         var exports: Set<String> = []
         for file in files {
             let lines = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
@@ -143,6 +141,6 @@ final class GatewayExperimentalSurfaceTests: XCTestCase {
                 XCTAssertTrue(documentation.contains { $0.contains("Experimental:") }, "\(name) is not marked experimental")
             }
         }
-        XCTAssertEqual(exports, ["CatalogEntry", "Catalog", "ModelPin", "ReplicaVerification", "GatewayHTTPClient", "GatewayOpenAIClient"])
+        XCTAssertEqual(exports, ["CatalogEntry", "Catalog", "ModelPin", "ReplicaVerification", "GatewayHTTPClient", "GatewayOptions"])
     }
 }

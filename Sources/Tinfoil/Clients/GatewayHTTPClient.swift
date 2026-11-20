@@ -180,3 +180,68 @@ public final class GatewayHTTPClient: Sendable {
         return (response.body, response.response)
     }
 }
+
+/// Configures a `GatewayHTTPClient`. Every option is optional, and the
+/// default value of each one selects its default.
+///
+/// Experimental: the gateway route is new, and this API may change or be
+/// removed in a later release.
+public struct GatewayOptions: Sendable {
+    /// The gateway's base URL; nil selects Tinfoil's gateway. It must be
+    /// HTTPS, and is treated as a directory: a path without a trailing slash
+    /// gets one. Request paths join under it, so a URL with credentials, a
+    /// query or a fragment, even an empty one, is refused.
+    public var baseURL: URL?
+    /// Pins models to repositories. With `pinnedModelsOnly`, only pinned
+    /// models are served, which requires at least one pin.
+    public var modelPins: [String: ModelPin]
+    /// Serve only the pinned models
+    public var pinnedModelsOnly: Bool
+    /// The verification policy for unpinned models, and pinned ones without
+    /// their own; the default policy keeps every default
+    public var policy: Policy
+    /// The default prompt-cache scope of the client's requests; nil or empty
+    /// uses a random secret that is generated once per process and that its
+    /// clients share, so cache hits aren't shared across processes; pass one
+    /// to keep it stable. A non-empty `user_cache_secret` string in a
+    /// request's JSON body overrides it, so that a server can scope the cache
+    /// to each end user. In a request with an `application/json` object body,
+    /// the secret is replaced by a salt derived from it and the API key; any
+    /// other body is sent as written, sealed to the verified replica. Use an
+    /// opaque random value, not a raw user ID or API key: the gateway sees a
+    /// cache prefix keyed on it, and could test guesses of a guessable secret
+    /// and then of the prompt.
+    public var userCacheSecret: String?
+    /// Called with each replica's verification, for pinned and unpinned
+    /// models, before its keys are used; throw to reject it, and the next
+    /// replica of the model is tried.
+    public var verificationCheck: VerificationCheck?
+    /// Called with each replica verification's final result. It only
+    /// observes.
+    public var onVerificationResult: VerificationResultCallback?
+    /// Read on every request in place of the gateway's catalog. Nil fetches
+    /// the gateway's catalog when the client is created and refreshes it every
+    /// 10 seconds while the client is used; a failed refresh keeps the last
+    /// catalog that was fetched.
+    public var catalog: (@Sendable () -> Catalog)?
+
+    public init(
+        modelPins: [String: ModelPin] = [:],
+        pinnedModelsOnly: Bool = false,
+        baseURL: URL? = nil,
+        policy: Policy = Policy(),
+        userCacheSecret: String? = nil,
+        verificationCheck: VerificationCheck? = nil,
+        onVerificationResult: VerificationResultCallback? = nil,
+        catalog: (@Sendable () -> Catalog)? = nil
+    ) {
+        self.baseURL = baseURL
+        self.modelPins = modelPins
+        self.pinnedModelsOnly = pinnedModelsOnly
+        self.policy = policy
+        self.userCacheSecret = userCacheSecret
+        self.verificationCheck = verificationCheck
+        self.onVerificationResult = onVerificationResult
+        self.catalog = catalog
+    }
+}

@@ -91,7 +91,7 @@ final class ClientTests: XCTestCase {
     func testClientSucceedsWithCacheSecretWhenVerificationSucceeds() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await RouterOpenAIClient(
+        let client = try await OpenAIClient(
             httpClient: RouterHTTPClient(options: .init(userCacheSecret: Self.testUserCacheSecret)),
             apiKey: try getAPIKey()
         )
@@ -113,7 +113,7 @@ final class ClientTests: XCTestCase {
     func testEHBPEncryptionSuccess() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await Client(apiKey: try getAPIKey())
+        let client = try await OpenAIClient(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -130,7 +130,7 @@ final class ClientTests: XCTestCase {
     // never leave the machine.
     func testCreateFailsForAnUnreachableEnclave() async throws {
         do {
-            _ = try await EnclaveOpenAIClient(
+            _ = try await OpenAIClient(
                 httpClient: EnclaveHTTPClient(enclave: "127.0.0.1:9", trust: .repo(TinfoilConstants.defaultGithubRepo), options: .init(transport: .ehbp())),
                 apiKey: "test-key"
             )
@@ -146,7 +146,7 @@ final class ClientTests: XCTestCase {
     func testStreamingChatCompletion() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await Client(apiKey: try getAPIKey())
+        let client = try await OpenAIClient(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -182,7 +182,7 @@ final class ClientTests: XCTestCase {
     func testStreamingWithEHBP() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await Client(apiKey: try getAPIKey())
+        let client = try await OpenAIClient(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -204,7 +204,7 @@ final class ClientTests: XCTestCase {
     func testStreamingResponseStructure() async throws {
         try skipIfNoAPIKey()
 
-        let client = try await Client(apiKey: try getAPIKey())
+        let client = try await OpenAIClient(apiKey: try getAPIKey())
 
         let chatQuery = ChatQuery(
             messages: [
@@ -252,7 +252,7 @@ final class ClientTests: XCTestCase {
 
         let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
-        let client = try await RouterOpenAIClient(
+        let client = try await OpenAIClient(
             httpClient: RouterHTTPClient(
                 options: .init(userCacheSecret: Self.testUserCacheSecret, onVerificationResult: { result in captured.value = result })
             ),
@@ -280,7 +280,7 @@ final class ClientTests: XCTestCase {
         let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
         do {
-            _ = try await EnclaveOpenAIClient(
+            _ = try await OpenAIClient(
                 httpClient: EnclaveHTTPClient(
                     enclave: "127.0.0.1:9",
                     trust: .repo(TinfoilConstants.defaultGithubRepo),

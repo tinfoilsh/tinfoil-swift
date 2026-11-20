@@ -127,13 +127,21 @@ final class VerificationCheckTests: XCTestCase {
         }
     }
 
-    func testOpenAIRequestsKeepTheBaseURLsPath() async throws {
-        for (path, expected) in [("", "/v1/chat/completions"), ("/api/", "/api/chat/completions")] {
-            let client = try await EnclaveOpenAIClient(httpClient: client(path: path), apiKey: "test-key")
+    /// The API path joins under the proxy URL's path, whether or not that
+    /// ends with a slash.
+    func testOpenAIRequestsJoinTheAPIPathUnderTheProxyURL() async throws {
+        let cases: [(String, String?, String)] = [
+            ("", nil, "/v1/chat/completions"),
+            ("/api", nil, "/api/v1/chat/completions"),
+            ("/api/", nil, "/api/v1/chat/completions"),
+            ("/api/", "/openai/v1", "/api/openai/v1/chat/completions"),
+        ]
+        for (path, apiPath, expected) in cases {
+            let client = try await OpenAIClient(httpClient: client(path: path), options: .init(apiPath: apiPath), apiKey: "test-key")
             // The stub server can't seal a response, so the request fails;
             // what matters is where it was sent.
             _ = try? await chat(client)
-            XCTAssertEqual(server.requestStore.lastRequest?.path, expected, "base URL path \"\(path)\"")
+            XCTAssertEqual(server.requestStore.lastRequest?.path, expected, "proxy path \"\(path)\", API path \(apiPath ?? "nil")")
         }
     }
 
@@ -141,7 +149,7 @@ final class VerificationCheckTests: XCTestCase {
         let reported = Box<Result<Verification, TinfoilError>?>(value: nil)
 
         do {
-            _ = try await EnclaveOpenAIClient(
+            _ = try await OpenAIClient(
                 httpClient: try client(
                     verificationCheck: { _ in throw Refusal() },
                     onVerificationResult: { reported.value = $0 }
@@ -163,7 +171,7 @@ final class VerificationCheckTests: XCTestCase {
     func testTheVerificationCheckRunsBeforeTheResultIsReported() async throws {
         let events = Recorder<String>()
 
-        _ = try await EnclaveOpenAIClient(
+        _ = try await OpenAIClient(
             httpClient: client(
                 verificationCheck: { _ in events.record("enclave verified") },
                 onVerificationResult: { _ in events.record("result") }
@@ -176,7 +184,7 @@ final class VerificationCheckTests: XCTestCase {
 
     func testARejectedRefreshFailsTheRequestWithoutReplaying() async throws {
         let verified = Recorder<String>()
-        let client = try await EnclaveOpenAIClient(
+        let client = try await OpenAIClient(
             httpClient: client(verificationCheck: { verification in
                 if verified.record(verification.codeDigest) > 1 {
                     throw Refusal()

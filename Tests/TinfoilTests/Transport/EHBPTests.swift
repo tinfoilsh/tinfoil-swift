@@ -1534,7 +1534,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.chats() uses EHBP encryption end-to-end
     func testClientChatsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1583,7 +1583,7 @@ final class EHBPTests: XCTestCase {
     /// Verifies that per-request headers reach the wire alongside the client's
     /// customHeaders, and override them on collision, through the EHBP transport.
     func testClientChatsForwardsPerRequestHeaders() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1618,7 +1618,7 @@ final class EHBPTests: XCTestCase {
     }
 
     func testClientChatsStreamForwardsPerRequestHeaders() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1658,7 +1658,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.chatsStream() uses EHBP encryption end-to-end
     func testClientChatsStreamUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1706,7 +1706,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.embeddings() uses EHBP encryption end-to-end
     func testClientEmbeddingsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1750,7 +1750,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.images() uses EHBP encryption end-to-end
     func testClientImagesUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1794,7 +1794,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.createResponse() (Responses API) uses EHBP encryption end-to-end
     func testClientCreateResponseUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1838,7 +1838,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.createResponseStream() (Responses API streaming) uses EHBP encryption end-to-end
     func testClientCreateResponseStreamUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1885,7 +1885,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.moderations() uses EHBP encryption end-to-end
     func testClientModerationsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1925,7 +1925,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.imageEdits() uses EHBP encryption end-to-end
     func testClientImageEditsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1956,7 +1956,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.imageVariations() uses EHBP encryption end-to-end
     func testClientImageVariationsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1984,7 +1984,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.audioCreateSpeech() uses EHBP encryption end-to-end
     func testClientAudioCreateSpeechUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2026,7 +2026,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.audioTranscriptions() uses EHBP encryption end-to-end
     func testClientAudioTranscriptionsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2058,7 +2058,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.audioTranslations() uses EHBP encryption end-to-end
     func testClientAudioTranslationsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2090,7 +2090,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.assistantCreate() uses EHBP encryption end-to-end
     func testClientAssistantCreateUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2134,7 +2134,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.threads() uses EHBP encryption end-to-end
     func testClientThreadsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2165,7 +2165,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.threadRun() uses EHBP encryption end-to-end
     func testClientThreadRunUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2209,7 +2209,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.runs() uses EHBP encryption end-to-end
     func testClientRunsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2237,7 +2237,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.threadsAddMessage() uses EHBP encryption end-to-end
     func testClientThreadsAddMessageUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2275,7 +2275,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.files() uses EHBP encryption end-to-end
     func testClientFilesUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2312,7 +2312,7 @@ final class EHBPTests: XCTestCase {
     /// This ensures EHBP is mandatory - there's no way to bypass it
     func testClientRequiresHPKEKey() {
         XCTAssertThrowsError(
-            try Client(
+            try SealedClient(
                 apiKey: "test-api-key",
                 baseURL: "https://example.com",
                 enclaveURL: "https://example.com",
@@ -2335,7 +2335,7 @@ final class EHBPTests: XCTestCase {
     /// Verifies that Client CANNOT be created with an empty HPKE public key
     func testClientRejectsEmptyHPKEKey() {
         XCTAssertThrowsError(
-            try Client(
+            try SealedClient(
                 apiKey: "test-api-key",
                 baseURL: "https://example.com",
                 enclaveURL: "https://example.com",
@@ -2360,7 +2360,7 @@ final class EHBPTests: XCTestCase {
     /// `if let body = body, !body.isEmpty { ... }`
     /// An empty body would bypass EHBP encryption entirely.
     func testAllPOSTRequestsHaveNonEmptyBodies() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2580,7 +2580,7 @@ final class EHBPTests: XCTestCase {
     /// Verifies that Client.audioCreateSpeechStream() uses EHBP encryption end-to-end
     func testClientAudioCreateSpeechStreamUsesEHBPEncryption() async throws {
         server.responseContentType = "audio/mpeg"
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2625,7 +2625,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.audioTranscriptionsVerbose() uses EHBP encryption end-to-end
     func testClientAudioTranscriptionsVerboseUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2658,7 +2658,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.audioTranscriptionStream() uses EHBP encryption end-to-end
     func testClientAudioTranscriptionStreamUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2689,7 +2689,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.assistantModify() uses EHBP encryption end-to-end
     func testClientAssistantModifyUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2733,7 +2733,7 @@ final class EHBPTests: XCTestCase {
 
     /// Verifies that Client.runSubmitToolOutputs() uses EHBP encryption end-to-end
     func testClientRunSubmitToolOutputsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,

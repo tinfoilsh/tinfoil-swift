@@ -361,7 +361,7 @@ final class UserCacheSecretTests: XCTestCase {
         try server.start()
         defer { server.stop() }
 
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,

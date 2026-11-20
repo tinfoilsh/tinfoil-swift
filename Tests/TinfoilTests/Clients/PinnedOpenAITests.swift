@@ -53,7 +53,7 @@ final class PinnedOpenAITests: XCTestCase {
         _ transport: PinnedTransport,
         network: FakeNetwork = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) },
         userCacheSecret: String = ""
-    ) async throws -> EnclaveOpenAIClient {
+    ) async throws -> OpenAIClient {
         let connection = try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: "enclave.example",
@@ -67,7 +67,7 @@ final class PinnedOpenAITests: XCTestCase {
             send: { _, _ in throw TinfoilError.configuration("the OpenAI client streams every request") },
             stream: { try await transport.stream($0, $1) }
         )
-        return try EnclaveOpenAIClient(httpClient: await EnclaveHTTPClient(verifying: connection), apiKey: "test-key")
+        return try OpenAIClient(httpClient: await EnclaveHTTPClient(verifying: connection), apiKey: "test-key")
     }
 
     func testChatGoesOverThePinnedConnection() async throws {
@@ -167,6 +167,6 @@ final class PinnedOpenAITests: XCTestCase {
 
     func testAnOpenAIClientOverAPinnedConnectionUsesItsMode() async throws {
         let client = try await client(PinnedTransport { _ in [Self.chat] })
-        XCTAssertEqual(client.httpClient.transport, .tls)
+        XCTAssertEqual((client.httpClient as? EnclaveHTTPClient)?.transport, .tls)
     }
 }

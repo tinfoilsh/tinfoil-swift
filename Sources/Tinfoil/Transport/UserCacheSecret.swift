@@ -7,15 +7,16 @@ import Security
 /// share cached prompt prefixes, requests carrying different secrets cannot
 /// observe each other's cache timing.
 ///
-/// A client of Tinfoil's inference routes, such as `RouterHTTPClient`,
-/// `Client` or `GatewayHTTPClient`, resolves it in this order. A client of an
+/// A client of Tinfoil's inference routes, `RouterHTTPClient` or
+/// `GatewayHTTPClient`, resolves it in this order. A client of an
 /// enclave the caller names uses only the first two, since other enclaves
 /// don't read the field:
 ///
 ///  1. a non-empty per-request `user_cache_secret` field in the body, e.g.
 ///     set via `ChatQuery.extraBody`,
-///  2. the client's `userCacheSecret` parameter; `Client` takes none, so for
-///     it only steps 1 and 3 apply,
+///  2. the client's `userCacheSecret` option; the drop-in
+///     `OpenAIClient(apiKey:…)` sets none, so for it only steps 1 and 3
+///     apply,
 ///  3. a random secret generated in memory once per process, which every
 ///     client in the process shares.
 ///
