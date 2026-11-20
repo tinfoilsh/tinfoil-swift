@@ -41,7 +41,7 @@ public final class GatewayHTTPClient: Sendable {
             throw TinfoilError.configuration("invalid base URL: the gateway base URL has no host")
         }
         let attestor = { (verifier: Verifier?) throws -> Attestor in
-            Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck)
+            Attestor(verifier: try (verifier ?? Verifier()).backend(trust: nil), verificationCheck: verificationCheck)
         }
         let policy = try GatewayPolicy(
             pins: options.modelPins.mapValues { pin in (repo: pin.repo, attestor: try pin.verifier.map { try attestor($0) }) },

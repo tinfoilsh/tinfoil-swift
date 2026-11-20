@@ -44,12 +44,6 @@ struct Attestor: Sendable {
         self.verificationCheck = verificationCheck
     }
 
-    /// Whether the verifier takes the config from the caller rather than from
-    /// a pin, which rules out discovering a router
-    var callerAuthorizesConfig: Bool {
-        verifier.callerAuthorizesConfig
-    }
-
     /// Throws the configuration error that every verification against pin
     /// would end in, without any I/O.
     func checkPinVerifiability(_ pin: Pin) throws {

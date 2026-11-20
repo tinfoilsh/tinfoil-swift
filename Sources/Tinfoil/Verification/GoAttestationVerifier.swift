@@ -12,6 +12,16 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
     // tracks; keeping it here ties its lifetime to the verifier's.
     private let configAuthorizer: ConfigAuthorizerBridge?
 
+    /// The framework's verifier for `trust` under `policy`; nil selects the
+    /// default config trust, Tinfoil's public registry.
+    convenience init(trust: Trust?, policy: VerifierOptions = .defaults) throws {
+        var authorizer: ConfigAuthorizerBridge?
+        if case let .authorizedBy(authorize) = trust?.kind {
+            authorizer = ConfigAuthorizerBridge(authorize)
+        }
+        try self.init(optionsJSON: policy.json(trust: trust), configAuthorizer: authorizer)
+    }
+
     /// - Parameters:
     ///   - optionsJSON: The framework's options; empty for the defaults
     ///   - configAuthorizer: Decides which configs are authorized, in place of
@@ -32,10 +42,6 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
         }
         self.verifier = verifier
         self.configAuthorizer = configAuthorizer
-    }
-
-    var callerAuthorizesConfig: Bool {
-        verifier.callerAuthorizesConfig()
     }
 
     func checkPinVerifiability(_ pin: Pin) throws {

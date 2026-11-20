@@ -9,7 +9,7 @@ final class DocumentationExamplesTests: XCTestCase {
         _ = [readmeExamples, migrationExamples] as [Any]
     }
 
-    private func readmeExamples(key: String, host: String, pin: Pin, registers: [String]) async throws {
+    private func readmeExamples(key: String, host: String, trust: Trust, registers: [String]) async throws {
         let client = try await Client(apiKey: "YOUR_API_KEY")
         let query = ChatQuery(
             messages: [.user(.init(content: .string("Hello, world!")))],
@@ -20,7 +20,7 @@ final class DocumentationExamplesTests: XCTestCase {
 
         _ = try await EnclaveOpenAIClient(
             enclave: "enclave.example.com",
-            pin: Pin(repo: "org/repo@v1.2.3"),
+            trust: .repo("org/repo@v1.2.3"),
             apiKey: "YOUR_API_KEY"
         )
 
@@ -28,18 +28,18 @@ final class DocumentationExamplesTests: XCTestCase {
             pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
             freshnessMaxAge: 3600
         )
-        _ = try await EnclaveOpenAIClient(enclave: host, pin: pin, options: .init(verifier: verifier), apiKey: key)
+        _ = try await EnclaveOpenAIClient(enclave: host, trust: trust, options: .init(verifier: verifier), apiKey: key)
     }
 
     private func migrationExamples(key: String) async throws {
         _ = try await Client(apiKey: key)
         _ = try await EnclaveOpenAIClient(
             enclave: "enclave.example.com",
-            pin: Pin(repo: "org/repo"),
+            trust: .repo("org/repo"),
             options: .init(transportMode: .ehbp, baseURL: URL(string: "https://proxy.example.com/v1/")!, attestationRelay: "proxy.example.com"),
             apiKey: key
         )
-        let http = try await EnclaveHTTPClient(enclave: "enclave.example.com", pin: Pin(repo: "org/repo"))
+        let http = try await EnclaveHTTPClient(enclave: "enclave.example.com", trust: .repo("org/repo"))
         _ = try await http.ensureVerified()
         _ = try await http.data(from: URL(string: "/v1/models")!)
         await http.close()

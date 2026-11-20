@@ -23,6 +23,10 @@ public enum TransportMode: Sendable, Equatable {
 public final class EnclaveHTTPClient: Sendable {
     let connection: EnclaveConnection
 
+    /// The trust that the enclave is verified under. It is a copy: the client
+    /// keeps its own.
+    public let trust: Trust
+
     /// Creates a client for the enclave at `enclave` and verifies it. The
     /// configuration is checked before any network I/O, so a misconfigured
     /// client fails without contacting the enclave; an enclave that fails
@@ -30,25 +34,19 @@ public final class EnclaveHTTPClient: Sendable {
     ///
     /// - Parameters:
     ///   - enclave: Host of the enclave, such as "inference.tinfoil.sh"
-    ///   - pin: What the enclave must run. `Pin(repo:)` names a GitHub
-    ///     repository, owner/name[@tag][@sha256:digest], whose signed release
-    ///     the enclave must prove; `Pin(project:)` names a config registry
-    ///     project, org/project[@revision][@sha256:digest], that the enclave's
-    ///     config must come from; `Pin(repo:project:)` accepts either.
-    ///     `Pin.none` accepts any config that the verifier's trust
-    ///     authorizes: with `configSigningKeys`, any config those keys
-    ///     approve; with a `configAuthorizer`, which requires `Pin.none`, any
-    ///     config it approves. The default verifier refuses `Pin.none`, which
-    ///     would accept any deployment in Tinfoil's public registry. An empty
-    ///     string is refused, so that a missing value can't widen the trust
-    ///     by accident.
+    ///   - trust: Who vouches for the config that the enclave runs, such as
+    ///     `.repo("owner/name@v1.2.3")` for a GitHub repository's signed
+    ///     release or `.project("org/project")` for a config registry
+    ///     project. `Trust` describes each kind.
     ///   - options: The client's options; each one's default applies when it
     ///     is not set
     public convenience init(
         enclave: String,
-        pin: Pin,
+        trust: Trust,
         options: EnclaveOptions = EnclaveOptions()
     ) async throws {
+        let pin = try trust.pin()
+        let verifier = try (options.verifier ?? Verifier()).backend(trust: trust)
         try await self.init(verifying: Self.connection(
             enclave: enclave,
             pin: pin,
@@ -56,17 +54,14 @@ public final class EnclaveHTTPClient: Sendable {
             baseURL: options.baseURL,
             attestationRelay: options.attestationRelay,
             userCacheSecret: options.userCacheSecret,
-            attestor: Attestor(
-                verifier: try options.verifier?.backend ?? GoAttestationVerifier(),
-                verificationCheck: options.verificationCheck
-            ),
+            attestor: Attestor(verifier: verifier, verificationCheck: options.verificationCheck),
             onVerificationResult: options.onVerificationResult
-        ))
+        ), trust: trust)
     }
 
-    /// The connection `init(enclave:pin:…)` verifies, built without network
-    /// I/O. Only Tinfoil's router reads the cache secret, so an unset one
-    /// stays unset.
+    /// The connection `init(enclave:trust:options:)` verifies, built without
+    /// network I/O. Only Tinfoil's router reads the cache secret, so an unset
+    /// one stays unset.
     static func connection(
         enclave: String,
         pin: Pin,
@@ -77,13 +72,6 @@ public final class EnclaveHTTPClient: Sendable {
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
-        // The verifier reads "" as an unset part of the pin; only Pin.none
-        // asks for no pin here.
-        if pin.repo?.isEmpty == true || pin.project?.isEmpty == true {
-            throw TinfoilError.configuration(
-                "a pin's repo and project must not be empty; pass Pin.none to accept any config that the verifier's trust authorizes"
-            )
-        }
         try attestor.checkPinVerifiability(pin)
         return try EnclaveConnection(
             handle: EnclaveHandle(
@@ -99,10 +87,12 @@ public final class EnclaveHTTPClient: Sendable {
         )
     }
 
-    /// Verifies connection before the client is handed out.
-    init(verifying connection: EnclaveConnection) async throws {
+    /// Verifies connection before the client is handed out. `trust` is what
+    /// the connection's pin came from; nil derives one from the pin.
+    init(verifying connection: EnclaveConnection, trust: Trust? = nil) async throws {
         try await connection.ensureUsable()
         self.connection = connection
+        self.trust = trust ?? Trust(pin: connection.pin)
     }
 
     /// Closes the client: later requests and verifications fail with
@@ -124,10 +114,6 @@ public final class EnclaveHTTPClient: Sendable {
     /// The host of the enclave the client verifies. It stays the enclave's
     /// host when `baseURL` is a proxy.
     public var enclave: String { connection.enclave }
-
-    /// The pin the enclave is verified against, or `Pin.none` when any config
-    /// that the verifier's trust authorizes is accepted
-    public var pin: Pin { connection.pin }
 
     /// The last successful verification, without checking it. It may have
     /// expired or been rejected; use `ensureVerified()` for one that is valid.

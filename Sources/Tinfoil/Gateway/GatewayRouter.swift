@@ -83,17 +83,9 @@ struct GatewayPolicy: Sendable {
         if pinnedOnly && pins.isEmpty {
             throw TinfoilError.configuration("pinned-only mode requires at least one model pin")
         }
-        // Replicas are verified against repository pins, so a policy whose
-        // config the caller supplies or approves has nothing to check.
-        if attestor.callerAuthorizesConfig {
-            throw TinfoilError.configuration(Self.callerAuthorizedConfig)
-        }
         var checked: [String: Pin] = [:]
         for (model, pin) in pins {
             let pinAttestor = pin.attestor ?? attestor
-            if pinAttestor.callerAuthorizesConfig {
-                throw TinfoilError.configuration("model \"\(model)\": \(Self.callerAuthorizedConfig)")
-            }
             guard !model.trimmingCharacters(in: .whitespaces).isEmpty, pin.repo.hasPrefix(GatewayCatalog.trustedRepoOwner) else {
                 throw TinfoilError.configuration(
                     "model pin \"\(model)\" repository \"\(pin.repo)\" must belong to \(GatewayCatalog.trustedRepoOwner)"
@@ -110,8 +102,6 @@ struct GatewayPolicy: Sendable {
         self.pinnedOnly = pinnedOnly
         self.attestor = attestor
     }
-
-    private static let callerAuthorizedConfig = "caller-authorized config requires a direct enclave client"
 
     /// The hosts that serve model and the replica, without its host, that a
     /// request for it is verified as

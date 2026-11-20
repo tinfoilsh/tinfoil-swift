@@ -60,7 +60,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let client = try await EnclaveHTTPClient(verifying: connection(network))
 
         XCTAssertEqual(client.enclave, "enclave.example")
-        XCTAssertEqual(client.pin, Pin(repo: "org/repo"))
+        XCTAssertEqual(client.trust.repo, "org/repo")
         XCTAssertEqual(client.transportMode, .tls, "A named enclave uses pinned TLS by default.")
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"])
         let current = await client.current
@@ -97,7 +97,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let client = try await router(network, onVerificationResult: { results.record($0) })
 
         XCTAssertEqual(client.enclave, "router-a.example")
-        XCTAssertEqual(client.pin, TinfoilConstants.routerPin)
+        XCTAssertEqual(client.connection.pin, TinfoilConstants.routerPin)
         XCTAssertEqual(client.transportMode, .ehbp, "A router uses EHBP by default.")
         let discovered = await client.current
         guard results.values.count == 1, case .success(let reported) = results.values[0] else {
@@ -277,7 +277,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
         let cases: [(TransportMode, String)] = Self.refusedBaseURLs.map { (.ehbp, $0) } + [(.tls, "http://localhost:8080/v1")]
         for (mode, url) in cases {
             do {
-                _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", pin: Pin(repo: "org/repo"), options: .init(transportMode: mode, baseURL: URL(string: url)!))
+                _ = try await EnclaveHTTPClient(enclave: "127.0.0.1:9", trust: .repo("org/repo"), options: .init(transportMode: mode, baseURL: URL(string: url)!))
                 XCTFail("\(url) must be refused")
             } catch TinfoilError.configurationError(let failure) {
                 if mode == .ehbp, url.hasPrefix("http://"), !url.contains("@"), !url.contains("?"), !url.contains("#") {
@@ -321,7 +321,7 @@ final class EnclaveHTTPClientTests: XCTestCase {
     func testAMissingAPIKeyFailsBeforeAnyNetworkIO() async throws {
         do {
             // An unreachable enclave would fail with a network error.
-            _ = try await EnclaveOpenAIClient(enclave: "127.0.0.1:9", pin: Pin(repo: "org/repo"))
+            _ = try await EnclaveOpenAIClient(enclave: "127.0.0.1:9", trust: .repo("org/repo"))
             XCTFail("a client without an API key must not be created")
         } catch TinfoilError.configurationError(let failure) {
             XCTAssertTrue(failure.message.contains("pass apiKey or apiKeyProvider"), failure.message)

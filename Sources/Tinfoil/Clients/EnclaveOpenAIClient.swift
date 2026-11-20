@@ -17,10 +17,10 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     }
 
     /// Creates an `EnclaveHTTPClient` for `enclave`, verified as
-    /// `EnclaveHTTPClient.init(enclave:pin:…)` verifies it, and an OpenAI
+    /// `EnclaveHTTPClient.init(enclave:trust:options:)` verifies it, and an OpenAI
     /// client over it. The API key is checked before any network I/O.
     ///
-    /// `enclave`, `pin` and `options` are those of `EnclaveHTTPClient`, which
+    /// `enclave`, `trust` and `options` are those of `EnclaveHTTPClient`, which
     /// describes them.
     /// - Parameters:
     ///   - apiKey: The API key; required unless `apiKeyProvider` is given
@@ -36,7 +36,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
     ///     values of the `X-Tinfoil-Events` header
     public convenience init(
         enclave: String,
-        pin: Pin,
+        trust: Trust,
         options: EnclaveOptions = EnclaveOptions(),
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
@@ -48,7 +48,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
         let staticApiKey = try OpenAI.apiKey(apiKey, provider: apiKeyProvider)
         let httpClient = try await EnclaveHTTPClient(
             enclave: enclave,
-            pin: pin,
+            trust: trust,
             options: options
         )
         try self.init(
@@ -64,7 +64,7 @@ public final class EnclaveOpenAIClient: OpenAICompatibleClient, Sendable {
 
     /// Creates an OpenAI client that sends through `httpClient`, in its
     /// transport mode. It does no network I/O: the client was
-    /// verified when it was created. See `init(enclave:pin:…)` for the other
+    /// verified when it was created. See `init(enclave:trust:options:…)` for the other
     /// parameters.
     public init(
         httpClient: EnclaveHTTPClient,

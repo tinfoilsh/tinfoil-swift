@@ -70,7 +70,7 @@ public struct ConfigVerification: Sendable, Equatable {
     public let approvalTime: Date?
     /// The registry that approved the config, as its URI. For an approval
     /// signed with a certificate the certificate authenticates it;
-    /// `Verifier.publicRegistryID` marks Tinfoil's public registry.
+    /// `Trust.publicRegistryID` marks Tinfoil's public registry.
     public let registryID: String
     /// When a certificate-signed approval was signed, from its authenticated
     /// timestamp; nil for an approval signed with a pinned key

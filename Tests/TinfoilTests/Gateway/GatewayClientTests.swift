@@ -54,20 +54,6 @@ final class GatewayClientTests: XCTestCase {
         XCTAssertEqual(directory("https://gw.example"), "https://gw.example")
     }
 
-    func testACallerAuthorizedVerifierIsRefused() async throws {
-        let authorizing = try Verifier(configAuthorizer: { _ in })
-        for (verifier, pin) in [(authorizing, nil), (nil, authorizing)] as [(Verifier?, Verifier?)] {
-            do {
-                _ = try await GatewayHTTPClient(
-                    options: .init(modelPins: ["m": ModelPin(repo: "tinfoilsh/model", verifier: pin)], verifier: verifier, userCacheSecret: "pinned", catalog: { [:] })
-                )
-                XCTFail("expected the refusal")
-            } catch TinfoilError.configurationError(let failure) {
-                XCTAssertTrue(failure.message.contains("caller-authorized config requires a direct enclave client"), failure.message)
-            }
-        }
-    }
-
     func testTheDefaultsNameTinfoilsGateway() async throws {
         let client = try await GatewayHTTPClient(options: .init(userCacheSecret: "pinned", catalog: { [:] }))
         XCTAssertEqual(client.baseURL.absoluteString, "https://inference-gateway.tinfoil.sh/v1/")

@@ -10,17 +10,14 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
     private var _pins: [Pin] = []
     /// The clock a verification's hour of freshness is counted from
     private let now: @Sendable () -> Date
-    let callerAuthorizesConfig: Bool
     /// A repo that checkPinVerifiability refuses
     private let refusedRepo: String?
 
     init(
         now: @escaping @Sendable () -> Date = { Date() },
-        callerAuthorizesConfig: Bool = false,
         refusedRepo: String? = nil
     ) {
         self.now = now
-        self.callerAuthorizesConfig = callerAuthorizesConfig
         self.refusedRepo = refusedRepo
     }
 

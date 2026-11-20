@@ -25,7 +25,7 @@ public final class RouterHTTPClient: Sendable {
     public convenience init(options: RouterOptions = RouterOptions()) async throws {
         try await self.init(verifying: EnclaveConnection.router(
             attestor: Attestor(
-                verifier: try options.verifier?.backend ?? GoAttestationVerifier(),
+                verifier: try (options.verifier ?? Verifier()).backend(trust: nil),
                 verificationCheck: options.verificationCheck
             ),
             transportMode: options.transportMode,
@@ -62,10 +62,6 @@ public final class RouterHTTPClient: Sendable {
     /// The host of the router the client chose. It stays the router's host
     /// when `baseURL` is a proxy.
     public var enclave: String { connection.enclave }
-
-    /// The pin the router is verified against: Tinfoil's router, as a
-    /// repository and as a registry project
-    public var pin: Pin { connection.pin }
 
     /// The last successful verification, without checking it. It may have
     /// expired or been rejected; use `ensureVerified()` for one that is valid.

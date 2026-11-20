@@ -1,21 +1,18 @@
 import Foundation
 import TinfoilGo
 
-/// The trust policy that attestation documents are appraised under. Every
-/// client takes one; without it, a client uses the defaults: Tinfoil's public
-/// config registry, Tinfoil's signing keys and a seven-day freshness bound.
+/// The verification policy that attestation documents are appraised under,
+/// on top of the trust that a client verifies its enclave under. Every client
+/// takes one; without it, a client uses the defaults: Tinfoil's signing keys
+/// and a seven-day freshness bound.
 ///
-/// The initializer checks the options, including the conflicts between trust
-/// sources, and throws `TinfoilError.configurationError` for an invalid
-/// combination, so a client never starts with a policy that can't verify.
-/// A verifier is immutable and safe to share between clients.
+/// The initializer checks the options and throws
+/// `TinfoilError.configurationError` for an invalid one, so that a client
+/// never starts with a policy that can't verify. A verifier is immutable and
+/// safe to share between clients.
 public final class Verifier: Sendable {
-    /// Tinfoil's public config registry. To accept configs from a private
-    /// registry as well as public ones, list both in `configRegistryIDs`.
-    public static let publicRegistryID: String = MobilePublicRegistryID
-
-    /// The framework verifier that clients built with this policy use
-    let backend: GoAttestationVerifier
+    /// The framework's options for this policy, without a config trust
+    private let options: VerifierOptions
 
     /// - Parameters:
     ///   - pinnedRegisters: Register values the enclave measurement must also
@@ -23,46 +20,35 @@ public final class Verifier: Sendable {
     ///   - freshnessMaxAge: Oldest freshness witness accepted, in seconds.
     ///     Nil keeps the seven-day default; a value must be at least one
     ///     nanosecond once rounded to whole nanoseconds.
-    ///   - configRegistryIDs: The config registries accepted, replacing the
-    ///     public registry. Must not be empty.
-    ///   - configSigningKeys: PEM `PUBLIC KEY` blocks that config approvals
-    ///     must be signed with, replacing registry trust. Must not be empty.
     ///   - freshnessSigningKeys: PEM `PUBLIC KEY` blocks for Tinfoil's runtime
     ///     and platform approvals, replacing the built-in keys. Must not be
     ///     empty.
     ///   - embeddedReferences: Caller-trusted components that replace their
     ///     endorsements. Set at least one component.
-    ///   - configAuthorizer: Decides which configs are authorized, replacing
-    ///     their endorsements. A client with one needs an explicit enclave and
-    ///     `Pin.none`.
     public init(
         pinnedRegisters: Verification.Measurement? = nil,
         freshnessMaxAge: TimeInterval? = nil,
-        configRegistryIDs: [String]? = nil,
-        configSigningKeys: [String]? = nil,
         freshnessSigningKeys: [String]? = nil,
-        embeddedReferences: EmbeddedReferences? = nil,
-        configAuthorizer: ConfigAuthorizer? = nil
+        embeddedReferences: EmbeddedReferences? = nil
     ) throws {
-        let options = Options(
+        if let embeddedReferences, embeddedReferences.runtime == nil, embeddedReferences.platform == nil {
+            throw TinfoilError.configuration("embedded references must contain at least one component")
+        }
+        options = VerifierOptions(
             pinnedRegisters: pinnedRegisters.map { .init(type: $0.type, registers: $0.registers) },
             freshnessMaxAgeNs: try freshnessMaxAge.map(Self.nanoseconds),
-            configRegistryIDs: configRegistryIDs,
-            configSigningKeysPEM: configSigningKeys,
             freshnessSigningKeysPEM: freshnessSigningKeys,
-            embeddedConfig: embeddedReferences?.config.map(Options.EmbeddedConfig.init),
             embeddedRuntime: embeddedReferences?.runtime,
             embeddedPlatform: embeddedReferences?.platform
         )
-        if let embeddedReferences, embeddedReferences.config == nil, embeddedReferences.runtime == nil,
-           embeddedReferences.platform == nil {
-            throw TinfoilError.configuration("embedded references must contain at least one component")
-        }
-        let optionsJSON = String(decoding: try JSONEncoder().encode(options), as: UTF8.self)
-        backend = try GoAttestationVerifier(
-            optionsJSON: optionsJSON,
-            configAuthorizer: configAuthorizer.map(ConfigAuthorizerBridge.init)
-        )
+        // Building a verifier checks the policy now rather than in a client.
+        _ = try backend(trust: nil)
+    }
+
+    /// The framework verifier for `trust` under this policy; nil selects the
+    /// default config trust, Tinfoil's public registry.
+    func backend(trust: Trust?) throws -> GoAttestationVerifier {
+        try GoAttestationVerifier(trust: trust, policy: options)
     }
 
     /// The framework takes the age as an integer count of nanoseconds, and
@@ -80,51 +66,65 @@ public final class Verifier: Sendable {
         }
         return nanoseconds
     }
+}
 
-    /// The options JSON that the framework's verifier takes; nil members are
-    /// left out, which keeps their defaults. Data encodes as standard base64.
-    private struct Options: Encodable {
-        struct Measurement: Encodable {
-            let type: String
-            let registers: [String]
+/// The policy part of the options JSON that the framework's verifier takes;
+/// nil members are left out, which keeps their defaults. Data encodes as
+/// standard base64.
+struct VerifierOptions: Sendable {
+    struct Measurement: Encodable, Sendable {
+        let type: String
+        let registers: [String]
+    }
+
+    var pinnedRegisters: Measurement?
+    var freshnessMaxAgeNs: Int64?
+    var freshnessSigningKeysPEM: [String]?
+    var embeddedRuntime: Data?
+    var embeddedPlatform: Data?
+
+    static let defaults = VerifierOptions()
+
+    /// The framework's options JSON for this policy and the config trust that
+    /// `trust` selects. A config authorizer is not part of the JSON: it is
+    /// passed to the framework beside it.
+    func json(trust: Trust?) throws -> String {
+        var encoded = Encoded(policy: self)
+        switch trust?.kind {
+        case let .project(_, registryIDs?):
+            encoded.configRegistryIDs = registryIDs
+        case let .signedBy(keys, _):
+            encoded.configSigningKeysPEM = keys
+        case let .embeddedConfig(bytes, name):
+            encoded.embeddedConfig = .init(name: name.isEmpty ? nil : name, bytes: bytes)
+        case nil, .repo, .project, .authorizedBy, .either:
+            break
         }
+        return String(decoding: try JSONEncoder().encode(encoded), as: UTF8.self)
+    }
 
-        struct RuntimeReference: Encodable {
-            let repo: String
-            let tag: String
-            let digest: String
-        }
-
+    private struct Encoded: Encodable {
         struct EmbeddedConfig: Encodable {
             let name: String?
-            let bytes: Data?
-            let digest: String?
-            let runtime: RuntimeReference?
-
-            init(_ config: Tinfoil.EmbeddedConfig) {
-                switch config {
-                case let .bytes(bytes, name):
-                    self.name = name.isEmpty ? nil : name
-                    self.bytes = bytes
-                    self.digest = nil
-                    self.runtime = nil
-                case let .reference(digest, runtime, name):
-                    self.name = name.isEmpty ? nil : name
-                    self.bytes = nil
-                    self.digest = digest
-                    self.runtime = .init(repo: runtime.repo, tag: runtime.tag, digest: runtime.digest)
-                }
-            }
+            let bytes: Data
         }
 
         let pinnedRegisters: Measurement?
         let freshnessMaxAgeNs: Int64?
-        let configRegistryIDs: [String]?
-        let configSigningKeysPEM: [String]?
+        var configRegistryIDs: [String]?
+        var configSigningKeysPEM: [String]?
         let freshnessSigningKeysPEM: [String]?
-        let embeddedConfig: EmbeddedConfig?
+        var embeddedConfig: EmbeddedConfig?
         let embeddedRuntime: Data?
         let embeddedPlatform: Data?
+
+        init(policy: VerifierOptions) {
+            pinnedRegisters = policy.pinnedRegisters
+            freshnessMaxAgeNs = policy.freshnessMaxAgeNs
+            freshnessSigningKeysPEM = policy.freshnessSigningKeysPEM
+            embeddedRuntime = policy.embeddedRuntime
+            embeddedPlatform = policy.embeddedPlatform
+        }
 
         private enum CodingKeys: String, CodingKey {
             case pinnedRegisters = "pinned_registers"
@@ -224,49 +224,18 @@ final class ConfigAuthorizerBridge: NSObject, MobileConfigAuthorizerProtocol, Se
     }
 }
 
-/// Caller-trusted components that replace their endorsements. Only the
-/// components that are set are replaced; the hardware is always verified, and
-/// so are the bindings between components and any pinned registers. Set at
-/// least one.
+/// Caller-trusted runtime and platform artifacts that replace their
+/// endorsements. Only the artifacts that are set are replaced; the hardware is
+/// always verified, and so are the bindings between components and any pinned
+/// registers. Set at least one.
 public struct EmbeddedReferences: Sendable, Equatable {
-    /// The deployment's config
-    public var config: EmbeddedConfig?
     /// The runtime manifest that the config pins
     public var runtime: Data?
     /// A platform policy artifact (platform-endorsements/v2)
     public var platform: Data?
 
-    public init(config: EmbeddedConfig? = nil, runtime: Data? = nil, platform: Data? = nil) {
-        self.config = config
+    public init(runtime: Data? = nil, platform: Data? = nil) {
         self.runtime = runtime
         self.platform = platform
-    }
-}
-
-/// A caller-trusted config: its exact bytes, or its digest and the runtime it
-/// pins. `name` optionally gives either an `/org/project/revision` identity,
-/// which a client's project pin is then checked against.
-public enum EmbeddedConfig: Sendable, Equatable {
-    /// The config itself, and optionally its `/org/project/revision` name,
-    /// which a client's project pin is then checked against
-    case bytes(Data, name: String = "")
-    /// The config by its SHA-256 (lowercase hex) and the runtime release that
-    /// it runs, and optionally its name
-    case reference(digest: String, runtime: RuntimeReference, name: String = "")
-}
-
-/// A runtime release: its repository, tag and digest
-public struct RuntimeReference: Sendable, Equatable {
-    /// The `owner/name` repository the runtime is released from
-    public let repo: String
-    /// The release tag
-    public let tag: String
-    /// SHA-256 of the runtime artifact, lowercase hex
-    public let digest: String
-
-    public init(repo: String, tag: String, digest: String) {
-        self.repo = repo
-        self.tag = tag
-        self.digest = digest
     }
 }
