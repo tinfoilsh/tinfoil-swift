@@ -154,8 +154,11 @@ the next bytes of its response.
 ### Client configuration (after 0.9.0-rc.6)
 
 The clients take a trust argument, on the enclave client only, and their
-optional settings as one options value. Every option is valid on its own, so
-combinations that used to be refused at run time can no longer be written.
+optional settings as one options value. Settings that only make sense
+together are one value, such as a proxy URL inside `.ehbp(proxyURL:)`, so
+the combinations that used to be refused at run time can no longer be
+written. Single values, and the gateway's pinned-only mode, which needs a
+model pin, are still checked before any network I/O.
 
 | 0.9.0-rc.6 | now |
 |---|---|

@@ -54,11 +54,11 @@ The trust argument names who vouches for the config that the enclave runs: `.rep
 
 ### Transport
 
-The enclave and router clients pin each TLS connection to the attested key by default (`transport: .tls`), which protects the whole request and response. With `transport: .ehbp(proxyURL:)`, request and response bodies are sealed to the attested key instead, so they stay private through the proxy; the method, URL and headers are not sealed. `OpenAIClient` adds the API path, `/v1/` by default (`OpenAIOptions.apiPath`), under the proxy URL or the enclave's origin. The gateway client always uses EHBP, since the gateway sits between the client and the replica.
+The enclave and router clients pin each TLS connection to the attested key by default (`transport: .tls`), which protects the whole request and response. With `transport: .ehbp(proxyURL:)`, request and response bodies are sealed to the attested key instead, so they stay private through the proxy; the method, URL and headers are not sealed, and neither is a request without a body or its response. `OpenAIClient` adds the API path, `/v1/` by default (`OpenAIOptions.apiPath`), under the proxy URL or the enclave's origin. The gateway client always uses EHBP, since the gateway sits between the client and the replica.
 
 ### Verification policy
 
-A `Policy` sets what an enclave must prove on top of its trust, and every client takes one as the `policy` option:
+A `Policy` sets what an enclave must prove on top of its trust. Every HTTP client takes one as the `policy` option of its options value, and an `OpenAIClient` uses its HTTP client's:
 
 ```swift
 let policy = Policy(
