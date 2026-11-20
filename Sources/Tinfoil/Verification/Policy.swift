@@ -91,7 +91,8 @@ extension VerifierOptions {
             freshnessMaxAgeNs: try Self.nanoseconds(policy.freshnessMaxAge),
             freshnessSigningKeysPEM: policy.artifacts.freshnessKeys,
             embeddedRuntime: policy.artifacts.runtime,
-            embeddedPlatform: policy.artifacts.platform
+            embeddedPlatform: policy.artifacts.platform,
+            embeddedArtifacts: policy.artifacts.isEmbedded
         )
     }
 
@@ -115,9 +116,9 @@ extension VerifierOptions {
     }
 }
 
-/// The policy part of the options JSON that the framework's verifier takes;
-/// nil members are left out, which keeps their defaults. Data encodes as
-/// standard base64.
+/// The policy part of the options that the framework's verifier takes as
+/// JSON; nil members are left out, which keeps their defaults. Data encodes
+/// as standard base64.
 struct VerifierOptions: Sendable {
     struct Measurement: Encodable, Sendable {
         let type: String
@@ -129,57 +130,97 @@ struct VerifierOptions: Sendable {
     var freshnessSigningKeysPEM: [String]?
     var embeddedRuntime: Data?
     var embeddedPlatform: Data?
+    /// Whether the artifacts are embedded rather than endorsed
+    var embeddedArtifacts = false
 
     /// The framework's options JSON for this policy and the config trust that
-    /// `trust` selects. A config authorizer is not part of the JSON: it is
-    /// passed to the framework beside it.
+    /// `trust` selects: an object with an optional `config_trust` and an
+    /// optional `policy`, each tagged by `type` where it has variants. A
+    /// config authorizer is the config trust itself, passed to the framework
+    /// beside the JSON, which is then the policy object alone.
     func json(trust: Trust?) throws -> String {
-        var encoded = Encoded(policy: self)
-        switch trust?.kind {
-        case let .project(_, registryIDs?):
-            encoded.configRegistryIDs = registryIDs
-        case let .signedBy(keys, _):
-            encoded.configSigningKeysPEM = keys
-        case let .embeddedConfig(bytes, name):
-            encoded.embeddedConfig = .init(name: name.isEmpty ? nil : name, bytes: bytes)
-        case nil, .repo, .project, .authorizedBy, .either:
-            break
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        if case .authorizedBy = trust?.kind {
+            return String(decoding: try encoder.encode(policyJSON), as: UTF8.self)
         }
-        return String(decoding: try JSONEncoder().encode(encoded), as: UTF8.self)
+        let options = OptionsJSON(configTrust: trust.flatMap(Self.configTrust), policy: policyJSON)
+        return String(decoding: try encoder.encode(options), as: UTF8.self)
     }
 
-    private struct Encoded: Encodable {
-        struct EmbeddedConfig: Encodable {
-            let name: String?
-            let bytes: Data
+    /// The `config_trust` member for `trust`, or nil for the default, Tinfoil's
+    /// public registry
+    private static func configTrust(_ trust: Trust) -> ConfigTrustJSON? {
+        switch trust.kind {
+        case let .project(_, registryIDs?):
+            return ConfigTrustJSON(type: "registries", ids: registryIDs)
+        case let .signedBy(keys, _):
+            return ConfigTrustJSON(type: "signing_keys", keysPEM: keys)
+        case let .embeddedConfig(bytes, name):
+            return ConfigTrustJSON(type: "embedded_config", name: name.isEmpty ? nil : name, bytes: bytes)
+        case .repo, .project, .authorizedBy, .either:
+            return nil
         }
+    }
 
+    private var policyJSON: PolicyJSON {
+        var artifacts: ArtifactsJSON?
+        if embeddedArtifacts {
+            artifacts = ArtifactsJSON(type: "embedded", runtime: embeddedRuntime, platform: embeddedPlatform, freshnessKeysPEM: freshnessSigningKeysPEM)
+        } else if let freshnessSigningKeysPEM {
+            artifacts = ArtifactsJSON(type: "endorsed", freshnessKeysPEM: freshnessSigningKeysPEM)
+        }
+        return PolicyJSON(pinnedRegisters: pinnedRegisters, freshnessMaxAgeNs: freshnessMaxAgeNs, artifacts: artifacts)
+    }
+
+    private struct OptionsJSON: Encodable {
+        let configTrust: ConfigTrustJSON?
+        let policy: PolicyJSON
+
+        private enum CodingKeys: String, CodingKey {
+            case configTrust = "config_trust"
+            case policy
+        }
+    }
+
+    /// One of the tagged config trust objects; only the members of its type
+    /// are set.
+    private struct ConfigTrustJSON: Encodable {
+        let type: String
+        var ids: [String]?
+        var keysPEM: [String]?
+        var name: String?
+        var bytes: Data?
+
+        private enum CodingKeys: String, CodingKey {
+            case type, ids, name, bytes
+            case keysPEM = "keys_pem"
+        }
+    }
+
+    private struct PolicyJSON: Encodable {
         let pinnedRegisters: Measurement?
         let freshnessMaxAgeNs: Int64?
-        var configRegistryIDs: [String]?
-        var configSigningKeysPEM: [String]?
-        let freshnessSigningKeysPEM: [String]?
-        var embeddedConfig: EmbeddedConfig?
-        let embeddedRuntime: Data?
-        let embeddedPlatform: Data?
-
-        init(policy: VerifierOptions) {
-            pinnedRegisters = policy.pinnedRegisters
-            freshnessMaxAgeNs = policy.freshnessMaxAgeNs
-            freshnessSigningKeysPEM = policy.freshnessSigningKeysPEM
-            embeddedRuntime = policy.embeddedRuntime
-            embeddedPlatform = policy.embeddedPlatform
-        }
+        let artifacts: ArtifactsJSON?
 
         private enum CodingKeys: String, CodingKey {
             case pinnedRegisters = "pinned_registers"
             case freshnessMaxAgeNs = "freshness_max_age_ns"
-            case configRegistryIDs = "config_registry_ids"
-            case configSigningKeysPEM = "config_signing_keys_pem"
-            case freshnessSigningKeysPEM = "freshness_signing_keys_pem"
-            case embeddedConfig = "embedded_config"
-            case embeddedRuntime = "embedded_runtime"
-            case embeddedPlatform = "embedded_platform"
+            case artifacts
+        }
+    }
+
+    /// One of the tagged artifact trust objects; only the members of its type
+    /// are set.
+    private struct ArtifactsJSON: Encodable {
+        let type: String
+        var runtime: Data?
+        var platform: Data?
+        var freshnessKeysPEM: [String]?
+
+        private enum CodingKeys: String, CodingKey {
+            case type, runtime, platform
+            case freshnessKeysPEM = "freshness_keys_pem"
         }
     }
 }
