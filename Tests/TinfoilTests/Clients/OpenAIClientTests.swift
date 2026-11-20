@@ -71,7 +71,7 @@ final class OpenAIClientTests: XCTestCase {
 
     func testAGatewayClientUsesItsURLAndTakesNoAPIPath() async throws {
         let gateway = try await GatewayHTTPClient(options: .init(
-            baseURL: URL(string: "https://gw.example/openai/v1")!,
+            url: URL(string: "https://gw.example/openai/v1")!,
             userCacheSecret: "pinned",
             catalog: { [:] }
         ))

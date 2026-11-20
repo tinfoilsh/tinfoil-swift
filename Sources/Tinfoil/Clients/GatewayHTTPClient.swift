@@ -16,7 +16,7 @@ import FoundationNetworking
 /// removed in a later release.
 public final class GatewayHTTPClient: Sendable {
     /// Tinfoil's gateway
-    public static let defaultBaseURL = URL(string: "https://inference-gateway.tinfoil.sh/v1/")!
+    public static let defaultURL = URL(string: "https://inference-gateway.tinfoil.sh/v1/")!
 
     let router: GatewayRouter
 
@@ -32,13 +32,13 @@ public final class GatewayHTTPClient: Sendable {
     public convenience init(options: GatewayOptions = GatewayOptions()) async throws {
         let verificationCheck = options.verificationCheck
         let onVerificationResult = options.onVerificationResult
-        let base = Self.directory(options.baseURL ?? Self.defaultBaseURL)
+        let base = Self.directory(options.url ?? Self.defaultURL)
         try EnclaveConnection.validateBaseURL(base, transportMode: .ehbp)
         guard base.scheme?.lowercased() == "https" else {
-            throw TinfoilError.configuration("invalid base URL: the gateway base URL must use HTTPS")
+            throw TinfoilError.configuration("invalid gateway URL: the gateway URL must use HTTPS")
         }
         guard let relay = Self.authority(of: base) else {
-            throw TinfoilError.configuration("invalid base URL: the gateway base URL has no host")
+            throw TinfoilError.configuration("invalid gateway URL: the gateway URL has no host")
         }
         let attestor = { (policy: Policy) throws -> Attestor in
             Attestor(verifier: try GoAttestationVerifier(trust: nil, policy: policy), verificationCheck: verificationCheck)
@@ -113,7 +113,8 @@ public final class GatewayHTTPClient: Sendable {
         try await GatewayCatalog.fetch(host: host)
     }
 
-    /// The gateway's base URL, which requests are sent to. Relative URLs
+    /// The gateway's URL, which requests are sent to: the `url` option, with
+    /// a trailing slash on its path, or Tinfoil's gateway. Relative URLs
     /// passed to `data(for:)` resolve against it.
     public var baseURL: URL { router.baseURL }
 
@@ -187,11 +188,12 @@ public final class GatewayHTTPClient: Sendable {
 /// Experimental: the gateway route is new, and this API may change or be
 /// removed in a later release.
 public struct GatewayOptions: Sendable {
-    /// The gateway's base URL; nil selects Tinfoil's gateway. It must be
-    /// HTTPS, and is treated as a directory: a path without a trailing slash
-    /// gets one. Request paths join under it, so a URL with credentials, a
-    /// query or a fragment, even an empty one, is refused.
-    public var baseURL: URL?
+    /// The gateway's URL, which requests are sent to; nil selects Tinfoil's
+    /// gateway. It must be HTTPS, and is treated as a directory: a path
+    /// without a trailing slash gets one. Request paths join under it, so a
+    /// URL with credentials, a query or a fragment, even an empty one, is
+    /// refused.
+    public var url: URL?
     /// Pins models to repositories. With `pinnedModelsOnly`, only pinned
     /// models are served, which requires at least one pin.
     public var modelPins: [String: ModelPin]
@@ -228,14 +230,14 @@ public struct GatewayOptions: Sendable {
     public init(
         modelPins: [String: ModelPin] = [:],
         pinnedModelsOnly: Bool = false,
-        baseURL: URL? = nil,
+        url: URL? = nil,
         policy: Policy = Policy(),
         userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil,
         catalog: (@Sendable () -> Catalog)? = nil
     ) {
-        self.baseURL = baseURL
+        self.url = url
         self.modelPins = modelPins
         self.pinnedModelsOnly = pinnedModelsOnly
         self.policy = policy

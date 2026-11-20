@@ -130,7 +130,7 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
         case let .gateway(gateway):
             guard options.apiPath == nil else {
                 throw TinfoilError.configuration(
-                    "invalid API path: a gateway client's URL already carries the API path; set the gateway's base URL instead"
+                    "invalid API path: a gateway client's URL already carries the API path; set GatewayOptions.url instead"
                 )
             }
             baseURL = gateway.baseURL

@@ -10,13 +10,13 @@ final class GatewayClientTests: XCTestCase {
         _ expected: String,
         modelPins: [String: ModelPin] = [:],
         pinnedModelsOnly: Bool = false,
-        baseURL: URL? = nil,
+        url: URL? = nil,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         do {
             _ = try await GatewayHTTPClient(
-                options: .init(modelPins: modelPins, pinnedModelsOnly: pinnedModelsOnly, baseURL: baseURL, userCacheSecret: "test-secret", catalog: {
+                options: .init(modelPins: modelPins, pinnedModelsOnly: pinnedModelsOnly, url: url, userCacheSecret: "test-secret", catalog: {
                     XCTFail("the catalog was read despite a refused configuration", file: file, line: line)
                     return [:]
                 })
@@ -30,10 +30,10 @@ final class GatewayClientTests: XCTestCase {
     }
 
     func testTheConfigurationIsCheckedBeforeAnyNetworkIO() async {
-        await assertRefusedBeforeIO("the gateway base URL must use HTTPS", baseURL: URL(string: "http://localhost/v1/")!)
-        await assertRefusedBeforeIO("must not carry a query or a fragment", baseURL: URL(string: "https://gw.example/v1/?")!)
-        await assertRefusedBeforeIO("must not carry a query or a fragment", baseURL: URL(string: "https://gw.example/v1/#x")!)
-        await assertRefusedBeforeIO("carry no credentials", baseURL: URL(string: "https://user:pass@gw.example/v1/")!)
+        await assertRefusedBeforeIO("the gateway URL must use HTTPS", url: URL(string: "http://localhost/v1/")!)
+        await assertRefusedBeforeIO("must not carry a query or a fragment", url: URL(string: "https://gw.example/v1/?")!)
+        await assertRefusedBeforeIO("must not carry a query or a fragment", url: URL(string: "https://gw.example/v1/#x")!)
+        await assertRefusedBeforeIO("carry no credentials", url: URL(string: "https://user:pass@gw.example/v1/")!)
         await assertRefusedBeforeIO("pinned-only mode requires at least one model pin", pinnedModelsOnly: true)
         await assertRefusedBeforeIO("must belong to tinfoilsh/", modelPins: ["m": ModelPin(repo: "someone/model")])
         await assertRefusedBeforeIO(#"model "m""#, modelPins: ["m": ModelPin(repo: "tinfoilsh/")])

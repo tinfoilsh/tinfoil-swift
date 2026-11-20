@@ -173,6 +173,7 @@ model pin, are still checked before any network I/O.
 | `Verifier(freshnessSigningKeys: k)` | `Policy(artifacts: .endorsed(freshnessKeys: k))` |
 | `Verifier(embeddedReferences: .init(runtime: r, platform: p))` | `Policy(artifacts: .embedded(runtime: r, platform: p))` |
 | `ModelPin(repo: r, verifier: v)` | `ModelPin(repo: r, policy: p)` |
+| `GatewayHTTPClient(baseURL: u)`, `GatewayHTTPClient.defaultBaseURL` | `GatewayHTTPClient(options: .init(url: u))`, `GatewayHTTPClient.defaultURL` |
 | `transportMode: .tls` | `transport: .tls`, or unset |
 | `transportMode: .ehbp` | `transport: .ehbp()` |
 | `transportMode: .ehbp, baseURL: proxy` | `transport: .ehbp(proxyURL: proxy)`; the OpenAI client adds the API path under it, so `https://proxy.example/v1/` becomes `https://proxy.example/` |
