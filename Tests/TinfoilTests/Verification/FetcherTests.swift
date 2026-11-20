@@ -313,6 +313,46 @@ final class FetcherTests: XCTestCase {
         }
     }
 
+    /// A closure that ignores cancellation until the test releases it
+    private func stubborn<T>(_ released: Box<Bool>, _ value: T) async -> T {
+        while !released.value {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return value
+    }
+
+    func testAFetcherThatIgnoresCancellationIsStillBounded() async {
+        let released = Box(value: false)
+        defer { released.value = true }
+        let stuck = AttestationFetcher { _, _ in await self.stubborn(released, Data()) }
+        let start = ContinuousClock.now
+        do {
+            _ = try await stuck(host: "enclave.example", nonce: nonce, timeout: 0.1)
+            XCTFail("expected a timeout")
+        } catch TinfoilError.networkError {
+        } catch {
+            XCTFail("expected a network error, got \(error)")
+        }
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(5))
+    }
+
+    func testDiscoveryFallsBackAtTheDeadlineDespiteAStuckRouterList() async throws {
+        let released = Box(value: false)
+        defer { released.value = true }
+        let attestor = Attestor(
+            verifier: FakeVerifier(),
+            fetch: noDirectFetch,
+            retryDelay: 0,
+            discoveryTimeout: 0.1,
+            fetchAttestation: Recorder().fetcher,
+            fetchRouterList: RouterListFetcher { await self.stubborn(released, ["router-a.example"]) }
+        )
+        let start = ContinuousClock.now
+        let discovered = try await attestor.discoverRouter()
+        XCTAssertNil(discovered, "The deadline passed with no router verified.")
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(5))
+    }
+
     func testTheCallersCancellationPassesThrough() async {
         let started = expectation(description: "the fetch started")
         let hanging = AttestationFetcher { _, _ in

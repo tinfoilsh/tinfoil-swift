@@ -95,31 +95,24 @@ struct Attestor: Sendable {
     }
 
     /// The first discovered router that verifies before discoveryTimeout, or
-    /// nil. Reaching the deadline cancels the fetch in flight.
+    /// nil. Reaching the deadline cancels the fetch in flight, and discovery
+    /// returns then even if a caller's fetcher ignores the cancellation.
     private func firstVerifiedRouter(pin: Pin) async -> DiscoveredRouter? {
         let deadline = now().advanced(by: .seconds(discoveryTimeout))
-        return await withTaskGroup(of: DiscoveredRouter?.self) { group in
-            group.addTask {
-                for router in await discoveredRouters() {
-                    // The deadline can pass before the timer below cancels
-                    // this task, as when a probe's own timeout ends with it.
-                    guard !Task.isCancelled, now() < deadline else {
-                        return nil
-                    }
-                    if let verified = try? await attestOnce(host: router, relay: nil, pin: pin) {
-                        return DiscoveredRouter(host: router, verification: verified)
-                    }
+        let discovered = try? await untilDeadline(discoveryTimeout) { () -> DiscoveredRouter? in
+            for router in await discoveredRouters() {
+                // The deadline can pass before the timer cancels this task,
+                // as when a probe's own timeout ends with it.
+                guard !Task.isCancelled, now() < deadline else {
+                    return nil
                 }
-                return nil
+                if let verified = try? await attestOnce(host: router, relay: nil, pin: pin) {
+                    return DiscoveredRouter(host: router, verification: verified)
+                }
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(discoveryTimeout * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+            return nil
         }
+        return discovered ?? nil
     }
 
     private func attestOnce(host: String, relay: String?, pin: Pin) async throws -> Verification {

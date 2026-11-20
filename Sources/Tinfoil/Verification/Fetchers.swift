@@ -87,18 +87,10 @@ public struct AttestationFetcher: Sendable {
     /// passes through, and any other error is a network error.
     func callAsFunction(host: String, nonce: Data, timeout: TimeInterval = 30) async throws -> Data {
         do {
-            return try await withThrowingTaskGroup(of: Data?.self) { group in
-                group.addTask { try await fetch(host, nonce) }
-                group.addTask {
-                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                    return nil
-                }
-                defer { group.cancelAll() }
-                guard let document = try await group.next() ?? nil else {
-                    throw TinfoilError.network("fetching the attestation of \(host) timed out after \(Int(timeout)) seconds")
-                }
-                return document
+            guard let document = try await untilDeadline(timeout, { try await fetch(host, nonce) }) else {
+                throw TinfoilError.network("fetching the attestation of \(host) timed out after \(Int(timeout)) seconds")
             }
+            return document
         } catch let error as TinfoilError {
             throw error
         } catch let error as CancellationError {
