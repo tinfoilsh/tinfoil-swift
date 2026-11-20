@@ -11,6 +11,13 @@ import FoundationNetworking
 final class EnclaveConnection: Sendable {
     /// How the client protects its requests
     let transportMode: TransportMode
+    /// Where requests go through, when not directly to the enclave
+    let proxyURL: URL?
+
+    /// How the client protects its requests, and the proxy it sends through
+    var transport: Transport {
+        transportMode == .ehbp ? .ehbp(proxyURL: proxyURL) : .tls
+    }
     /// The URL requests are sent to: the `baseURL` the client was created
     /// with, or the enclave's own origin. Relative URLs passed to
     /// `data(for:)` resolve against it.
@@ -49,11 +56,6 @@ final class EnclaveConnection: Sendable {
         // Checked before discovery, so a misconfiguration costs no network I/O.
         if let baseURL {
             try validateBaseURL(baseURL, transportMode: transportMode)
-            guard transportMode == .ehbp else {
-                throw TinfoilError.configuration(
-                    "a base URL requires TransportMode.ehbp when discovering the router, because the router's origin isn't known before discovery"
-                )
-            }
         }
         let discovered = attestationRelay == nil ? try await attestor.discoverRouter() : nil
         if let discovered {
@@ -93,13 +95,9 @@ final class EnclaveConnection: Sendable {
         let base = baseURL ?? enclaveOrigin
         try Self.validateBaseURL(base, transportMode: transportMode)
         let origin = URLHelpers.origin(from: base.absoluteString)
-        if transportMode == .tls, origin != URLHelpers.origin(from: enclaveOrigin.absoluteString) {
-            throw TinfoilError.configuration(
-                "a base URL on another origin than the enclave \(handle.enclave) requires TransportMode.ehbp, since TLS pinning needs a direct connection"
-            )
-        }
         self.handle = handle
         self.transportMode = transportMode
+        self.proxyURL = origin == URLHelpers.origin(from: enclaveOrigin.absoluteString) ? nil : base
         self.baseURL = base
         self.userCacheSecret = userCacheSecret
         self.send = send
@@ -107,6 +105,17 @@ final class EnclaveConnection: Sendable {
         self.ehbp = transportMode == .ehbp
             ? EHBPChannel(origin: origin, enclaveURL: "https://\(handle.enclave)", handle: handle, initial: initial, userCacheSecret: userCacheSecret)
             : nil
+    }
+
+    /// Refuses an EHBP proxy URL on the enclave's own origin, which would send
+    /// requests directly to the enclave under the name of a proxy.
+    static func refuseEnclaveOriginProxy(_ proxyURL: URL, enclave: String) throws {
+        let enclaveOrigin = URLHelpers.origin(from: "https://\(enclave)/")
+        guard URLHelpers.origin(from: proxyURL.absoluteString) != enclaveOrigin else {
+            throw TinfoilError.configuration(
+                "invalid proxy URL: \(enclaveOrigin) is the enclave's own origin; leave the proxy URL nil to connect directly"
+            )
+        }
     }
 
     /// Refuses a base URL that isn't HTTPS, which would expose request
@@ -132,7 +141,7 @@ final class EnclaveConnection: Sendable {
             throw TinfoilError.configuration(
                 transportMode == .ehbp
                     ? "invalid base URL \(url.absoluteString): HTTPS is required to protect request headers; HTTP is allowed only for localhost or a loopback IP address"
-                    : "invalid base URL \(url.absoluteString): TransportMode.tls requires HTTPS"
+                    : "invalid base URL \(url.absoluteString): the TLS transport requires HTTPS"
             )
         }
     }
@@ -246,7 +255,7 @@ final class EnclaveConnection: Sendable {
     func recoverableBytes(for request: URLRequest) async throws -> RecoverableResponse {
         guard let ehbp else {
             throw TinfoilError.configuration(
-                "session recovery tokens need TransportMode.ehbp; pinned TLS has none"
+                "session recovery tokens need the EHBP transport; pinned TLS has none"
             )
         }
         var resolved = request

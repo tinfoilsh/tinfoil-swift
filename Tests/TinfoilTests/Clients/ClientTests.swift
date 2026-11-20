@@ -131,7 +131,7 @@ final class ClientTests: XCTestCase {
     func testCreateFailsForAnUnreachableEnclave() async throws {
         do {
             _ = try await EnclaveOpenAIClient(
-                httpClient: EnclaveHTTPClient(enclave: "127.0.0.1:9", trust: .repo(TinfoilConstants.defaultGithubRepo), options: .init(transportMode: .ehbp)),
+                httpClient: EnclaveHTTPClient(enclave: "127.0.0.1:9", trust: .repo(TinfoilConstants.defaultGithubRepo), options: .init(transport: .ehbp())),
                 apiKey: "test-key"
             )
             XCTFail("Should have failed to fetch attestation from an unreachable enclave")
@@ -284,7 +284,7 @@ final class ClientTests: XCTestCase {
                 httpClient: EnclaveHTTPClient(
                     enclave: "127.0.0.1:9",
                     trust: .repo(TinfoilConstants.defaultGithubRepo),
-                    options: .init(transportMode: .ehbp, onVerificationResult: { result in captured.value = result })
+                    options: .init(transport: .ehbp(), onVerificationResult: { result in captured.value = result })
                 ),
                 apiKey: "test-key"
             )

@@ -3,16 +3,9 @@ import Foundation
 /// Configures an `EnclaveHTTPClient`. Every option is optional, and the
 /// default value of each one selects its default.
 public struct EnclaveOptions: Sendable {
-    /// How requests are protected; pinned TLS by default
-    public var transportMode: TransportMode
-    /// Where requests are sent: a path on the enclave's own origin, or a
-    /// proxy on another origin, which requires `.ehbp`. Requests to a proxy
-    /// carry `X-Tinfoil-Enclave-Url` so that it can forward them to the
-    /// enclave. It must be HTTPS, since EHBP doesn't seal headers such as the
-    /// API key; under `.ehbp`, `http` is also accepted when the host is
-    /// `localhost` or a loopback IP address, as for a local development proxy
-    /// or a sidecar.
-    public var baseURL: URL?
+    /// How requests are protected: pinned TLS by default, or EHBP, directly
+    /// or through a proxy
+    public var transport: Transport
     /// The trust policy; nil selects the defaults
     public var verifier: Verifier?
     /// Scopes the prompt cache of the client's requests. Only Tinfoil's
@@ -30,16 +23,14 @@ public struct EnclaveOptions: Sendable {
     public var onVerificationResult: VerificationResultCallback?
 
     public init(
-        transportMode: TransportMode = .tls,
-        baseURL: URL? = nil,
+        transport: Transport = .tls,
         attestationRelay: String? = nil,
         verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) {
-        self.transportMode = transportMode
-        self.baseURL = baseURL
+        self.transport = transport
         self.verifier = verifier
         self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck
@@ -51,15 +42,10 @@ public struct EnclaveOptions: Sendable {
 /// Configures a `RouterHTTPClient`. Every option is optional, and the default
 /// value of each one selects its default.
 public struct RouterOptions: Sendable {
-    /// How requests are protected; pinned TLS by default
-    public var transportMode: TransportMode
-    /// A proxy that requests are sent to, which requires `.ehbp` because the
-    /// router's origin isn't known before discovery. Requests carry
-    /// `X-Tinfoil-Enclave-Url` so that it can forward them. It must be HTTPS,
-    /// since EHBP doesn't seal headers such as the API key, or `http` when the
-    /// host is `localhost` or a loopback IP address, as for a local
-    /// development proxy or a sidecar.
-    public var baseURL: URL?
+    /// How requests are protected: pinned TLS by default, or EHBP, directly
+    /// or through a proxy that forwards requests to the router that discovery
+    /// chooses
+    public var transport: Transport
     /// The trust policy; nil selects the defaults
     public var verifier: Verifier?
     /// Scopes the router's prompt cache for the client's requests. When
@@ -79,16 +65,14 @@ public struct RouterOptions: Sendable {
     public var onVerificationResult: VerificationResultCallback?
 
     public init(
-        transportMode: TransportMode = .tls,
-        baseURL: URL? = nil,
+        transport: Transport = .tls,
         attestationRelay: String? = nil,
         verifier: Verifier? = nil,
         userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) {
-        self.transportMode = transportMode
-        self.baseURL = baseURL
+        self.transport = transport
         self.verifier = verifier
         self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck

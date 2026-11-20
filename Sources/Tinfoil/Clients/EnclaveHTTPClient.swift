@@ -4,15 +4,46 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// How a client protects its traffic to an enclave
-public enum TransportMode: Sendable, Equatable {
+/// How a client protects its traffic to an enclave: `.tls`, the default, or
+/// `.ehbp(proxyURL:)`.
+public struct Transport: Sendable, Equatable {
+    let mode: TransportMode
+
+    /// Where an EHBP client sends requests, or nil when it connects directly
+    /// to the enclave. It is always nil for TLS.
+    public let proxyURL: URL?
+
     /// Pins each connection to the attested TLS key. It protects the whole
-    /// request and response, and needs a direct connection to the enclave.
-    case tls
-    /// Seals request and response bodies to the attested HPKE key, so they
-    /// stay private through a proxy. The method, URL and headers aren't
+    /// request and response, and needs a direct connection to the enclave, so
+    /// it takes no URL: requests go to the enclave's own HTTPS origin.
+    public static let tls = Transport(mode: .tls, proxyURL: nil)
+
+    /// Seals request and response bodies to the attested HPKE key, so that
+    /// they stay private through a proxy. The method, URL and headers aren't
     /// sealed, and neither is a request without a body or its response.
     /// Protocol upgrades, such as WebSockets, and CONNECT tunnels are refused.
+    ///
+    /// - Parameter proxyURL: A proxy that forwards requests to the enclave,
+    ///   which requests are sent to; nil sends them directly to the enclave.
+    ///   Its path, if any, is where the proxy is mounted, not the API path.
+    ///   Requests to it carry `X-Tinfoil-Enclave-Url` so that it can forward
+    ///   them. It must be HTTPS, since EHBP doesn't seal headers such as the
+    ///   API key; `http` is accepted only when its host is `localhost` or a
+    ///   loopback IP address, as for a local development proxy or a sidecar.
+    ///   Request paths join under it, so a URL with credentials, a query or a
+    ///   fragment, even an empty one, is refused. An enclave client also
+    ///   refuses a proxy on the enclave's own origin, which is no proxy; leave
+    ///   it nil to connect directly.
+    public static func ehbp(proxyURL: URL? = nil) -> Transport {
+        Transport(mode: .ehbp, proxyURL: proxyURL)
+    }
+}
+
+/// The transport's protection, apart from where requests go
+enum TransportMode: Sendable, Equatable {
+    /// Pinned TLS
+    case tls
+    /// Bodies sealed with EHBP
     case ehbp
 }
 
@@ -50,8 +81,8 @@ public final class EnclaveHTTPClient: Sendable {
         try await self.init(verifying: Self.connection(
             enclave: enclave,
             pin: pin,
-            transportMode: options.transportMode,
-            baseURL: options.baseURL,
+            transportMode: options.transport.mode,
+            baseURL: options.transport.proxyURL,
             attestationRelay: options.attestationRelay,
             userCacheSecret: options.userCacheSecret,
             attestor: Attestor(verifier: verifier, verificationCheck: options.verificationCheck),
@@ -72,6 +103,9 @@ public final class EnclaveHTTPClient: Sendable {
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
+        if let proxyURL = baseURL {
+            try EnclaveConnection.refuseEnclaveOriginProxy(proxyURL, enclave: enclave)
+        }
         try attestor.checkPinVerifiability(pin)
         return try EnclaveConnection(
             handle: EnclaveHandle(
@@ -104,15 +138,15 @@ public final class EnclaveHTTPClient: Sendable {
     }
 
     /// How the client protects its requests
-    public var transportMode: TransportMode { connection.transportMode }
+    public var transport: Transport { connection.transport }
 
-    /// The URL requests are sent to: the `baseURL` the client was created
-    /// with, or the enclave's own origin. Relative URLs passed to
-    /// `data(for:)` resolve against it.
+    /// The URL that requests are sent to: the EHBP proxy URL, or the
+    /// enclave's own origin when the client connects directly. Relative URLs
+    /// passed to `data(for:)` resolve against it.
     public var baseURL: URL { connection.baseURL }
 
     /// The host of the enclave the client verifies. It stays the enclave's
-    /// host when `baseURL` is a proxy.
+    /// host when requests go through a proxy.
     public var enclave: String { connection.enclave }
 
     /// The last successful verification, without checking it. It may have
@@ -137,7 +171,7 @@ public final class EnclaveHTTPClient: Sendable {
     }
 
     /// Loads a request from the enclave, as `URLSession.data(for:)` does,
-    /// protected by the client's transport mode. A URL without a host resolves
+    /// protected by the client's transport. A URL without a host resolves
     /// against `baseURL`; an absolute URL must be on `baseURL`'s exact origin,
     /// and so must any redirect, so credentials never leave it. A redirect
     /// elsewhere fails with `TinfoilError.configurationError`, except that over
@@ -175,7 +209,7 @@ public final class EnclaveHTTPClient: Sendable {
     /// after an interruption, such as a chat completion. The token is this
     /// request's own, even with other requests in flight on the client.
     ///
-    /// It requires `TransportMode.ehbp`; in TLS mode it fails with
+    /// It requires the EHBP transport; over TLS it fails with
     /// `TinfoilError.configurationError`. The same retry after a key rejection
     /// applies, and cancelling the task stops it in the same way. The
     /// request's `timeoutInterval` also limits each wait for the body's next

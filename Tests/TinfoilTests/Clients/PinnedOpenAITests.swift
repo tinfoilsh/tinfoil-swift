@@ -167,6 +167,6 @@ final class PinnedOpenAITests: XCTestCase {
 
     func testAnOpenAIClientOverAPinnedConnectionUsesItsMode() async throws {
         let client = try await client(PinnedTransport { _ in [Self.chat] })
-        XCTAssertEqual(client.httpClient.transportMode, .tls)
+        XCTAssertEqual(client.httpClient.transport, .tls)
     }
 }

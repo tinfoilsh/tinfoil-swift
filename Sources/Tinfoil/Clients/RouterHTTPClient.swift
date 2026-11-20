@@ -28,8 +28,8 @@ public final class RouterHTTPClient: Sendable {
                 verifier: try (options.verifier ?? Verifier()).backend(trust: nil),
                 verificationCheck: options.verificationCheck
             ),
-            transportMode: options.transportMode,
-            baseURL: options.baseURL,
+            transportMode: options.transport.mode,
+            baseURL: options.transport.proxyURL,
             attestationRelay: options.attestationRelay,
             userCacheSecret: options.userCacheSecret,
             onVerificationResult: options.onVerificationResult
@@ -52,15 +52,15 @@ public final class RouterHTTPClient: Sendable {
     }
 
     /// How the client protects its requests
-    public var transportMode: TransportMode { connection.transportMode }
+    public var transport: Transport { connection.transport }
 
-    /// The URL requests are sent to: the `baseURL` the client was created
-    /// with, or the router's own origin. Relative URLs passed to
-    /// `data(for:)` resolve against it.
+    /// The URL that requests are sent to: the EHBP proxy URL, or the
+    /// router's own origin when the client connects directly. Relative URLs
+    /// passed to `data(for:)` resolve against it.
     public var baseURL: URL { connection.baseURL }
 
     /// The host of the router the client chose. It stays the router's host
-    /// when `baseURL` is a proxy.
+    /// when requests go through a proxy.
     public var enclave: String { connection.enclave }
 
     /// The last successful verification, without checking it. It may have

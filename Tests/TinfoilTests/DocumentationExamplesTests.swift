@@ -36,7 +36,7 @@ final class DocumentationExamplesTests: XCTestCase {
         _ = try await EnclaveOpenAIClient(
             enclave: "enclave.example.com",
             trust: .repo("org/repo"),
-            options: .init(transportMode: .ehbp, baseURL: URL(string: "https://proxy.example.com/v1/")!, attestationRelay: "proxy.example.com"),
+            options: .init(transport: .ehbp(proxyURL: URL(string: "https://proxy.example.com/")!), attestationRelay: "proxy.example.com"),
             apiKey: key
         )
         let http = try await EnclaveHTTPClient(enclave: "enclave.example.com", trust: .repo("org/repo"))
