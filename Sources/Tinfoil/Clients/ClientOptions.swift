@@ -6,8 +6,9 @@ public struct EnclaveOptions: Sendable {
     /// How requests are protected: pinned TLS by default, or EHBP, directly
     /// or through a proxy
     public var transport: Transport
-    /// The trust policy; nil selects the defaults
-    public var verifier: Verifier?
+    /// The verification policy that applies on top of the client's trust;
+    /// the default policy keeps every default
+    public var policy: Policy
     /// Scopes the prompt cache of the client's requests. Only Tinfoil's
     /// router reads it, so it is sent only when set. A non-empty
     /// `user_cache_secret` string in a request's JSON body overrides it. Use
@@ -25,13 +26,13 @@ public struct EnclaveOptions: Sendable {
     public init(
         transport: Transport = .tls,
         attestationRelay: String? = nil,
-        verifier: Verifier? = nil,
+        policy: Policy = Policy(),
         userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) {
         self.transport = transport
-        self.verifier = verifier
+        self.policy = policy
         self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck
         self.attestationRelay = attestationRelay
@@ -46,8 +47,9 @@ public struct RouterOptions: Sendable {
     /// or through a proxy that forwards requests to the router that discovery
     /// chooses
     public var transport: Transport
-    /// The trust policy; nil selects the defaults
-    public var verifier: Verifier?
+    /// The verification policy that applies on top of the client's trust;
+    /// the default policy keeps every default
+    public var policy: Policy
     /// Scopes the router's prompt cache for the client's requests. When
     /// unset, a random secret that is generated once per process and that its
     /// clients share is used, so cache hits aren't shared across processes;
@@ -67,13 +69,13 @@ public struct RouterOptions: Sendable {
     public init(
         transport: Transport = .tls,
         attestationRelay: String? = nil,
-        verifier: Verifier? = nil,
+        policy: Policy = Policy(),
         userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil
     ) {
         self.transport = transport
-        self.verifier = verifier
+        self.policy = policy
         self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck
         self.attestationRelay = attestationRelay
@@ -97,11 +99,9 @@ public struct GatewayOptions: Sendable {
     public var modelPins: [String: ModelPin]
     /// Serve only the pinned models
     public var pinnedModelsOnly: Bool
-    /// The trust policy for unpinned models, and pinned ones without their
-    /// own; nil selects the defaults. A policy whose config the caller
-    /// supplies or approves is refused: replicas are verified against
-    /// repositories.
-    public var verifier: Verifier?
+    /// The verification policy for unpinned models, and pinned ones without
+    /// their own; the default policy keeps every default
+    public var policy: Policy
     /// The default prompt-cache scope of the client's requests; nil or empty
     /// uses a random secret that is generated once per process and that its
     /// clients share, so cache hits aren't shared across processes; pass one
@@ -131,7 +131,7 @@ public struct GatewayOptions: Sendable {
         modelPins: [String: ModelPin] = [:],
         pinnedModelsOnly: Bool = false,
         baseURL: URL? = nil,
-        verifier: Verifier? = nil,
+        policy: Policy = Policy(),
         userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
         onVerificationResult: VerificationResultCallback? = nil,
@@ -140,7 +140,7 @@ public struct GatewayOptions: Sendable {
         self.baseURL = baseURL
         self.modelPins = modelPins
         self.pinnedModelsOnly = pinnedModelsOnly
-        self.verifier = verifier
+        self.policy = policy
         self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck
         self.onVerificationResult = onVerificationResult

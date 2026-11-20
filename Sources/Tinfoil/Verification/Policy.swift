@@ -2,66 +2,113 @@ import Foundation
 import TinfoilGo
 
 /// The verification policy that attestation documents are appraised under,
-/// on top of the trust that a client verifies its enclave under. Every client
-/// takes one; without it, a client uses the defaults: Tinfoil's signing keys
-/// and a seven-day freshness bound.
-///
-/// The initializer checks the options and throws
-/// `TinfoilError.configurationError` for an invalid one, so that a client
-/// never starts with a policy that can't verify. A verifier is immutable and
-/// safe to share between clients.
-public final class Verifier: Sendable {
-    /// The framework's options for this policy, without a config trust
-    private let options: VerifierOptions
+/// on top of the trust that a client verifies its enclave under. It is plain
+/// data: a client builds its verifier from it, and checks it before any
+/// network I/O, throwing `TinfoilError.configurationError` for an invalid
+/// value. The default policy keeps every default: no register pins, the
+/// seven-day freshness bound, and runtime and platform artifacts that
+/// Tinfoil's public keys endorse.
+public struct Policy: Sendable, Equatable {
+    /// Register values that the enclave measurement must also match. An empty
+    /// register keeps its default check. Pins for one platform reject every
+    /// enclave on the other.
+    public var pinnedRegisters: Verification.Measurement?
+    /// The oldest freshness witness accepted, in seconds. Zero selects the
+    /// seven-day default; a negative age is refused, and so is a positive one
+    /// under a nanosecond, which the verifier would read as zero.
+    public var freshnessMaxAge: TimeInterval
+    /// Who vouches for the runtime and platform artifacts; artifacts that
+    /// Tinfoil's public keys endorse by default
+    public var artifacts: ArtifactTrust
 
-    /// - Parameters:
-    ///   - pinnedRegisters: Register values the enclave measurement must also
-    ///     match. An empty register keeps its default check.
-    ///   - freshnessMaxAge: Oldest freshness witness accepted, in seconds.
-    ///     Nil keeps the seven-day default; a value must be at least one
-    ///     nanosecond once rounded to whole nanoseconds.
-    ///   - freshnessSigningKeys: PEM `PUBLIC KEY` blocks for Tinfoil's runtime
-    ///     and platform approvals, replacing the built-in keys. Must not be
-    ///     empty.
-    ///   - embeddedReferences: Caller-trusted components that replace their
-    ///     endorsements. Set at least one component.
     public init(
         pinnedRegisters: Verification.Measurement? = nil,
-        freshnessMaxAge: TimeInterval? = nil,
-        freshnessSigningKeys: [String]? = nil,
-        embeddedReferences: EmbeddedReferences? = nil
-    ) throws {
-        if let embeddedReferences, embeddedReferences.runtime == nil, embeddedReferences.platform == nil {
-            throw TinfoilError.configuration("embedded references must contain at least one component")
-        }
-        options = VerifierOptions(
-            pinnedRegisters: pinnedRegisters.map { .init(type: $0.type, registers: $0.registers) },
-            freshnessMaxAgeNs: try freshnessMaxAge.map(Self.nanoseconds),
-            freshnessSigningKeysPEM: freshnessSigningKeys,
-            embeddedRuntime: embeddedReferences?.runtime,
-            embeddedPlatform: embeddedReferences?.platform
-        )
-        // Building a verifier checks the policy now rather than in a client.
-        _ = try backend(trust: nil)
+        freshnessMaxAge: TimeInterval = 0,
+        artifacts: ArtifactTrust = .endorsed()
+    ) {
+        self.pinnedRegisters = pinnedRegisters
+        self.freshnessMaxAge = freshnessMaxAge
+        self.artifacts = artifacts
+    }
+}
+
+/// Who vouches for the runtime and platform artifacts that an enclave runs:
+/// `.endorsed(freshnessKeys:)`, the default, or
+/// `.embedded(runtime:platform:freshnessKeys:)`.
+public struct ArtifactTrust: Sendable, Equatable {
+    /// The caller's runtime manifest, which replaces its endorsement
+    public let runtime: Data?
+    /// The caller's platform policy artifact (platform-endorsements/v2),
+    /// which replaces its endorsement
+    public let platform: Data?
+    /// PEM `PUBLIC KEY` blocks that replace Tinfoil's public keys for the
+    /// artifacts that are endorsed; nil keeps Tinfoil's keys
+    public let freshnessKeys: [String]?
+
+    /// Accepts the artifacts that Tinfoil endorses.
+    ///
+    /// - Parameter freshnessKeys: PEM `PUBLIC KEY` blocks that replace
+    ///   Tinfoil's public keys; nil keeps them, and an empty list is refused.
+    public static func endorsed(freshnessKeys: [String]? = nil) -> ArtifactTrust {
+        ArtifactTrust(runtime: nil, platform: nil, freshnessKeys: freshnessKeys)
     }
 
-    /// The framework verifier for `trust` under this policy; nil selects the
-    /// default config trust, Tinfoil's public registry.
-    func backend(trust: Trust?) throws -> GoAttestationVerifier {
-        try GoAttestationVerifier(trust: trust, policy: options)
+    /// Accepts the caller's own artifacts in place of their endorsements, and
+    /// the endorsed one for an artifact that the caller doesn't supply. The
+    /// hardware is always verified, and so are the bindings between
+    /// components and any pinned registers. Set at least one of `runtime` and
+    /// `platform`.
+    ///
+    /// - Parameter freshnessKeys: PEM `PUBLIC KEY` blocks that replace
+    ///   Tinfoil's public keys for an artifact that the caller doesn't
+    ///   supply; nil keeps them. An empty list is refused, and so is a list
+    ///   with both artifacts embedded, since nothing would be left for the
+    ///   keys to verify.
+    public static func embedded(runtime: Data? = nil, platform: Data? = nil, freshnessKeys: [String]? = nil) -> ArtifactTrust {
+        ArtifactTrust(runtime: runtime, platform: platform, freshnessKeys: freshnessKeys, isEmbedded: true)
+    }
+
+    /// Whether the artifacts are embedded rather than endorsed
+    let isEmbedded: Bool
+
+    private init(runtime: Data?, platform: Data?, freshnessKeys: [String]?, isEmbedded: Bool = false) {
+        self.runtime = runtime
+        self.platform = platform
+        self.freshnessKeys = freshnessKeys
+        self.isEmbedded = isEmbedded
+    }
+}
+
+extension VerifierOptions {
+    /// The framework's options for `policy`, after checking what the
+    /// framework would read differently from what the caller meant.
+    init(policy: Policy) throws {
+        if policy.artifacts.isEmbedded, policy.artifacts.runtime == nil, policy.artifacts.platform == nil {
+            throw TinfoilError.configuration("embedded artifacts must contain a runtime or a platform")
+        }
+        self.init(
+            pinnedRegisters: policy.pinnedRegisters.map { .init(type: $0.type, registers: $0.registers) },
+            freshnessMaxAgeNs: try Self.nanoseconds(policy.freshnessMaxAge),
+            freshnessSigningKeysPEM: policy.artifacts.freshnessKeys,
+            embeddedRuntime: policy.artifacts.runtime,
+            embeddedPlatform: policy.artifacts.platform
+        )
     }
 
     /// The framework takes the age as an integer count of nanoseconds, and
-    /// reads zero as "keep the default". So an age must be at least one
-    /// nanosecond once rounded: 0, or a positive age under half a nanosecond,
-    /// would otherwise silently select the seven-day default, and nil is the
-    /// way to ask for it. A value with no such count, such as NaN, infinity or
-    /// more than about 292 years, is refused rather than trapping in the
-    /// conversion.
-    private static func nanoseconds(_ seconds: TimeInterval) throws -> Int64 {
+    /// reads zero as "keep the default", which an age of zero asks for. So a
+    /// positive age must be at least one nanosecond once rounded: one under
+    /// half a nanosecond would otherwise silently select the seven-day
+    /// default. A negative age, or one with no such count, such as NaN,
+    /// infinity or more than about 292 years, is refused rather than trapping
+    /// in the conversion.
+    private static func nanoseconds(_ seconds: TimeInterval) throws -> Int64? {
+        if seconds == 0 {
+            return nil
+        }
         guard let nanoseconds = Int64(exactly: (seconds * 1_000_000_000).rounded()), nanoseconds > 0 else {
             throw TinfoilError.configuration(
-                "freshness maximum age must be a positive, finite number of seconds of at least a nanosecond, not \(seconds)"
+                "freshness maximum age must be zero, for the default, or a positive, finite number of seconds of at least a nanosecond, not \(seconds)"
             )
         }
         return nanoseconds
@@ -82,8 +129,6 @@ struct VerifierOptions: Sendable {
     var freshnessSigningKeysPEM: [String]?
     var embeddedRuntime: Data?
     var embeddedPlatform: Data?
-
-    static let defaults = VerifierOptions()
 
     /// The framework's options JSON for this policy and the config trust that
     /// `trust` selects. A config authorizer is not part of the JSON: it is
@@ -221,21 +266,5 @@ final class ConfigAuthorizerBridge: NSObject, MobileConfigAuthorizerProtocol, Se
                 userInfo: [NSLocalizedDescriptionKey: error.localizedDescription]
             )
         }
-    }
-}
-
-/// Caller-trusted runtime and platform artifacts that replace their
-/// endorsements. Only the artifacts that are set are replaced; the hardware is
-/// always verified, and so are the bindings between components and any pinned
-/// registers. Set at least one.
-public struct EmbeddedReferences: Sendable, Equatable {
-    /// The runtime manifest that the config pins
-    public var runtime: Data?
-    /// A platform policy artifact (platform-endorsements/v2)
-    public var platform: Data?
-
-    public init(runtime: Data? = nil, platform: Data? = nil) {
-        self.runtime = runtime
-        self.platform = platform
     }
 }

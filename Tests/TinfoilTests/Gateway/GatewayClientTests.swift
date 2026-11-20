@@ -37,6 +37,7 @@ final class GatewayClientTests: XCTestCase {
         await assertRefusedBeforeIO("pinned-only mode requires at least one model pin", pinnedModelsOnly: true)
         await assertRefusedBeforeIO("must belong to tinfoilsh/", modelPins: ["m": ModelPin(repo: "someone/model")])
         await assertRefusedBeforeIO(#"model "m""#, modelPins: ["m": ModelPin(repo: "tinfoilsh/")])
+        await assertRefusedBeforeIO("freshness maximum age", modelPins: ["m": ModelPin(repo: "tinfoilsh/model", policy: Policy(freshnessMaxAge: -1))])
     }
 
     func testTheRelayKeepsThePortAndBracketsAnIPv6Host() {

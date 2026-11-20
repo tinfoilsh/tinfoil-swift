@@ -14,12 +14,12 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
 
     /// The framework's verifier for `trust` under `policy`; nil selects the
     /// default config trust, Tinfoil's public registry.
-    convenience init(trust: Trust?, policy: VerifierOptions = .defaults) throws {
+    convenience init(trust: Trust?, policy: Policy = Policy()) throws {
         var authorizer: ConfigAuthorizerBridge?
         if case let .authorizedBy(authorize) = trust?.kind {
             authorizer = ConfigAuthorizerBridge(authorize)
         }
-        try self.init(optionsJSON: policy.json(trust: trust), configAuthorizer: authorizer)
+        try self.init(optionsJSON: VerifierOptions(policy: policy).json(trust: trust), configAuthorizer: authorizer)
     }
 
     /// - Parameters:

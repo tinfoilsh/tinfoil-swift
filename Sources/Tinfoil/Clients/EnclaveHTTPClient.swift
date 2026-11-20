@@ -77,7 +77,7 @@ public final class EnclaveHTTPClient: Sendable {
         options: EnclaveOptions = EnclaveOptions()
     ) async throws {
         let pin = try trust.pin()
-        let verifier = try (options.verifier ?? Verifier()).backend(trust: trust)
+        let verifier = try GoAttestationVerifier(trust: trust, policy: options.policy)
         try await self.init(verifying: Self.connection(
             enclave: enclave,
             pin: pin,

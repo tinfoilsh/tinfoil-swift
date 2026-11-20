@@ -3,10 +3,10 @@ import CryptoKit
 import Foundation
 @testable import Tinfoil
 
-/// Exercises `Verifier` through the real TinfoilGo framework: each option
-/// reaching it, the checks a client makes before any I/O, and a config
+/// Exercises a trust and a policy through the real TinfoilGo framework: each
+/// option reaching it, the checks a client makes before any I/O, and a config
 /// authorizer called back from Go during verification.
-final class VerifierTests: XCTestCase {
+final class PolicyTests: XCTestCase {
     private let key = P256.Signing.PrivateKey().publicKey.pemRepresentation
     private let fixture = ConfigAuthorizerFixture.self
 
@@ -24,9 +24,14 @@ final class VerifierTests: XCTestCase {
         }
     }
 
-    /// The framework verifier for `trust` under `verifier`'s policy
-    private func backend(_ trust: Trust?, _ verifier: Verifier? = nil) throws -> GoAttestationVerifier {
-        try (verifier ?? Verifier()).backend(trust: trust)
+    /// The framework verifier for `trust` under `policy`
+    private func backend(_ trust: Trust?, _ policy: Policy = Policy()) throws -> GoAttestationVerifier {
+        try GoAttestationVerifier(trust: trust, policy: policy)
+    }
+
+    /// The framework verifier for the default trust under `policy`
+    private func backend(_ policy: Policy) throws -> GoAttestationVerifier {
+        try backend(nil, policy)
     }
 
     func testPublicRegistryID() {
@@ -36,14 +41,16 @@ final class VerifierTests: XCTestCase {
 
     func testAcceptsEachOption() throws {
         let register = String(repeating: "ab", count: 48)
-        XCTAssertNoThrow(try Verifier())
-        XCTAssertNoThrow(try Verifier(
+        XCTAssertNoThrow(try backend(Policy()))
+        XCTAssertNoThrow(try backend(Policy(
             pinnedRegisters: .init(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: ["", "", "", "", register]),
             freshnessMaxAge: 3600
-        ))
-        XCTAssertNoThrow(try Verifier(freshnessMaxAge: 1e-9), "One nanosecond is the shortest age accepted.")
-        XCTAssertNoThrow(try Verifier(freshnessSigningKeys: [key]))
-        XCTAssertNoThrow(try Verifier(embeddedReferences: .init(runtime: fixture.runtime, platform: fixture.platform)))
+        )))
+        XCTAssertNoThrow(try backend(Policy(freshnessMaxAge: 0)), "Zero selects the default.")
+        XCTAssertNoThrow(try backend(Policy(freshnessMaxAge: 1e-9)), "One nanosecond is the shortest age accepted.")
+        XCTAssertNoThrow(try backend(Policy(artifacts: .endorsed(freshnessKeys: [key]))))
+        XCTAssertNoThrow(try backend(Policy(artifacts: .embedded(runtime: fixture.runtime, platform: fixture.platform))))
+        XCTAssertNoThrow(try backend(Policy(artifacts: .embedded(runtime: fixture.runtime, freshnessKeys: [key]))))
         XCTAssertNoThrow(try backend(.signedBy(keys: [key])))
         XCTAssertNoThrow(try backend(.embeddedConfig(fixture.config, name: "/org/project/v1")))
         XCTAssertNoThrow(try backend(.authorizedBy { _ in }))
@@ -54,18 +61,22 @@ final class VerifierTests: XCTestCase {
         assertConfigurationError(try backend(.signedBy(keys: [])), containing: "must not be empty")
         assertConfigurationError(try backend(.signedBy(keys: ["not a key"])), containing: "PEM PUBLIC KEY")
         assertConfigurationError(try backend(.embeddedConfig(Data())), containing: "must not be empty")
-        assertConfigurationError(try Verifier(embeddedReferences: .init()), containing: "at least one component")
+        assertConfigurationError(try backend(Policy(artifacts: .embedded())), containing: "a runtime or a platform")
+        XCTAssertThrowsError(try backend(Policy(artifacts: .embedded(runtime: fixture.runtime, platform: fixture.platform, freshnessKeys: [key]))))
+        assertConfigurationError(try backend(Policy(artifacts: .embedded(runtime: Data()))), containing: "must not be empty")
+        assertConfigurationError(try backend(Policy(artifacts: .endorsed(freshnessKeys: []))), containing: "must not be empty")
+        assertConfigurationError(try backend(Policy(artifacts: .endorsed(freshnessKeys: ["not a key"]))), containing: "PEM PUBLIC KEY")
         assertConfigurationError(
-            try Verifier(pinnedRegisters: .init(type: "bogus", registers: ["aa"])),
+            try backend(Policy(pinnedRegisters: .init(type: "bogus", registers: ["aa"]))),
             containing: "pinned registers"
         )
     }
 
-    func testRefusesAgesThatAreNotPositiveOrUnrepresentable() {
-        // Zero, and ±1e-10 (a tenth of a nanosecond), round to zero
-        // nanoseconds, which would otherwise select the default rather than fail.
-        for age in [0, -1, 1e-10, -1e-10, TimeInterval.nan, .infinity, -.infinity, 1e300] {
-            assertConfigurationError(try Verifier(freshnessMaxAge: age), containing: "freshness maximum age")
+    func testRefusesAgesThatAreNegativeOrUnrepresentable() {
+        // ±1e-10 (a tenth of a nanosecond) rounds to zero nanoseconds, which
+        // would otherwise select the default rather than fail.
+        for age in [-1, 1e-10, -1e-10, TimeInterval.nan, .infinity, -.infinity, 1e300] {
+            assertConfigurationError(try backend(Policy(freshnessMaxAge: age)), containing: "freshness maximum age")
         }
     }
 
@@ -161,7 +172,7 @@ final class VerifierTests: XCTestCase {
         let verifier = try backend(.authorizedBy { endorsement in
             seen.add(endorsement)
             throw TinfoilError.configuration("config is not on the allow list")
-        }, Verifier(embeddedReferences: .init(runtime: fixture.runtime, platform: fixture.platform)))
+        }, Policy(artifacts: .embedded(runtime: fixture.runtime, platform: fixture.platform)))
         XCTAssertThrowsError(try verifier.verify(document: fixture.document, nonce: fixture.nonce, pin: Pin.none)) { error in
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("expected an attestation error, got \(error)")
@@ -180,7 +191,7 @@ final class VerifierTests: XCTestCase {
         let seen = Seen()
         let verifier = try backend(
             .authorizedBy { seen.add($0) },
-            Verifier(embeddedReferences: .init(runtime: fixture.runtime, platform: fixture.platform))
+            Policy(artifacts: .embedded(runtime: fixture.runtime, platform: fixture.platform))
         )
         XCTAssertThrowsError(try verifier.verify(document: fixture.document, nonce: fixture.nonce, pin: Pin.none)) { error in
             guard case TinfoilError.attestationError(let failure) = error else {
@@ -196,7 +207,7 @@ final class VerifierTests: XCTestCase {
         let seen = Seen()
         let verifier = try backend(
             .authorizedBy { seen.add($0) },
-            Verifier(embeddedReferences: .init(runtime: fixture.runtime, platform: fixture.platform))
+            Policy(artifacts: .embedded(runtime: fixture.runtime, platform: fixture.platform))
         )
         DispatchQueue.concurrentPerform(iterations: 8) { _ in
             _ = try? verifier.verify(document: fixture.document, nonce: fixture.nonce, pin: Pin.none)

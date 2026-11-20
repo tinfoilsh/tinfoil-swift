@@ -24,11 +24,11 @@ final class DocumentationExamplesTests: XCTestCase {
             apiKey: "YOUR_API_KEY"
         )
 
-        let verifier = try Verifier(
+        let policy = Policy(
             pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
             freshnessMaxAge: 3600
         )
-        _ = try await EnclaveOpenAIClient(enclave: host, trust: trust, options: .init(verifier: verifier), apiKey: key)
+        _ = try await EnclaveOpenAIClient(enclave: host, trust: trust, options: .init(policy: policy), apiKey: key)
     }
 
     private func migrationExamples(key: String) async throws {

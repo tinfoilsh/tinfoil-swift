@@ -40,13 +40,13 @@ public final class GatewayHTTPClient: Sendable {
         guard let relay = Self.authority(of: base) else {
             throw TinfoilError.configuration("invalid base URL: the gateway base URL has no host")
         }
-        let attestor = { (verifier: Verifier?) throws -> Attestor in
-            Attestor(verifier: try (verifier ?? Verifier()).backend(trust: nil), verificationCheck: verificationCheck)
+        let attestor = { (policy: Policy) throws -> Attestor in
+            Attestor(verifier: try GoAttestationVerifier(trust: nil, policy: policy), verificationCheck: verificationCheck)
         }
         let policy = try GatewayPolicy(
-            pins: options.modelPins.mapValues { pin in (repo: pin.repo, attestor: try pin.verifier.map { try attestor($0) }) },
+            pins: options.modelPins.mapValues { pin in (repo: pin.repo, attestor: try pin.policy.map { try attestor($0) }) },
             pinnedOnly: options.pinnedModelsOnly,
-            attestor: attestor(options.verifier)
+            attestor: attestor(options.policy)
         )
         let source: @Sendable () async throws -> Catalog
         if let catalog = options.catalog {

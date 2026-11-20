@@ -13,13 +13,14 @@ public struct ModelPin: Sendable {
     /// The trusted `tinfoilsh/name[@tag][@sha256:digest]` that the model's
     /// replicas must run
     public let repo: String
-    /// The pin's trust policy: nil inherits the gateway client's; a verifier
-    /// replaces it.
-    public let verifier: Verifier?
+    /// The pin's verification policy: nil inherits the gateway client's; a
+    /// policy replaces it entirely, so an unset field takes the SDK's
+    /// default rather than the gateway client's.
+    public let policy: Policy?
 
-    public init(repo: String, verifier: Verifier? = nil) {
+    public init(repo: String, policy: Policy? = nil) {
         self.repo = repo
-        self.verifier = verifier
+        self.policy = policy
     }
 }
 

@@ -25,7 +25,7 @@ public final class RouterHTTPClient: Sendable {
     public convenience init(options: RouterOptions = RouterOptions()) async throws {
         try await self.init(verifying: EnclaveConnection.router(
             attestor: Attestor(
-                verifier: try (options.verifier ?? Verifier()).backend(trust: nil),
+                verifier: try GoAttestationVerifier(trust: nil, policy: options.policy),
                 verificationCheck: options.verificationCheck
             ),
             transportMode: options.transport.mode,
