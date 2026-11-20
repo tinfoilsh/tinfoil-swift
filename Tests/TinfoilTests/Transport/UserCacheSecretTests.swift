@@ -15,17 +15,17 @@ final class UserCacheSecretTests: XCTestCase {
 
     // MARK: - Resolution
 
-    func testAnExplicitSecretWinsAndOtherwiseTheProcessSecret() {
-        XCTAssertEqual(UserCacheSecret.resolve(explicit: "s1"), "s1")
+    func testAnExplicitSecretWinsAndOtherwiseTheProcessSecret() throws {
+        XCTAssertEqual(try UserCacheSecret.resolve(explicit: "s1"), "s1")
         for unset in [nil, ""] as [String?] {
-            let resolved = UserCacheSecret.resolve(explicit: unset)
+            let resolved = try UserCacheSecret.resolve(explicit: unset)
             assertIsGeneratedSecret(resolved)
-            XCTAssertEqual(resolved, UserCacheSecret.processSecret, "Every client in the process shares one secret.")
+            XCTAssertEqual(resolved, try UserCacheSecret.processSecret.value(), "Every client in the process shares one secret.")
         }
     }
 
     /// The SDK reads no environment variable or file for the secret.
-    func testTheEnvironmentIsNotRead() {
+    func testTheEnvironmentIsNotRead() throws {
         let original = ProcessInfo.processInfo.environment["TINFOIL_USER_CACHE_SECRET"]
         setenv("TINFOIL_USER_CACHE_SECRET", "from-the-environment", 1)
         defer {
@@ -35,13 +35,96 @@ final class UserCacheSecretTests: XCTestCase {
                 unsetenv("TINFOIL_USER_CACHE_SECRET")
             }
         }
-        XCTAssertEqual(UserCacheSecret.resolve(explicit: nil), UserCacheSecret.processSecret)
+        XCTAssertEqual(try UserCacheSecret.resolve(explicit: nil), try UserCacheSecret.processSecret.value())
     }
 
-    func testGeneratedSecretsAreFresh() {
-        let first = UserCacheSecret.generate()
+    func testGeneratedSecretsAreFresh() throws {
+        let first = try UserCacheSecret.generate()
         assertIsGeneratedSecret(first)
-        XCTAssertNotEqual(first, UserCacheSecret.generate())
+        XCTAssertNotEqual(first, try UserCacheSecret.generate())
+    }
+
+    /// A random source that fails with `status` on its first call, and then
+    /// succeeds.
+    private func failingOnce(status: OSStatus) -> UserCacheSecret.RandomSource {
+        let calls = Calls()
+        return { bytes in
+            calls.record() == 1 ? status : UserCacheSecret.systemRandom(&bytes)
+        }
+    }
+
+    private final class Calls: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        /// Records a call, returning how many have been made, this one included.
+        func record() -> Int {
+            lock.lock()
+            defer { lock.unlock() }
+            count += 1
+            return count
+        }
+        var made: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return count
+        }
+    }
+
+    func testAFailingGeneratorThrowsItsStatusAndIsTriedAgain() throws {
+        let process = UserCacheSecret.ProcessSecret(random: failingOnce(status: errSecAllocate))
+        XCTAssertThrowsError(try UserCacheSecret.resolve(explicit: nil, process: process)) { error in
+            XCTAssertEqual(error as? SecureRandomError, SecureRandomError(status: errSecAllocate))
+        }
+        XCTAssertEqual(try UserCacheSecret.resolve(explicit: "s1", process: process), "s1", "An explicit secret needs no generation.")
+        let generated = try UserCacheSecret.resolve(explicit: nil, process: process)
+        assertIsGeneratedSecret(generated)
+        XCTAssertEqual(try UserCacheSecret.resolve(explicit: nil, process: process), generated, "The failure was not kept as the secret.")
+    }
+
+    func testARouterWhoseSecretCantBeGeneratedFailsBeforeDiscovery() async throws {
+        let process = UserCacheSecret.ProcessSecret(random: failingOnce(status: errSecAllocate))
+        // A relay skips discovery's network I/O; the route is still Tinfoil's router.
+        let attestor = Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") })
+        do {
+            _ = try await EnclaveConnection.router(
+                attestor: attestor,
+                transportMode: .ehbp,
+                baseURL: nil,
+                attestationRelay: "relay.example",
+                userCacheSecret: nil,
+                processSecret: process,
+                onVerificationResult: nil
+            )
+            XCTFail("expected SecureRandomError")
+        } catch {
+            XCTAssertEqual(error as? SecureRandomError, SecureRandomError(status: errSecAllocate))
+        }
+        let connection = try await EnclaveConnection.router(
+            attestor: attestor,
+            transportMode: .ehbp,
+            baseURL: nil,
+            attestationRelay: "relay.example",
+            userCacheSecret: nil,
+            processSecret: process,
+            onVerificationResult: nil
+        )
+        XCTAssertEqual(connection.userCacheSecret, try process.value())
+    }
+
+    func testAGatewayWhoseSecretCantBeGeneratedFailsBeforeReadingTheCatalog() async throws {
+        let process = UserCacheSecret.ProcessSecret(random: failingOnce(status: errSecAllocate))
+        let reads = Calls()
+        let options = GatewayOptions(url: URL(string: "https://gateway.example/v1/")!, catalog: {
+            _ = reads.record()
+            return [:]
+        })
+        do {
+            _ = try await GatewayHTTPClient(options: options, processSecret: process)
+            XCTFail("expected SecureRandomError")
+        } catch {
+            XCTAssertEqual(error as? SecureRandomError, SecureRandomError(status: errSecAllocate))
+        }
+        XCTAssertEqual(reads.made, 0, "The catalog is not read.")
     }
 
     func testAnEnclaveTheCallerNamesGetsNoSecret() throws {
@@ -76,7 +159,7 @@ final class UserCacheSecretTests: XCTestCase {
             userCacheSecret: nil,
             onVerificationResult: nil
         )
-        XCTAssertEqual(connection.userCacheSecret, UserCacheSecret.processSecret)
+        XCTAssertEqual(connection.userCacheSecret, try UserCacheSecret.processSecret.value())
     }
 
     // MARK: - Injection
