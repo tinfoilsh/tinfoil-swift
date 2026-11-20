@@ -313,8 +313,26 @@ final class FetcherTests: XCTestCase {
         }
     }
 
+    /// A flag that a test sets while a stubborn closure reads it
+    private final class Release: @unchecked Sendable {
+        private let lock = NSLock()
+        private var released = false
+
+        var value: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return released
+        }
+
+        func release() {
+            lock.lock()
+            released = true
+            lock.unlock()
+        }
+    }
+
     /// A closure that ignores cancellation until the test releases it
-    private func stubborn<T>(_ released: Box<Bool>, _ value: T) async -> T {
+    private func stubborn<T>(_ released: Release, _ value: T) async -> T {
         while !released.value {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
@@ -322,8 +340,8 @@ final class FetcherTests: XCTestCase {
     }
 
     func testAFetcherThatIgnoresCancellationIsStillBounded() async {
-        let released = Box(value: false)
-        defer { released.value = true }
+        let released = Release()
+        defer { released.release() }
         let stuck = AttestationFetcher { _, _ in await self.stubborn(released, Data()) }
         let start = ContinuousClock.now
         do {
@@ -337,8 +355,8 @@ final class FetcherTests: XCTestCase {
     }
 
     func testDiscoveryFallsBackAtTheDeadlineDespiteAStuckRouterList() async throws {
-        let released = Box(value: false)
-        defer { released.value = true }
+        let released = Release()
+        defer { released.release() }
         let attestor = Attestor(
             verifier: FakeVerifier(),
             fetch: noDirectFetch,
