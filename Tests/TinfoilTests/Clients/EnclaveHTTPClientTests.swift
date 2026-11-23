@@ -413,6 +413,8 @@ final class EnclaveHTTPClientTests: XCTestCase {
             XCTFail("a rejected attestation must fail the re-verification")
         } catch TinfoilError.attestationError {
         }
+        let last = await handle.current
+        XCTAssertEqual(last, first, "current still returns the last successful verification.")
         let fetched = network.urls.count
         do {
             _ = try await channel.state.current()
@@ -441,8 +443,10 @@ final class EnclaveHTTPClientTests: XCTestCase {
             XCTFail("the recovery must fail while the enclave fails verification")
         } catch TinfoilError.attestationError {
         }
-        let discarded = await handle.current
+        let discarded = await handle.usable
         XCTAssertNil(discarded)
+        let last = await handle.current
+        XCTAssertEqual(last, sealing.endpoint.verification, "current still returns the last successful verification.")
         let fetched = network.urls.count
         do {
             _ = try await channel.state.current()
@@ -495,6 +499,8 @@ final class EnclaveHTTPClientTests: XCTestCase {
             url == TinfoilConstants.routerListURL ? #"["router-a.example"]"# : FakeNetwork.document(verdict.value, for: url)
         }
         let client = try await router(network)
+        let first = await client.current
+        XCTAssertNotNil(first)
 
         verdict.value = "reject"
         do {
@@ -502,8 +508,8 @@ final class EnclaveHTTPClientTests: XCTestCase {
             XCTFail("a rejected attestation must fail the re-verification")
         } catch TinfoilError.attestationError {
         }
-        let discarded = await client.current
-        XCTAssertNil(discarded)
+        let last = await client.current
+        XCTAssertEqual(last, first, "current still returns the last successful verification.")
 
         verdict.value = "ok"
         _ = try await client.ensureVerified()
