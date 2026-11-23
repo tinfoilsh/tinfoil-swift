@@ -220,7 +220,8 @@ actor GatewayRouter {
     }
 
     /// The last successful verification of each replica used so far, without
-    /// checking them. They may have expired or been rejected.
+    /// checking them. They may have expired. A replica whose verification was
+    /// discarded isn't listed.
     var current: [ReplicaVerification] {
         get async {
             var results: [ReplicaVerification] = []

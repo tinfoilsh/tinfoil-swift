@@ -379,4 +379,135 @@ final class EnclaveHTTPClientTests: XCTestCase {
         XCTAssertEqual(network.urls.count, 2, "A rejected key is verified again.")
         XCTAssertNotEqual(refreshed.expiresAt, first.endpoint.expiresAt)
     }
+
+    /// A handle and the EHBP channel over it, verified, whose attestation
+    /// source serves verdict, failing as a network error does while it is
+    /// "offline"
+    private func verifiedChannel(_ verdict: Verdict) async throws -> (FakeNetwork, EnclaveHandle, EHBPChannel) {
+        let network = FakeNetwork { url, _ in
+            if verdict.value == "offline" {
+                throw TinfoilError.network("attestation source unreachable")
+            }
+            return FakeNetwork.document(verdict.value, for: url)
+        }
+        let handle = EnclaveHandle(enclave: "enclave.example", pin: Pin(repo: "org/repo"), attestationRelay: nil, attestor: attestor(network))
+        let channel = EHBPChannel(
+            origin: "https://enclave.example",
+            enclaveURL: "https://enclave.example",
+            handle: handle,
+            initial: nil,
+            userCacheSecret: ""
+        )
+        _ = try await channel.state.current()
+        return (network, handle, channel)
+    }
+
+    func testAFailedReverifyStopsSealingToTheDiscardedKey() async throws {
+        let verdict = Verdict("ok")
+        let (network, handle, channel) = try await verifiedChannel(verdict)
+        let first = try await channel.state.current().endpoint.verification
+
+        verdict.value = "reject"
+        do {
+            _ = try await handle.reverify()
+            XCTFail("a rejected attestation must fail the re-verification")
+        } catch TinfoilError.attestationError {
+        }
+        let fetched = network.urls.count
+        do {
+            _ = try await channel.state.current()
+            XCTFail("no request may be sealed to the discarded key")
+        } catch TinfoilError.attestationError {
+        }
+        XCTAssertGreaterThan(network.urls.count, fetched, "The next request verified the enclave again.")
+
+        verdict.value = "ok"
+        let recovered = try await channel.state.current().endpoint.verification
+        let current = await handle.current
+        XCTAssertNotNil(recovered)
+        XCTAssertNotEqual(recovered, first)
+        XCTAssertEqual(recovered, current, "Requests are sealed under the new verification.")
+    }
+
+    /// The path that a gateway replica takes when the enclave rejects its key
+    func testAFailedRecoveryFromARejectedEHBPKeyStopsSealing() async throws {
+        let verdict = Verdict("ok")
+        let (network, handle, channel) = try await verifiedChannel(verdict)
+        let sealing = try await channel.state.current()
+
+        verdict.value = "reject"
+        do {
+            _ = try await channel.state.refresh(afterRejectedGeneration: sealing.generation)
+            XCTFail("the recovery must fail while the enclave fails verification")
+        } catch TinfoilError.attestationError {
+        }
+        let discarded = await handle.current
+        XCTAssertNil(discarded)
+        let fetched = network.urls.count
+        do {
+            _ = try await channel.state.current()
+            XCTFail("no request may be sealed to the rejected key")
+        } catch TinfoilError.attestationError {
+        }
+        XCTAssertGreaterThan(network.urls.count, fetched)
+
+        verdict.value = "ok"
+        let recovered = try await channel.state.current()
+        XCTAssertNotEqual(recovered.endpoint.verification, sealing.endpoint.verification)
+    }
+
+    func testAReverifyThatCannotReachTheAttestationSourceKeepsTheEHBPKey() async throws {
+        let verdict = Verdict("ok")
+        let (network, handle, channel) = try await verifiedChannel(verdict)
+        let sealing = try await channel.state.current()
+
+        verdict.value = "offline"
+        do {
+            _ = try await handle.reverify()
+            XCTFail("an unreachable attestation source must fail the re-verification")
+        } catch TinfoilError.networkError {
+        }
+        let fetched = network.urls.count
+        let current = try await channel.state.current()
+
+        XCTAssertEqual(current.generation, sealing.generation)
+        XCTAssertEqual(current.endpoint.verification, sealing.endpoint.verification)
+        XCTAssertEqual(network.urls.count, fetched, "No new verification was needed.")
+    }
+
+    func testASuccessfulReverifyReplacesTheEHBPKeyWithoutVerifyingAgain() async throws {
+        let verdict = Verdict("ok")
+        let (network, handle, channel) = try await verifiedChannel(verdict)
+        let sealing = try await channel.state.current()
+
+        let newer = try await handle.reverify()
+        let fetched = network.urls.count
+        let current = try await channel.state.current()
+
+        XCTAssertNotEqual(current.endpoint.verification, sealing.endpoint.verification)
+        XCTAssertEqual(current.endpoint.verification, newer)
+        XCTAssertEqual(network.urls.count, fetched)
+    }
+
+    func testAFailedRouterReverifyVerifiesTheSameRouterAgain() async throws {
+        let verdict = Verdict("ok")
+        let network = FakeNetwork { url, _ in
+            url == TinfoilConstants.routerListURL ? #"["router-a.example"]"# : FakeNetwork.document(verdict.value, for: url)
+        }
+        let client = try await router(network)
+
+        verdict.value = "reject"
+        do {
+            _ = try await client.reverify()
+            XCTFail("a rejected attestation must fail the re-verification")
+        } catch TinfoilError.attestationError {
+        }
+        let discarded = await client.current
+        XCTAssertNil(discarded)
+
+        verdict.value = "ok"
+        _ = try await client.ensureVerified()
+        XCTAssertEqual(network.urls.filter { $0 == TinfoilConstants.routerListURL }.count, 1, "Discovery doesn't run again.")
+        XCTAssertEqual(Set(network.urls.compactMap(\.host)), ["atc.tinfoil.sh", "router-a.example"])
+    }
 }
