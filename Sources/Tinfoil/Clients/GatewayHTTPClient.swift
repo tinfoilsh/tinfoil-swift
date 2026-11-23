@@ -132,9 +132,9 @@ public final class GatewayHTTPClient: Sendable {
         try await router.ensureVerified(model: model)
     }
 
-    /// One entry for each replica that the client has tried to verify,
-    /// failed replicas included, without I/O, each holding that replica's
-    /// last attempt: its report if the attempt passed, and otherwise its
+    /// One entry for each replica that the client has tried to verify and
+    /// whose attempt has finished, failed replicas included, without I/O,
+    /// each holding that replica's last attempt: its report if the attempt passed, and otherwise its
     /// error, as `EnclaveHTTPClient.lastVerification` describes. A replica's
     /// earlier success is not kept once a later attempt for it fails.
     /// Reports may have expired or been discarded since; a discarded

@@ -156,9 +156,9 @@ public final class EnclaveHTTPClient: Sendable {
     /// host when requests go through a proxy.
     public var enclave: String { connection.enclave }
 
-    /// The outcome of the client's most recent attempt to verify its enclave,
-    /// without I/O, or nil before the first: the attempt's report if it
-    /// passed, and otherwise the error that the client reported for it.
+    /// The outcome of the client's most recent attempt to verify its
+    /// enclave, without I/O, or nil before the first: the attempt's report if
+    /// it passed, and otherwise the error that the client reported for it.
     /// When the verifier rejected the document, the error is
     /// `TinfoilError.attestationError`, whose `verificationError` carries the
     /// report that shows the step that failed; an attempt that failed before
@@ -191,8 +191,10 @@ public final class EnclaveHTTPClient: Sendable {
     /// next request verifies again, failing while the problem persists.
     /// Other failures, such as a `TinfoilError.networkError` or a
     /// cancellation, keep a cached verification that is still valid.
-    /// Requests already in flight finish. Either way, the failure becomes
-    /// `lastVerification`. It returns the new report.
+    /// Requests already in flight finish. Either way, the failed attempt
+    /// becomes `lastVerification`. It returns the new report. Cancelling the
+    /// call ends only its own wait: the verification that it started or
+    /// joined still finishes, and its outcome becomes `lastVerification`.
     @discardableResult
     public func reverify() async throws -> VerificationReport {
         try await connection.reverify()

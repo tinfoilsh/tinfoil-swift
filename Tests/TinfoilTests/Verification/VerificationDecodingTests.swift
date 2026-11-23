@@ -41,25 +41,26 @@ final class VerificationDecodingTests: XCTestCase {
     }
 
     /// The result of a document that the verifier rejected at the quote layer
-    private func rejection(partialFacts: [String: Any] = [:], changes: [String: Any?] = [:]) throws -> String {
-        let message = "verification error: quote: signature does not verify"
-        var result: [String: Any] = [
+    private func rejection(
+        partialFacts: [String: Any] = [:],
+        failing layer: String = "quote",
+        message: String = "verification error: quote: signature does not verify"
+    ) throws -> String {
+        let layers = ["envelope", "provenance", "quote", "policy"]
+        let failed = layers.firstIndex(of: layer) ?? layers.count
+        let result: [String: Any] = [
             "schema_version": 2,
             "report": [
-                "steps": [
-                    ["layer": "envelope", "status": "passed"],
-                    ["layer": "provenance", "status": "passed"],
-                    ["layer": "quote", "status": "failed", "message": message],
-                    ["layer": "policy", "status": "not_run"],
-                ],
+                "steps": layers.enumerated().map { index, step -> [String: Any] in
+                    index < failed ? ["layer": step, "status": "passed"]
+                        : index == failed ? ["layer": step, "status": "failed", "message": message]
+                        : ["layer": step, "status": "not_run"]
+                },
                 "partial_facts": partialFacts,
                 "metadata": ["verified_at": "2026-09-26T12:00:00Z"],
             ] as [String: Any],
-            "error": ["layer": "quote", "message": message],
+            "error": ["layer": layer, "message": message],
         ]
-        for (key, value) in changes {
-            result[key] = value
-        }
         return try json(result)
     }
 
@@ -285,9 +286,7 @@ final class VerificationDecodingTests: XCTestCase {
             ],
             "measured": ["cpu_measurement": ["type": tdx, "registers": ["aa", "bb", "cc", "dd", "ff"]]],
         ]
-        let result = try rejection(partialFacts: partial, changes: [
-            "error": ["layer": "policy", "message": "verification error: policy: RTMR3 mismatch"],
-        ])
+        let result = try rejection(partialFacts: partial, failing: "policy", message: "verification error: policy: RTMR3 mismatch")
         XCTAssertThrowsError(try decode(result)) { error in
             guard let report = (error as? TinfoilError)?.verificationError?.report else {
                 return XCTFail("expected a report, got \(error)")
@@ -296,6 +295,7 @@ final class VerificationDecodingTests: XCTestCase {
             XCTAssertEqual(report.partialFacts?.measured?.cpu?.measurement.registers, ["aa", "bb", "cc", "dd", "ff"])
             XCTAssertEqual(report.partialFacts?.measured?.tlsPublicKeyFingerprint, "", "A key that the document doesn't endorse is empty.")
             XCTAssertEqual((error as? TinfoilError)?.verificationError?.layer, .policy)
+            XCTAssertEqual(report.steps.map(\.status), [.passed, .passed, .passed, .failed])
         }
     }
 
@@ -328,6 +328,9 @@ final class VerificationDecodingTests: XCTestCase {
             "config": ["source": "endorsement", "digest": "c0", "approval_time": "2026-09-20T08:00:00Z"],
         ]))
         XCTAssertEqual(try JSONDecoder().decode(VerificationReport.self, from: JSONEncoder().encode(accepted)), accepted)
+        let steps = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(accepted.steps)) as? [[String: Any]])
+        XCTAssertEqual(steps.first?["layer"] as? String, "envelope", "A layer encodes as its raw string.")
+        XCTAssertEqual(steps.first?["status"] as? String, "passed")
 
         XCTAssertThrowsError(try decode(rejection(partialFacts: ["measured": ["tls_public_key_fp": "deadbeef"]]))) { error in
             guard let report = (error as? TinfoilError)?.verificationError?.report else {

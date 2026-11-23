@@ -120,12 +120,20 @@ struct Attestor: Sendable {
                     return nil
                 }
                 // This runs in a task of its own, outside any actor, so the
-                // callback can call the client.
+                // callback can call the client. Once the deadline or the
+                // caller has cancelled discovery, a router that is still
+                // finishing is abandoned, not tried, so it isn't reported.
                 do {
                     let verified = try await attestOnce(host: router, relay: nil, pin: pin)
+                    guard !Task.isCancelled else {
+                        return nil
+                    }
                     onVerification?(router, .success(verified))
                     return DiscoveredRouter(host: router, report: verified)
                 } catch let error as TinfoilError {
+                    guard !Task.isCancelled else {
+                        return nil
+                    }
                     onVerification?(router, .failure(error))
                 } catch {
                     // A cancelled attempt has no outcome to report.

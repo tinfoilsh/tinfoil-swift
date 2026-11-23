@@ -130,7 +130,9 @@ task is cancelled, and the OpenAI SDK's own errors for an API failure.
 ### Low-level types
 
 `EHBPURLSession`, `EHBPURLSessionFactory`, `TinfoilConstants`, `SecureResponse`
-and `VerificationCallback` are no longer public. Send requests of your own with
+and the 0.8.x `VerificationCallback` are no longer public; the
+`VerificationCallback` of this release is the type of the `onVerification`
+option. Send requests of your own with
 an HTTP client's `data(for:)`, or with `recoverableBytes(for:)` for a streamed
 EHBP response and its session recovery token.
 
