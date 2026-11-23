@@ -66,8 +66,10 @@ public final class RouterHTTPClient: Sendable {
     /// when requests go through a proxy.
     public var enclave: String { connection.enclave }
 
-    /// The last successful verification, without checking it. It may have
-    /// expired or been rejected; use `ensureVerified()` for one that is valid.
+    /// The last successful verification, without checking it, or nil once a
+    /// re-verification that fails attestation discards it, as `reverify()`
+    /// describes. It may have expired; use `ensureVerified()` for one that is
+    /// valid.
     public var current: Verification? {
         get async { await connection.current }
     }
@@ -82,6 +84,14 @@ public final class RouterHTTPClient: Sendable {
 
     /// Verifies the router again, even if the cached verification is still
     /// valid. It stays with the router chosen at creation.
+    ///
+    /// If the new verification fails with `TinfoilError.attestationError`,
+    /// this throws it and the client discards its cached verification, even
+    /// one that is still valid: no later request is sent under it, and the
+    /// next request verifies again, failing while the problem persists. Other
+    /// failures, such as a `TinfoilError.networkError` or a cancellation,
+    /// keep a cached verification that is still valid. Requests already in
+    /// flight finish.
     @discardableResult
     public func reverify() async throws -> Verification {
         try await connection.reverify()

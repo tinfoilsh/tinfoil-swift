@@ -173,6 +173,22 @@ final class Recorder<Value: Sendable>: @unchecked Sendable {
     }
 }
 
+/// A value that a test changes while the code under test reads it, as a
+/// verdict that a fake network serves
+final class Verdict: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: String
+
+    init(_ value: String) {
+        _value = value
+    }
+
+    var value: String {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
+    }
+}
+
 /// A clock tests move by hand
 final class ManualClock: @unchecked Sendable {
     private let lock = NSLock()

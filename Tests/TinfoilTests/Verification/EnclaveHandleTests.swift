@@ -85,24 +85,64 @@ final class EnclaveHandleTests: XCTestCase {
         XCTAssertEqual(network.urls.count, 2)
     }
 
-    func testFailedVerificationKeepsTheLastResult() async throws {
-        let network = FakeNetwork { url, previous in
-            FakeNetwork.document(previous == 0 ? "ok" : "reject", for: url)
-        }
+    func testAFailedAttestationDiscardsAFreshVerification() async throws {
+        let verdict = Verdict("ok")
+        let network = FakeNetwork { url, _ in FakeNetwork.document(verdict.value, for: url) }
         let handle = handle(enclave: "enclave.example", network: network)
-        let first = try await handle.reverify()
+        _ = try await handle.reverify()
 
+        verdict.value = "reject"
         do {
             _ = try await handle.reverify()
             XCTFail("a rejected attestation must fail verification")
         } catch TinfoilError.attestationError {
         }
 
+        let discarded = await handle.current
+        XCTAssertNil(discarded, "A verification that the enclave no longer backs is not kept.")
+        let attempts = network.urls.count
+        do {
+            _ = try await handle.ensureVerified()
+            XCTFail("the discarded verification must not be returned")
+        } catch TinfoilError.attestationError {
+        }
+        XCTAssertGreaterThan(network.urls.count, attempts, "The next use verifies again.")
+
+        verdict.value = "ok"
+        let recovered = try await handle.ensureVerified()
         let latest = await handle.current
-        XCTAssertEqual(latest, first)
+        XCTAssertEqual(latest, recovered, "Once the enclave verifies again, it is used again.")
     }
 
-    func testRejectedEnclaveKeepsTheLastResult() async throws {
+    func testOtherFailuresKeepAFreshVerification() async throws {
+        let verdict = Verdict("ok")
+        let network = FakeNetwork { url, _ in
+            if verdict.value == "offline" {
+                throw TinfoilError.network("attestation source unreachable")
+            }
+            return FakeNetwork.document(verdict.value, for: url)
+        }
+        let handle = handle(enclave: "enclave.example", network: network)
+        let first = try await handle.reverify()
+
+        for failure in ["offline", "config"] {
+            verdict.value = failure
+            do {
+                _ = try await handle.reverify()
+                XCTFail("the \(failure) run must fail")
+            } catch TinfoilError.networkError, TinfoilError.configurationError {
+            }
+            let latest = await handle.current
+            XCTAssertEqual(latest, first, "A \(failure) failure keeps the verification.")
+        }
+
+        let attempts = network.urls.count
+        let current = try await handle.ensureVerified()
+        XCTAssertEqual(current, first)
+        XCTAssertEqual(network.urls.count, attempts, "The kept verification is used without verifying again.")
+    }
+
+    func testARejectedEnclaveDiscardsTheVerification() async throws {
         let verified = Recorder<String>()
         let network = approving()
         let handle = EnclaveHandle(
@@ -120,7 +160,7 @@ final class EnclaveHandleTests: XCTestCase {
                 }
             )
         )
-        let first = try await handle.reverify()
+        _ = try await handle.reverify()
 
         do {
             _ = try await handle.reverify()
@@ -129,7 +169,7 @@ final class EnclaveHandleTests: XCTestCase {
         }
 
         let latest = await handle.current
-        XCTAssertEqual(latest, first)
+        XCTAssertNil(latest, "The verification check's rejection discards it as a failed attestation does.")
     }
 
     func testEachRunReportsItsResult() async throws {
