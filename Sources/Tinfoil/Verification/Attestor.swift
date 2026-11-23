@@ -6,10 +6,11 @@ import Foundation
 struct Attestor: Sendable {
     typealias Fetch = @Sendable (URL) async throws -> Data
 
-    /// A router discovery verified, and the host it was fetched from
+    /// A router that discovery verified, and the host that it was fetched
+    /// from
     struct DiscoveredRouter: Sendable {
         let host: String
-        let verification: Verification
+        let report: VerificationReport
     }
 
     private let verifier: any AttestationVerifier
@@ -70,26 +71,38 @@ struct Attestor: Sendable {
 
     /// Verifies host against pin, fetching through relay when it is not nil.
     /// A failed fetch or verification is retried once against fresh evidence;
-    /// a configuration error is not.
-    func attest(host: String, relay: String?, pin: Pin) async throws -> Verification {
-        let verified: Verification
+    /// a configuration error is not. The failed attempt that is retried is
+    /// passed to `retried` before the retry starts; the outcome of the last
+    /// attempt is the result.
+    func attest(
+        host: String,
+        relay: String?,
+        pin: Pin,
+        retried: @Sendable (TinfoilError) async -> Void = { _ in }
+    ) async throws -> VerificationReport {
+        let verified: VerificationReport
         do {
             verified = try await verifyOnce(host: host, relay: relay, pin: pin)
         } catch let error as TinfoilError where error.isRetryable {
+            await retried(error)
             try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
             verified = try await verifyOnce(host: host, relay: relay, pin: pin)
         }
         return try accepted(verified, host: host)
     }
 
-    /// Returns the host and verification of the first router of the list, in
-    /// a random order, that verifies against the router pin, trying each
-    /// once, or nil when none does. The caller then uses the fallback router, which it verifies
-    /// itself. A router list that cannot be fetched or read leaves only the
-    /// fallback, and so does reaching discoveryTimeout, however many routers
-    /// are left.
-    func discoverRouter() async throws -> DiscoveredRouter? {
-        let discovered = await firstVerifiedRouter(pin: TinfoilConstants.routerPin)
+    /// Returns the host and report of the first router of the list, in a
+    /// random order, that verifies against the router pin, trying each once,
+    /// or nil when none does. The caller then uses the fallback router, which
+    /// it verifies itself. A router list that cannot be fetched or read
+    /// leaves only the fallback, and so does reaching discoveryTimeout,
+    /// however many routers are left.
+    ///
+    /// - Parameter onVerification: Called with each router that is tried and
+    ///   the outcome of its attempt, the chosen router included. An attempt
+    ///   that the deadline or the caller cancelled is not reported.
+    func discoverRouter(onVerification: VerificationCallback? = nil) async throws -> DiscoveredRouter? {
+        let discovered = await firstVerifiedRouter(pin: TinfoilConstants.routerPin, onVerification: onVerification)
         try Task.checkCancellation()
         return discovered
     }
@@ -97,7 +110,7 @@ struct Attestor: Sendable {
     /// The first discovered router that verifies before discoveryTimeout, or
     /// nil. Reaching the deadline cancels the fetch in flight, and discovery
     /// returns then even if a caller's fetcher ignores the cancellation.
-    private func firstVerifiedRouter(pin: Pin) async -> DiscoveredRouter? {
+    private func firstVerifiedRouter(pin: Pin, onVerification: VerificationCallback?) async -> DiscoveredRouter? {
         let deadline = now().advanced(by: .seconds(discoveryTimeout))
         let discovered = try? await untilDeadline(discoveryTimeout) { () -> DiscoveredRouter? in
             for router in await discoveredRouters() {
@@ -106,8 +119,16 @@ struct Attestor: Sendable {
                 guard !Task.isCancelled, now() < deadline else {
                     return nil
                 }
-                if let verified = try? await attestOnce(host: router, relay: nil, pin: pin) {
-                    return DiscoveredRouter(host: router, verification: verified)
+                // This runs in a task of its own, outside any actor, so the
+                // callback can call the client.
+                do {
+                    let verified = try await attestOnce(host: router, relay: nil, pin: pin)
+                    onVerification?(router, .success(verified))
+                    return DiscoveredRouter(host: router, report: verified)
+                } catch let error as TinfoilError {
+                    onVerification?(router, .failure(error))
+                } catch {
+                    // A cancelled attempt has no outcome to report.
                 }
             }
             return nil
@@ -115,11 +136,11 @@ struct Attestor: Sendable {
         return discovered ?? nil
     }
 
-    private func attestOnce(host: String, relay: String?, pin: Pin) async throws -> Verification {
+    private func attestOnce(host: String, relay: String?, pin: Pin) async throws -> VerificationReport {
         try accepted(await verifyOnce(host: host, relay: relay, pin: pin), host: host)
     }
 
-    private func verifyOnce(host: String, relay: String?, pin: Pin) async throws -> Verification {
+    private func verifyOnce(host: String, relay: String?, pin: Pin) async throws -> VerificationReport {
         let nonce = verifier.newNonce()
         let document: Data
         if let fetchAttestation {
@@ -132,16 +153,18 @@ struct Attestor: Sendable {
 
     /// A rejection is a decision about this evidence, so callers check it
     /// outside any retry; during discovery the next router is tried instead.
-    private func accepted(_ verification: Verification, host: String) throws -> Verification {
+    /// The check sees only the verified facts, never a report.
+    private func accepted(_ report: VerificationReport, host: String) throws -> VerificationReport {
+        let facts = try report.passedFacts()
         guard let verificationCheck else {
-            return verification
+            return report
         }
         do {
-            try verificationCheck(verification)
+            try verificationCheck(facts)
         } catch {
             throw TinfoilError.attestation("verification check rejected \(host): \(error)")
         }
-        return verification
+        return report
     }
 
     /// The router list, in the order that discovery tries it. The list is

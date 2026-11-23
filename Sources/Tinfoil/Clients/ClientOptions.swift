@@ -9,28 +9,31 @@ public struct EnclaveOptions: Sendable {
     /// The verification policy that applies on top of the client's trust;
     /// the default policy keeps every default
     public var policy: Policy
-    /// Called each time the enclave's evidence verifies, before its keys are
-    /// used; throw to reject it.
+    /// Called with the verified facts each time the enclave's evidence
+    /// verifies, before its keys are used; throw to reject it.
     public var verificationCheck: VerificationCheck?
     /// How the enclave's attestation documents are obtained, for every
     /// verification; nil fetches them directly from the enclave. Use
     /// `.relay(_:)` to fetch them through a relay.
     public var fetchAttestation: AttestationFetcher?
-    /// Called with each verification's final result. It only observes.
-    public var onVerificationResult: VerificationResultCallback?
+    /// Called once for every attempt to verify the enclave, with the
+    /// enclave's host and the attempt's report or error: the verification
+    /// when the client is created, each retry, and every verification again.
+    /// It only observes. `VerificationCallback` describes when it runs.
+    public var onVerification: VerificationCallback?
 
     public init(
         transport: Transport = .tls,
         policy: Policy = Policy(),
         verificationCheck: VerificationCheck? = nil,
         fetchAttestation: AttestationFetcher? = nil,
-        onVerificationResult: VerificationResultCallback? = nil
+        onVerification: VerificationCallback? = nil
     ) {
         self.transport = transport
         self.policy = policy
         self.verificationCheck = verificationCheck
         self.fetchAttestation = fetchAttestation
-        self.onVerificationResult = onVerificationResult
+        self.onVerification = onVerification
     }
 }
 
@@ -51,8 +54,9 @@ public struct RouterOptions: Sendable {
     /// request's JSON body overrides it. Use an opaque random value, not a raw
     /// user ID or API key.
     public var userCacheSecret: String?
-    /// Called each time a router's evidence verifies, before its keys are
-    /// used; throw to reject it, and discovery moves to the next router.
+    /// Called with the verified facts each time a router's evidence
+    /// verifies, before its keys are used; throw to reject it, and discovery
+    /// moves to the next router.
     public var verificationCheck: VerificationCheck?
     /// How routers' attestation documents are obtained: for each router that
     /// discovery tries, for the fallback router, and for every later
@@ -63,8 +67,12 @@ public struct RouterOptions: Sendable {
     /// from `https://atc.tinfoil.sh/routers`. Use `.relay(_:)` to fetch it
     /// through a relay. Discovery runs whichever list it gets.
     public var fetchRouterList: RouterListFetcher?
-    /// Called with each verification's final result. It only observes.
-    public var onVerificationResult: VerificationResultCallback?
+    /// Called once for every attempt to verify a router, with the router's
+    /// host and the attempt's report or error: for each router that
+    /// discovery tries, including the fallback, and for the chosen router
+    /// whenever the client verifies it again. It only observes.
+    /// `VerificationCallback` describes when it runs.
+    public var onVerification: VerificationCallback?
 
     public init(
         transport: Transport = .tls,
@@ -73,7 +81,7 @@ public struct RouterOptions: Sendable {
         verificationCheck: VerificationCheck? = nil,
         fetchAttestation: AttestationFetcher? = nil,
         fetchRouterList: RouterListFetcher? = nil,
-        onVerificationResult: VerificationResultCallback? = nil
+        onVerification: VerificationCallback? = nil
     ) {
         self.transport = transport
         self.policy = policy
@@ -81,6 +89,6 @@ public struct RouterOptions: Sendable {
         self.verificationCheck = verificationCheck
         self.fetchAttestation = fetchAttestation
         self.fetchRouterList = fetchRouterList
-        self.onVerificationResult = onVerificationResult
+        self.onVerification = onVerification
     }
 }

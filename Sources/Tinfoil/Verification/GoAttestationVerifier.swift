@@ -71,7 +71,11 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
         return parsed
     }
 
-    func verify(document: Data, nonce: Data, pin: Pin) throws -> Verification {
+    /// The framework returns one result for a document that it accepted and
+    /// for one that it rejected, since an error that crosses the boundary
+    /// can't carry a report; it returns an error only when there is no
+    /// report, as for a usage error.
+    func verify(document: Data, nonce: Data, pin: Pin) throws -> VerificationReport {
         var error: NSError?
         let payload = verifier.verify(
             document,
@@ -83,7 +87,7 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
         if let error {
             throw Self.classify(error)
         }
-        return try Verification(payload: payload)
+        return try VerificationReport.decodeResult(payload, verificationPrefix: MobileVerificationErrorPrefix)
     }
 
     private static func classify(_ error: Error) -> TinfoilError {

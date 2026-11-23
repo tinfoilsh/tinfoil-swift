@@ -39,6 +39,14 @@ public enum TinfoilError: Error, Equatable {
         /// The layer of the verifier that rejected the attestation document,
         /// when it did
         public let layer: VerificationLayer?
+        /// The cause of the error when the verifier rejected the attestation
+        /// document: the verifier's error, with the verification report that
+        /// shows the step that failed and the facts that the steps before it
+        /// established. It is nil for every other attestation error, such as
+        /// a rejection by a `verificationCheck` or a channel-binding failure.
+        /// It is diagnostic: choose what to do from the category, not from
+        /// the report.
+        public let verificationError: VerificationError?
     }
 
     /// The error's message, whatever its category
@@ -56,7 +64,7 @@ public enum TinfoilError: Error, Equatable {
 
 /// Shorthand the SDK throws with, each building its case's details: for
 /// example, `.attestation("rejected")` is
-/// `.attestationError(Attestation(message: "rejected", layer: nil))`.
+/// `.attestationError(Attestation(message: "rejected", layer: nil, verificationError: nil))`.
 extension TinfoilError {
     static func configuration(_ message: String) -> TinfoilError {
         .configurationError(Configuration(message: message))
@@ -66,14 +74,18 @@ extension TinfoilError {
         .networkError(Network(message: message, urlError: urlError, status: status))
     }
 
-    static func attestation(_ message: String, layer: VerificationLayer? = nil) -> TinfoilError {
-        .attestationError(Attestation(message: message, layer: layer))
+    static func attestation(
+        _ message: String,
+        layer: VerificationLayer? = nil,
+        verificationError: VerificationError? = nil
+    ) -> TinfoilError {
+        .attestationError(Attestation(message: message, layer: layer, verificationError: verificationError))
     }
 }
 
 /// The layer of the verifier that rejected an attestation document. More
 /// layers may be added, so match the ones you handle and tolerate any other.
-public struct VerificationLayer: RawRepresentable, Hashable, Sendable, CustomStringConvertible {
+public struct VerificationLayer: RawRepresentable, Hashable, Sendable, Codable, CustomStringConvertible {
     /// A document that can't be parsed or isn't bound to the request
     public static let envelope = VerificationLayer(rawValue: "envelope")
     /// Reference values that fail to authenticate

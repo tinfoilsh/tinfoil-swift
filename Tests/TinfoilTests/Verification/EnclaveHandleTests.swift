@@ -33,10 +33,10 @@ final class EnclaveHandleTests: XCTestCase {
 
         let verification = try await handle.reverify()
 
-        XCTAssertEqual(verification.configRepo, "org/repo")
+        XCTAssertEqual(verification.verifiedFacts?.configRepo, "org/repo")
         XCTAssertEqual(network.urls.map(\.host), ["enclave.example"])
-        let latest = await handle.current
-        XCTAssertEqual(latest, verification)
+        let latest = await handle.lastVerification
+        XCTAssertEqual(latest?.report, verification)
     }
 
     func testEnsureVerifiedVerifiesWhenThereIsNone() async throws {
@@ -100,8 +100,8 @@ final class EnclaveHandleTests: XCTestCase {
 
         let discarded = await handle.usable
         XCTAssertNil(discarded, "A verification that the enclave no longer backs is not used.")
-        let last = await handle.current
-        XCTAssertEqual(last, first, "current still returns the last successful verification.")
+        let last = await handle.lastVerification
+        XCTAssertNotNil(last?.error?.verificationError, "lastVerification returns the failure, not the earlier success \(first).")
         let attempts = network.urls.count
         do {
             _ = try await handle.ensureVerified()
@@ -112,8 +112,8 @@ final class EnclaveHandleTests: XCTestCase {
 
         verdict.value = "ok"
         let recovered = try await handle.ensureVerified()
-        let latest = await handle.current
-        XCTAssertEqual(latest, recovered, "Once the enclave verifies again, it is used again.")
+        let latest = await handle.lastVerification
+        XCTAssertEqual(latest?.report, recovered, "Once the enclave verifies again, it is used again.")
     }
 
     func testOtherFailuresKeepAFreshVerification() async throws {
@@ -134,8 +134,10 @@ final class EnclaveHandleTests: XCTestCase {
                 XCTFail("the \(failure) run must fail")
             } catch TinfoilError.networkError, TinfoilError.configurationError {
             }
-            let latest = await handle.current
-            XCTAssertEqual(latest, first, "A \(failure) failure keeps the verification.")
+            let usable = await handle.usable
+            XCTAssertEqual(usable, first, "A \(failure) failure keeps the verification.")
+            let latest = await handle.lastVerification
+            XCTAssertNotNil(latest?.error, "lastVerification returns the \(failure) failure.")
         }
 
         let attempts = network.urls.count
@@ -155,8 +157,8 @@ final class EnclaveHandleTests: XCTestCase {
                 verifier: FakeVerifier(),
                 fetch: { try network.fetch($0) },
                 retryDelay: 0,
-                verificationCheck: { verification in
-                    if verified.record(verification.codeDigest) > 1 {
+                verificationCheck: { facts in
+                    if verified.record(facts.codeDigest) > 1 {
                         throw Refusal()
                     }
                 }
@@ -172,12 +174,13 @@ final class EnclaveHandleTests: XCTestCase {
 
         let usable = await handle.usable
         XCTAssertNil(usable, "The verification check's rejection discards it as a failed attestation does.")
-        let latest = await handle.current
-        XCTAssertEqual(latest, first, "current still returns the last successful verification.")
+        let latest = await handle.lastVerification
+        XCTAssertEqual(latest?.error?.isRefusal, true, "lastVerification returns the rejection, not \(first).")
+        XCTAssertNil(latest?.error?.verificationError, "A rejection by the check has no report.")
     }
 
     func testEachRunReportsItsResult() async throws {
-        let results = Recorder<Result<Verification, TinfoilError>>()
+        let results = Recorder<Result<VerificationReport, TinfoilError>>()
         let network = FakeNetwork { url, previous in
             FakeNetwork.document(previous == 0 ? "ok" : "reject", for: url)
         }
@@ -186,16 +189,19 @@ final class EnclaveHandleTests: XCTestCase {
             pin: Pin(repo: "org/repo"),
             attestationRelay: nil,
             attestor: Attestor(verifier: FakeVerifier(), fetch: { try network.fetch($0) }, retryDelay: 0),
-            onVerificationResult: { results.record($0) }
+            onVerification: { _, result in results.record(result) }
         )
 
         let first = try await handle.reverify()
         _ = try? await handle.reverify()
 
-        guard results.values.count == 2,
+        // The second run's first attempt is retried, and each attempt is
+        // reported.
+        guard results.values.count == 3,
               case .success(let reported) = results.values[0],
-              case .failure(.attestationError) = results.values[1] else {
-            return XCTFail("expected a success then a failure, got \(results.values)")
+              case .failure(.attestationError) = results.values[1],
+              case .failure(.attestationError) = results.values[2] else {
+            return XCTFail("expected a success then two failures, got \(results.values)")
         }
         XCTAssertEqual(reported, first)
     }
@@ -206,7 +212,7 @@ final class EnclaveHandleTests: XCTestCase {
     private func gatedHandle(
         gate: AsyncGate,
         verifications: VerificationCounter,
-        onVerificationResult: VerificationResultCallback? = nil
+        onVerification: VerificationCallback? = nil
     ) -> EnclaveHandle {
         let network = approving()
         let fetch: Attestor.Fetch = { url in
@@ -220,7 +226,7 @@ final class EnclaveHandleTests: XCTestCase {
             pin: Pin(repo: "org/repo"),
             attestationRelay: nil,
             attestor: Attestor(verifier: FakeVerifier(), fetch: fetch, retryDelay: 0),
-            onVerificationResult: onVerificationResult
+            onVerification: onVerification
         )
     }
 
@@ -230,8 +236,8 @@ final class EnclaveHandleTests: XCTestCase {
             first: expectation(description: "verification started"),
             more: expectation(description: "a second verification")
         )
-        let results = Recorder<Result<Verification, TinfoilError>>()
-        let handle = gatedHandle(gate: gate, verifications: verifications, onVerificationResult: { results.record($0) })
+        let results = Recorder<Result<VerificationReport, TinfoilError>>()
+        let handle = gatedHandle(gate: gate, verifications: verifications, onVerification: { _, result in results.record(result) })
 
         let calls = (0..<3).map { _ in Task { try await handle.reverify() } }
         await fulfillment(of: [verifications.first], timeout: 1)
@@ -240,7 +246,7 @@ final class EnclaveHandleTests: XCTestCase {
         await fulfillment(of: [verifications.more], timeout: 0.2)
         await gate.open()
 
-        var returned: [Verification] = []
+        var returned: [VerificationReport] = []
         for call in calls {
             returned.append(try await call.value)
         }
@@ -276,8 +282,8 @@ final class EnclaveHandleTests: XCTestCase {
         }
 
         let verification = try await waiting.value
-        let latest = await handle.current
-        XCTAssertEqual(latest, verification)
+        let latest = await handle.lastVerification
+        XCTAssertEqual(latest?.report, verification)
         await fulfillment(of: [verifications.more], timeout: 0.1)
         XCTAssertEqual(verifications.count, 1)
     }

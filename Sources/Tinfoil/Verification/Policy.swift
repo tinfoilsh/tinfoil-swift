@@ -12,7 +12,7 @@ public struct Policy: Sendable, Equatable {
     /// Register values that the enclave measurement must also match. An empty
     /// register keeps its default check. Pins for one platform reject every
     /// enclave on the other.
-    public var pinnedRegisters: Verification.Measurement?
+    public var pinnedRegisters: VerifiedFacts.Measurement?
     /// The oldest freshness witness accepted, in seconds. Zero selects the
     /// seven-day default; a negative age is refused, and a positive age must
     /// be at least one nanosecond once rounded to whole nanoseconds.
@@ -22,7 +22,7 @@ public struct Policy: Sendable, Equatable {
     public var artifacts: ArtifactTrust
 
     public init(
-        pinnedRegisters: Verification.Measurement? = nil,
+        pinnedRegisters: VerifiedFacts.Measurement? = nil,
         freshnessMaxAge: TimeInterval = 0,
         artifacts: ArtifactTrust = .endorsed()
     ) {

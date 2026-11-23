@@ -91,7 +91,7 @@ final class AttestorTests: XCTestCase {
 
         await assertThrows(
             { try await self.attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, pin: Pin(repo: "org/repo")) },
-            { $0 as? TinfoilError == .attestation("rejected") }
+            { ($0 as? TinfoilError)?.verificationError?.layer == .policy }
         )
         XCTAssertEqual(network.urls.count, 2)
     }
