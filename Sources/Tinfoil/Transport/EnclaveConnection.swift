@@ -166,10 +166,10 @@ final class EnclaveConnection: Sendable {
         await handle.close()
     }
 
-    /// The last successful verification, without checking it, or nil once a
-    /// re-verification that fails attestation discards it, as `reverify()`
-    /// describes. It may have expired; use `ensureVerified()` for one that is
-    /// valid.
+    /// The last successful verification, without checking it. It may have
+    /// expired or been discarded by a re-verification that failed
+    /// attestation, and a failed verification doesn't change it; use
+    /// `ensureVerified()` for one that is valid now.
     var current: Verification? {
         get async { await handle.current }
     }
@@ -188,7 +188,8 @@ final class EnclaveConnection: Sendable {
     /// If the new verification fails with `TinfoilError.attestationError`,
     /// this throws it and the client discards its cached verification, even
     /// one that is still valid: no later request is sent under it, and the
-    /// next request verifies again, failing while the problem persists. Other
+    /// next request verifies again, failing while the problem persists.
+    /// `current` still returns the discarded verification. Other
     /// failures, such as a `TinfoilError.networkError` or a cancellation,
     /// keep a cached verification that is still valid. Requests already in
     /// flight finish.
@@ -363,13 +364,13 @@ struct EHBPChannel: Sendable {
         state = EHBPVerifiedState(
             endpoint: endpoint,
             refresh: { stale in
-                // The stale endpoint's own verification still being current
+                // The stale endpoint's own verification still being usable
                 // means that the enclave rejected its key or that it expired,
                 // so verify again. Otherwise the handle has a newer one, as
                 // one made by ensureVerified() before the first request, or
                 // discarded it, and ensureVerified() returns a valid one.
                 let verified: Verification
-                if let source = stale.verification, await handle.current == source {
+                if let source = stale.verification, await handle.usable == source {
                     verified = try await handle.reverify()
                 } else {
                     verified = try await handle.ensureVerified()
@@ -377,13 +378,13 @@ struct EHBPChannel: Sendable {
                 return try EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: verified)
             },
             // A key stops sealing new requests once its verification is no
-            // longer the handle's current one, as when a failed
+            // longer the handle's usable one, as when a failed
             // re-verification discards it.
             endorses: { endpoint in
                 guard let source = endpoint.verification else {
                     return true
                 }
-                return await handle.current == source
+                return await handle.usable == source
             }
         )
         session = EHBPURLSession(baseURL: origin, verifiedState: state, userCacheSecret: userCacheSecret)

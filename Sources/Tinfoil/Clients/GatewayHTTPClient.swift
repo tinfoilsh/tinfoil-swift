@@ -133,9 +133,9 @@ public final class GatewayHTTPClient: Sendable {
     }
 
     /// The last successful verification of each replica used so far, without
-    /// checking them. They may have expired. A replica isn't listed while a
-    /// re-verification that failed attestation has discarded its current
-    /// verification; its next request verifies it again.
+    /// checking them. They may have expired or been discarded by a
+    /// re-verification that failed attestation; a discarded replica's next
+    /// request verifies it again.
     public var current: [ReplicaVerification] {
         get async { await router.current }
     }

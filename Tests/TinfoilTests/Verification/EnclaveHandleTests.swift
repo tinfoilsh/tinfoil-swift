@@ -89,7 +89,7 @@ final class EnclaveHandleTests: XCTestCase {
         let verdict = Verdict("ok")
         let network = FakeNetwork { url, _ in FakeNetwork.document(verdict.value, for: url) }
         let handle = handle(enclave: "enclave.example", network: network)
-        _ = try await handle.reverify()
+        let first = try await handle.reverify()
 
         verdict.value = "reject"
         do {
@@ -98,8 +98,10 @@ final class EnclaveHandleTests: XCTestCase {
         } catch TinfoilError.attestationError {
         }
 
-        let discarded = await handle.current
-        XCTAssertNil(discarded, "A verification that the enclave no longer backs is not kept.")
+        let discarded = await handle.usable
+        XCTAssertNil(discarded, "A verification that the enclave no longer backs is not used.")
+        let last = await handle.current
+        XCTAssertEqual(last, first, "current still returns the last successful verification.")
         let attempts = network.urls.count
         do {
             _ = try await handle.ensureVerified()
@@ -160,7 +162,7 @@ final class EnclaveHandleTests: XCTestCase {
                 }
             )
         )
-        _ = try await handle.reverify()
+        let first = try await handle.reverify()
 
         do {
             _ = try await handle.reverify()
@@ -168,8 +170,10 @@ final class EnclaveHandleTests: XCTestCase {
         } catch let error as TinfoilError where error.isRefusal {
         }
 
+        let usable = await handle.usable
+        XCTAssertNil(usable, "The verification check's rejection discards it as a failed attestation does.")
         let latest = await handle.current
-        XCTAssertNil(latest, "The verification check's rejection discards it as a failed attestation does.")
+        XCTAssertEqual(latest, first, "current still returns the last successful verification.")
     }
 
     func testEachRunReportsItsResult() async throws {

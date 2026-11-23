@@ -398,6 +398,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
             XCTFail("a rejected attestation must fail the re-verification")
         } catch TinfoilError.attestationError {
         }
+        let last = await client.current
+        XCTAssertEqual(last, first, "current still returns the last successful verification.")
         let fetched = network.urls.count
         do {
             _ = try await client.data(from: URL(string: "/health")!)
@@ -444,7 +446,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
             if previous == 0 { throw self.rejection }
         }
         let client = try client(network: network, log: log)
-        _ = try await client.ensureVerified()
+        let first = try await client.ensureVerified()
 
         // The enclave presents another key, and its new evidence fails.
         verdict.value = "reject"
@@ -453,8 +455,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
             XCTFail("a key that no verification endorses must not be used")
         } catch TinfoilError.attestationError {
         }
-        let discarded = await client.current
-        XCTAssertNil(discarded)
+        let last = await client.current
+        XCTAssertEqual(last, first, "current still returns the last successful verification.")
         do {
             _ = try await client.data(from: URL(string: "/health")!)
             XCTFail("a request must not go out under the discarded verification")
