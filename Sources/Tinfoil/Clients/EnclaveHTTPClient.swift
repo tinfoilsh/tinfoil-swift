@@ -119,7 +119,8 @@ public final class EnclaveHTTPClient: Sendable {
                 pin: pin,
                 attestationRelay: nil,
                 attestor: attestor,
-                onVerification: onVerification
+                onVerification: onVerification,
+                requiresHPKEKey: transportMode == .ehbp
             ),
             transportMode: transportMode,
             baseURL: baseURL,

@@ -278,6 +278,27 @@ final class VerificationReportTests: XCTestCase {
         XCTAssertEqual(Set(attempts.values.map(\.host)), ["a.example", "b.example"], "Each attempt names its replica.")
     }
 
+    func testAnEHBPAttemptWithoutAnHPKEKeyFails() async throws {
+        let attempts = Recorder<Attempt>()
+        let handle = EnclaveHandle(
+            enclave: "enclave.example",
+            pin: Pin(repo: "org/repo"),
+            attestationRelay: nil,
+            attestor: Attestor(verifier: FakeVerifier(), fetch: { try self.serving("tls-only").fetch($0) }, retryDelay: 0),
+            onVerification: { attempts.record(($0, $1)) },
+            requiresHPKEKey: true
+        )
+
+        _ = try? await handle.ensureVerified()
+
+        let last = await handle.lastVerification
+        XCTAssertNil(last?.report, "A document that EHBP can't seal to is not a successful attempt.")
+        XCTAssertTrue(last?.error?.message.contains("HPKE") ?? false, String(describing: last))
+        XCTAssertEqual(attempts.values.last?.result.error, last?.error)
+        let usable = await handle.usable
+        XCTAssertNil(usable)
+    }
+
     func testTheVerificationCheckSeesOnlyVerifiedFacts() async throws {
         let checked = Recorder<VerifiedFacts>()
         let connection = try connection(serving("reject", "reject", "ok"), verificationCheck: { checked.record($0) })

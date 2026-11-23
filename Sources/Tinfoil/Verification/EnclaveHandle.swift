@@ -18,6 +18,9 @@ actor EnclaveHandle {
     private let attestationRelay: String?
     private let attestor: Attestor
     private let onVerification: VerificationCallback?
+    /// Whether a verification must endorse an HPKE key, as one for EHBP
+    /// must; an attempt whose document endorses none fails
+    private let requiresHPKEKey: Bool
     private let now: @Sendable () -> Date
     /// The verification in progress, shared by every caller that asks while
     /// it runs
@@ -44,6 +47,8 @@ actor EnclaveHandle {
     /// - Parameter initial: A verification of `enclave` already made, as by
     ///   router discovery, which reported it, kept as the usable one so that
     ///   it isn't repeated.
+    /// - Parameter requiresHPKEKey: Whether an attempt fails when the
+    ///   verified facts endorse no usable HPKE key, as for EHBP.
     init(
         enclave: String,
         pin: Pin,
@@ -51,6 +56,7 @@ actor EnclaveHandle {
         attestor: Attestor,
         initial: VerificationReport? = nil,
         onVerification: VerificationCallback? = nil,
+        requiresHPKEKey: Bool = false,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.enclave = enclave
@@ -60,6 +66,7 @@ actor EnclaveHandle {
         self.usable = initial
         self.lastVerification = initial.map { .success($0) }
         self.onVerification = onVerification
+        self.requiresHPKEKey = requiresHPKEKey
         self.now = now
     }
 
@@ -95,12 +102,18 @@ actor EnclaveHandle {
             task = Task {
                 let outcome: Result<VerificationReport, Error>
                 do {
-                    outcome = .success(try await self.attestor.attest(
+                    let report = try await self.attestor.attest(
                         host: self.enclave,
                         relay: self.attestationRelay,
                         pin: self.pin,
                         retried: { await self.noteRetried($0) }
-                    ))
+                    )
+                    // A document without the key that the transport binds to
+                    // can't carry requests, so the attempt fails.
+                    if self.requiresHPKEKey {
+                        _ = try EHBPVerifiedEndpoint.publicKey(hex: report.passedFacts().hpkePublicKey)
+                    }
+                    outcome = .success(report)
                 } catch {
                     outcome = .failure(error)
                 }

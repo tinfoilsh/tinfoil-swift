@@ -69,7 +69,8 @@ public final class GatewayHTTPClient: Sendable {
                         pin: pin,
                         attestationRelay: relay,
                         attestor: attestor,
-                        onVerification: onVerification
+                        onVerification: onVerification,
+                        requiresHPKEKey: true
                     ),
                     transportMode: .ehbp,
                     baseURL: base,

@@ -66,7 +66,8 @@ final class EnclaveConnection: Sendable {
                 attestationRelay: nil,
                 attestor: attestor,
                 initial: discovered?.report,
-                onVerification: onVerification
+                onVerification: onVerification,
+                requiresHPKEKey: transportMode == .ehbp
             ),
             initial: discovered?.report,
             transportMode: transportMode,
