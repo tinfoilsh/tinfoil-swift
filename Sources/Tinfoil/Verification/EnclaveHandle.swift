@@ -98,8 +98,9 @@ actor EnclaveHandle {
                     // Evidence that fails verification means the enclave may
                     // no longer be the one verified, so its keys aren't used
                     // again. A verification that became current since the run
-                    // started is newer than this evidence, so it is kept.
-                    if case .attestationError = error, self.generation == replacing {
+                    // started is newer than this evidence, so it is kept, and
+                    // a run that the client's close ended changes nothing.
+                    if case .attestationError = error, self.generation == replacing, !self.closed {
                         self.current = nil
                     }
                     // A run that the client's close ended isn't a failed

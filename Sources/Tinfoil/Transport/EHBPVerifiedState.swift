@@ -110,6 +110,11 @@ internal actor EHBPVerifiedState {
         let (cached, cachedGeneration) = (endpoint, generation)
         if now() < cached.expiresAt, await endorses?(cached) ?? true {
             try checkOpen()
+            // Another request may have installed a newer endpoint while the
+            // check was suspended; seal to that one instead.
+            guard generation == cachedGeneration else {
+                return try await current()
+            }
             return (cached, cachedGeneration)
         }
         _ = try await refresh(afterRejectedGeneration: cachedGeneration)
