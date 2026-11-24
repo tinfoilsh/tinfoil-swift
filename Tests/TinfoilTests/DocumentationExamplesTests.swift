@@ -28,7 +28,7 @@ final class DocumentationExamplesTests: XCTestCase {
         _ = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(policy: policy))
 
         let reported = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(
-            onVerification: { host, result in
+            onVerificationAttempt: { host, result in
                 // Called once for every attempt, outside the client's actors.
                 if case .failure(.attestationError(let failure)) = result, let rejected = failure.verificationError {
                     print(host, rejected.report.steps.map { "\($0.layer): \($0.status)" })
@@ -36,7 +36,7 @@ final class DocumentationExamplesTests: XCTestCase {
             }
         ))
         let report = try await reported.ensureVerified()
-        let last = await reported.lastVerification  // the most recent attempt, success or failure
+        let last = await reported.lastVerificationAttempt  // the most recent attempt, success or failure
         _ = (report, last)
         let json = try JSONEncoder().encode(report)
         _ = json

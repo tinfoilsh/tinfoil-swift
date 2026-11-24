@@ -8,16 +8,16 @@ import Foundation
 /// Each `reverify()` is one run. A run fetches the enclave's attestation
 /// document and has the TinfoilGo verifier check it, retrying a failed
 /// attempt once. Every attempt, retried or final, becomes
-/// `lastVerification` as soon as its outcome is decided, and is reported to
-/// `onVerification` once the run is done, outside the actor. A run that
-/// fails attestation withdraws the verification that it was replacing from
-/// `usable`, so that no later request uses it.
+/// `lastVerificationAttempt` as soon as its outcome is decided, and is
+/// reported to `onVerificationAttempt` once the run is done, outside the
+/// actor. A run that fails attestation withdraws the verification that it was
+/// replacing from `usable`, so that no later request uses it.
 actor EnclaveHandle {
     nonisolated let enclave: String
     nonisolated let pin: Pin
     private let attestationRelay: String?
     private let attestor: Attestor
-    private let onVerification: VerificationCallback?
+    private let onVerificationAttempt: VerificationCallback?
     /// Whether a verification must endorse an HPKE key, as one for EHBP
     /// must; an attempt whose document endorses none fails
     private let requiresHPKEKey: Bool
@@ -35,11 +35,21 @@ actor EnclaveHandle {
     /// failure replaces an earlier success. A report may have expired or
     /// been discarded since; `ensureVerified()` returns one that is valid
     /// now.
-    private(set) var lastVerification: Result<VerificationReport, TinfoilError>?
+    private(set) var lastVerificationAttempt: Result<VerificationReport, TinfoilError>?
     /// The verification that requests may use: the last that passed, or nil
     /// before the first and after a run that fails attestation discards it.
     /// It may have expired; `ensureVerified()` returns one that has not.
     private(set) var usable: VerificationReport?
+
+    /// The report of the verification that requests are bound to now: the
+    /// usable verification while it is before its `freshnessExpiresAt`, and
+    /// otherwise nil. It verifies nothing.
+    var currentVerification: VerificationReport? {
+        guard let usable, now() < usable.freshnessExpiresAt else {
+            return nil
+        }
+        return usable
+    }
     /// Counts the verifications that have become `usable`, so that a failed
     /// run discards only the one that it was replacing
     private var generation: UInt64 = 0
@@ -55,7 +65,7 @@ actor EnclaveHandle {
         attestationRelay: String?,
         attestor: Attestor,
         initial: VerificationReport? = nil,
-        onVerification: VerificationCallback? = nil,
+        onVerificationAttempt: VerificationCallback? = nil,
         requiresHPKEKey: Bool = false,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -64,8 +74,8 @@ actor EnclaveHandle {
         self.attestationRelay = attestationRelay
         self.attestor = attestor
         self.usable = initial
-        self.lastVerification = initial.map { .success($0) }
-        self.onVerification = onVerification
+        self.lastVerificationAttempt = initial.map { .success($0) }
+        self.onVerificationAttempt = onVerificationAttempt
         self.requiresHPKEKey = requiresHPKEKey
         self.now = now
     }
@@ -121,7 +131,7 @@ actor EnclaveHandle {
                 // Reported once per run, however many callers share it, and
                 // only after the run is forgotten, so that a callback that
                 // verifies again starts a run of its own.
-                await Self.report(attempts, host: self.enclave, to: self.onVerification)
+                await Self.report(attempts, host: self.enclave, to: self.onVerificationAttempt)
                 return try result.get()
             }
             inFlight = task
@@ -134,7 +144,7 @@ actor EnclaveHandle {
         guard !closed else {
             return
         }
-        lastVerification = .failure(error)
+        lastVerificationAttempt = .failure(error)
         retried.append(error)
     }
 
@@ -161,7 +171,7 @@ actor EnclaveHandle {
         case .success(let report):
             usable = report
             generation &+= 1
-            lastVerification = .success(report)
+            lastVerificationAttempt = .success(report)
             attempts.append(.success(report))
         case .failure(let error as TinfoilError):
             // Evidence that fails verification means the enclave may no
@@ -171,7 +181,7 @@ actor EnclaveHandle {
             if case .attestationError = error, generation == replacing {
                 usable = nil
             }
-            lastVerification = .failure(error)
+            lastVerificationAttempt = .failure(error)
             attempts.append(.failure(error))
         case .failure:
             // A cancellation has no outcome to report.

@@ -98,11 +98,11 @@ struct Attestor: Sendable {
     /// leaves only the fallback, and so does reaching discoveryTimeout,
     /// however many routers are left.
     ///
-    /// - Parameter onVerification: Called with each router that is tried and
-    ///   the outcome of its attempt, the chosen router included. An attempt
-    ///   that the deadline or the caller cancelled is not reported.
-    func discoverRouter(onVerification: VerificationCallback? = nil) async throws -> DiscoveredRouter? {
-        let discovered = await firstVerifiedRouter(pin: TinfoilConstants.routerPin, onVerification: onVerification)
+    /// - Parameter onVerificationAttempt: Called with each router that is
+    ///   tried and the outcome of its attempt, the chosen router included. An
+    ///   attempt that the deadline or the caller cancelled is not reported.
+    func discoverRouter(onVerificationAttempt: VerificationCallback? = nil) async throws -> DiscoveredRouter? {
+        let discovered = await firstVerifiedRouter(pin: TinfoilConstants.routerPin, onVerificationAttempt: onVerificationAttempt)
         try Task.checkCancellation()
         return discovered
     }
@@ -110,7 +110,7 @@ struct Attestor: Sendable {
     /// The first discovered router that verifies before discoveryTimeout, or
     /// nil. Reaching the deadline cancels the fetch in flight, and discovery
     /// returns then even if a caller's fetcher ignores the cancellation.
-    private func firstVerifiedRouter(pin: Pin, onVerification: VerificationCallback?) async -> DiscoveredRouter? {
+    private func firstVerifiedRouter(pin: Pin, onVerificationAttempt: VerificationCallback?) async -> DiscoveredRouter? {
         let deadline = now().advanced(by: .seconds(discoveryTimeout))
         let discovered = try? await untilDeadline(discoveryTimeout) { () -> DiscoveredRouter? in
             for router in await discoveredRouters() {
@@ -128,13 +128,13 @@ struct Attestor: Sendable {
                     guard !Task.isCancelled else {
                         return nil
                     }
-                    onVerification?(router, .success(verified))
+                    onVerificationAttempt?(router, .success(verified))
                     return DiscoveredRouter(host: router, report: verified)
                 } catch let error as TinfoilError {
                     guard !Task.isCancelled else {
                         return nil
                     }
-                    onVerification?(router, .failure(error))
+                    onVerificationAttempt?(router, .failure(error))
                 } catch {
                     // A cancelled attempt has no outcome to report.
                 }

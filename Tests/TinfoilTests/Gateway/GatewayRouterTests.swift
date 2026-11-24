@@ -48,6 +48,14 @@ final class GatewayRouterTests: XCTestCase {
             return verification
         }
 
+        func reverify() async throws -> VerificationReport {
+            try await usableVerification()
+        }
+
+        var currentVerification: VerificationReport? {
+            get async { lock.withLock { _last?.report } }
+        }
+
         func open(_ request: URLRequest) async throws -> RecoverableResponse {
             lock.withLock { _sent.append(request) }
             record(replica.host)
@@ -59,7 +67,7 @@ final class GatewayRouterTests: XCTestCase {
             )
         }
 
-        var lastVerification: Result<VerificationReport, TinfoilError>? {
+        var lastVerificationAttempt: Result<VerificationReport, TinfoilError>? {
             get async { lock.withLock { _last } }
         }
 
@@ -171,7 +179,7 @@ final class GatewayRouterTests: XCTestCase {
         XCTAssertEqual(sent.value(forHTTPHeaderField: GatewayRequest.modelHeader), "m")
         XCTAssertEqual(sent.url?.absoluteString, "https://gw.example/v1/chat/completions")
 
-        let current = await router.lastVerification
+        let current = await router.replicaVerifications
         XCTAssertEqual(current.map(\.host), ["d.example"])
         XCTAssertEqual(current.first?.models, ["m"])
         XCTAssertEqual(current.first?.reference, "tinfoilsh/model-repo")
@@ -185,13 +193,13 @@ final class GatewayRouterTests: XCTestCase {
         XCTAssertEqual(harness.sealedTo, ["c.example"], "Nothing is sealed to a replica that failed verification.")
 
         // Each replica tried keeps its own last attempt, failed ones included.
-        let attempts = await router.lastVerification
+        let attempts = await router.replicaVerifications
         XCTAssertEqual(attempts.map(\.host), ["b.example", "c.example", "d.example"])
         for entry in attempts {
             if entry.host == "c.example" {
-                XCTAssertNotNil(entry.lastVerification.report, "c.example verified.")
+                XCTAssertNotNil(entry.lastAttempt.report, "c.example verified.")
             } else {
-                XCTAssertEqual(entry.lastVerification.error?.message, "\(entry.host) failed verification")
+                XCTAssertEqual(entry.lastAttempt.error?.message, "\(entry.host) failed verification")
             }
         }
     }
@@ -311,7 +319,7 @@ final class GatewayRouterTests: XCTestCase {
         let router = try harness.router(pins: ["m": ("tinfoilsh/model-repo@v2", nil)])
         _ = try await router.open(chat(prefix: "m"))
         XCTAssertEqual(harness.replicas.first?.replica, GatewayRouter.Replica(host: "d.example", reference: "tinfoilsh/model-repo@v2", pinnedModel: "m"))
-        let current = await router.lastVerification
+        let current = await router.replicaVerifications
         XCTAssertEqual(current.first?.pinnedModel, "m")
     }
 

@@ -3,9 +3,9 @@ import Foundation
 @testable import Tinfoil
 
 /// How the clients report each verification attempt through
-/// `lastVerification` and `onVerification`: the conformance cases of the
-/// verification lifecycle, against the stand-ins from
-/// AttestationTestDoubles.swift.
+/// `currentVerification`, `lastVerificationAttempt` and
+/// `onVerificationAttempt`: the conformance cases of the verification
+/// lifecycle, against the stand-ins from AttestationTestDoubles.swift.
 final class VerificationReportTests: XCTestCase {
     private typealias Attempt = (host: String, result: Result<VerificationReport, TinfoilError>)
 
@@ -16,7 +16,7 @@ final class VerificationReportTests: XCTestCase {
     private func connection(
         _ network: FakeNetwork,
         verificationCheck: VerificationCheck? = nil,
-        onVerification: VerificationCallback? = nil,
+        onVerificationAttempt: VerificationCallback? = nil,
         send: @escaping PinnedTLS.Send = { request, _ in
             (Data("ok".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         }
@@ -32,7 +32,7 @@ final class VerificationReportTests: XCTestCase {
                     retryDelay: 0,
                     verificationCheck: verificationCheck
                 ),
-                onVerification: onVerification
+                onVerificationAttempt: onVerificationAttempt
             ),
             transportMode: .tls,
             baseURL: nil,
@@ -58,13 +58,15 @@ final class VerificationReportTests: XCTestCase {
 
     func testASuccessfulVerificationIsTheLastAndIsReportedOnce() async throws {
         let attempts = Recorder<Attempt>()
-        let client = try await EnclaveHTTPClient(verifying: connection(serving("ok"), onVerification: { attempts.record(($0, $1)) }))
+        let client = try await EnclaveHTTPClient(verifying: connection(serving("ok"), onVerificationAttempt: { attempts.record(($0, $1)) }))
 
         let report = try await client.ensureVerified()
         XCTAssertNotNil(report.verifiedFacts)
         XCTAssertNil(report.partialFacts)
-        let last = await client.lastVerification
+        let last = await client.lastVerificationAttempt
         XCTAssertEqual(last?.report, report)
+        let current = await client.currentVerification
+        XCTAssertEqual(current, report)
         XCTAssertEqual(attempts.values.count, 1, "The verification at creation is reported once.")
         XCTAssertEqual(attempts.values.first?.host, "enclave.example")
         XCTAssertEqual(attempts.values.first?.result.report, report)
@@ -72,7 +74,7 @@ final class VerificationReportTests: XCTestCase {
 
     func testARejectedDocumentCarriesTheVerifierErrorAndReport() async throws {
         let attempts = Recorder<Attempt>()
-        let connection = try connection(serving("reject"), onVerification: { attempts.record(($0, $1)) })
+        let connection = try connection(serving("reject"), onVerificationAttempt: { attempts.record(($0, $1)) })
 
         let thrown: TinfoilError
         do {
@@ -88,9 +90,11 @@ final class VerificationReportTests: XCTestCase {
         XCTAssertEqual(rejected.report.steps.first { $0.status == .failed }?.layer, rejected.layer)
         XCTAssertNil(rejected.report.verifiedFacts)
         XCTAssertNotNil(rejected.report.partialFacts)
-        let last = await connection.lastVerification
+        let last = await connection.lastVerificationAttempt
         XCTAssertNil(last?.report)
-        XCTAssertEqual(last?.error, thrown, "lastVerification returns the error that the client reported.")
+        XCTAssertEqual(last?.error, thrown, "lastVerificationAttempt returns the error that the client reported.")
+        let current = await connection.currentVerification
+        XCTAssertNil(current)
         XCTAssertEqual(attempts.values.count, 2, "The failed attempt and its retry are each reported.")
         XCTAssertTrue(attempts.values.allSatisfy { $0.host == "enclave.example" && $0.result.error?.verificationError != nil })
         XCTAssertEqual(attempts.values.last?.result.error, thrown)
@@ -98,7 +102,7 @@ final class VerificationReportTests: XCTestCase {
 
     func testAFailedFetchIsANetworkErrorWithoutAReport() async throws {
         let attempts = Recorder<Attempt>()
-        let connection = try connection(serving("offline"), onVerification: { attempts.record(($0, $1)) })
+        let connection = try connection(serving("offline"), onVerificationAttempt: { attempts.record(($0, $1)) })
 
         do {
             _ = try await connection.ensureUsable()
@@ -108,7 +112,7 @@ final class VerificationReportTests: XCTestCase {
                 return XCTFail("expected a network error, got \(error)")
             }
             XCTAssertNil(error.verificationError, "An attempt that failed before the verifier ran has no report.")
-            let last = await connection.lastVerification
+            let last = await connection.lastVerificationAttempt
             XCTAssertEqual(last?.error, error)
             XCTAssertEqual(attempts.values.last?.result.error, error)
         }
@@ -116,31 +120,33 @@ final class VerificationReportTests: XCTestCase {
 
     func testAFailedReverificationReplacesAnEarlierSuccess() async throws {
         let client = try await EnclaveHTTPClient(verifying: connection(serving("ok", "reject")))
-        let first = await client.lastVerification
+        let first = await client.lastVerificationAttempt
         XCTAssertNotNil(first?.report)
 
         _ = try? await client.reverify()
 
-        let last = await client.lastVerification
+        let last = await client.lastVerificationAttempt
         XCTAssertNil(last?.report, "The earlier success is not returned in place of the failure.")
         XCTAssertNotNil(last?.error?.verificationError)
     }
 
     func testEachAttemptOfARetriedVerificationIsReported() async throws {
         let attempts = Recorder<Attempt>()
-        let client = try await EnclaveHTTPClient(verifying: connection(serving("reject", "ok"), onVerification: { attempts.record(($0, $1)) }))
+        let client = try await EnclaveHTTPClient(verifying: connection(serving("reject", "ok"), onVerificationAttempt: { attempts.record(($0, $1)) }))
 
         XCTAssertEqual(attempts.values.count, 2)
         XCTAssertNotNil(attempts.values.first?.result.error?.verificationError, "The failed attempt is reported first.")
-        let last = await client.lastVerification
-        XCTAssertNotNil(last?.report, "lastVerification returns the retry.")
+        let last = await client.lastVerificationAttempt
+        XCTAssertNotNil(last?.report, "lastVerificationAttempt returns the retry.")
         XCTAssertEqual(attempts.values.last?.result.report, last?.report)
+        let current = await client.currentVerification
+        XCTAssertEqual(current, last?.report)
     }
 
     func testAKeyRotationReportsTheReverification() async throws {
         let attempts = Recorder<Attempt>()
         let sends = Recorder<String>()
-        let connection = try connection(serving("ok"), onVerification: { attempts.record(($0, $1)) }, send: { request, fingerprint in
+        let connection = try connection(serving("ok"), onVerificationAttempt: { attempts.record(($0, $1)) }, send: { request, fingerprint in
             if sends.record(fingerprint) == 1 {
                 throw self.rejection
             }
@@ -168,7 +174,7 @@ final class VerificationReportTests: XCTestCase {
                     await gate.wait()
                     return try network.fetch(url)
                 }, retryDelay: 0),
-                onVerification: { attempts.record(($0, $1)) }
+                onVerificationAttempt: { attempts.record(($0, $1)) }
             ),
             transportMode: .tls,
             baseURL: nil,
@@ -204,15 +210,17 @@ final class VerificationReportTests: XCTestCase {
             transportMode: .tls,
             baseURL: nil,
             userCacheSecret: "test-secret",
-            onVerification: { attempts.record(($0, $1)) }
+            onVerificationAttempt: { attempts.record(($0, $1)) }
         ))
 
         XCTAssertEqual(client.enclave, "router-b.example")
         XCTAssertEqual(attempts.values.map(\.host), ["router-a.example", "router-b.example"])
         XCTAssertNotNil(attempts.values.first?.result.error?.verificationError, "The skipped router is reported with its failure.")
-        let last = await client.lastVerification
-        XCTAssertNotNil(last?.report, "lastVerification describes the chosen router.")
+        let last = await client.lastVerificationAttempt
+        XCTAssertNotNil(last?.report, "lastVerificationAttempt describes the chosen router.")
         XCTAssertEqual(last?.report, attempts.values.last?.result.report)
+        let current = await client.currentVerification
+        XCTAssertEqual(current, last?.report, "currentVerification describes the chosen router.")
     }
 
     func testTheFallbackRouterIsReportedWithItsHost() async throws {
@@ -229,7 +237,7 @@ final class VerificationReportTests: XCTestCase {
             transportMode: .tls,
             baseURL: nil,
             userCacheSecret: "test-secret",
-            onVerification: { attempts.record(($0, $1)) }
+            onVerificationAttempt: { attempts.record(($0, $1)) }
         ))
 
         XCTAssertEqual(attempts.values.map(\.host), [TinfoilConstants.fallbackEnclave])
@@ -259,7 +267,7 @@ final class VerificationReportTests: XCTestCase {
                         pin: GatewayCatalog.pin(replica.reference),
                         attestationRelay: nil,
                         attestor: attestor,
-                        onVerification: { attempts.record(($0, $1)) }
+                        onVerificationAttempt: { attempts.record(($0, $1)) }
                     ),
                     transportMode: .ehbp,
                     baseURL: base,
@@ -271,10 +279,12 @@ final class VerificationReportTests: XCTestCase {
         _ = try? await router.ensureVerified(model: "m1")
         let verified = try await router.ensureVerified(model: "m2")
 
-        let entries = await router.lastVerification
+        let entries = await router.replicaVerifications
         XCTAssertEqual(entries.map(\.host), ["a.example", "b.example"])
-        XCTAssertNotNil(entries.first?.lastVerification.error?.verificationError, "The failed replica keeps its failure and report.")
-        XCTAssertEqual(entries.last?.lastVerification.report, verified)
+        XCTAssertNotNil(entries.first?.lastAttempt.error?.verificationError, "The failed replica keeps its failure and report.")
+        XCTAssertNil(entries.first?.current, "The failed replica has no current verification.")
+        XCTAssertEqual(entries.last?.lastAttempt.report, verified)
+        XCTAssertEqual(entries.last?.current, verified)
         XCTAssertEqual(Set(attempts.values.map(\.host)), ["a.example", "b.example"], "Each attempt names its replica.")
     }
 
@@ -285,13 +295,13 @@ final class VerificationReportTests: XCTestCase {
             pin: Pin(repo: "org/repo"),
             attestationRelay: nil,
             attestor: Attestor(verifier: FakeVerifier(), fetch: { try self.serving("tls-only").fetch($0) }, retryDelay: 0),
-            onVerification: { attempts.record(($0, $1)) },
+            onVerificationAttempt: { attempts.record(($0, $1)) },
             requiresHPKEKey: true
         )
 
         _ = try? await handle.ensureVerified()
 
-        let last = await handle.lastVerification
+        let last = await handle.lastVerificationAttempt
         XCTAssertNil(last?.report, "A document that EHBP can't seal to is not a successful attempt.")
         XCTAssertTrue(last?.error?.message.contains("HPKE") ?? false, String(describing: last))
         XCTAssertEqual(attempts.values.last?.result.error, last?.error)
@@ -313,13 +323,13 @@ final class VerificationReportTests: XCTestCase {
     func testTheCallbackCanCallTheClient() async throws {
         let holder = Holder<EnclaveConnection>()
         let seen = Recorder<(reported: Result<VerificationReport, TinfoilError>, last: Result<VerificationReport, TinfoilError>?)>()
-        let connection = try connection(serving("ok", "reject"), onVerification: { _, result in
+        let connection = try connection(serving("ok", "reject"), onVerificationAttempt: { _, result in
             // Blocks this callback until the client answers: it would never
             // answer if the callback ran on the client's actor.
             let answered = DispatchSemaphore(value: 0)
             let last = Holder<Result<VerificationReport, TinfoilError>>()
             Task {
-                last.value = await holder.value?.lastVerification
+                last.value = await holder.value?.lastVerificationAttempt
                 answered.signal()
             }
             XCTAssertEqual(answered.wait(timeout: .now() + 5), .success, "The callback's call to the client deadlocked.")
@@ -359,7 +369,7 @@ final class VerificationReportTests: XCTestCase {
             try JSONSerialization.data(withJSONObject: JSONSerialization.jsonObject(with: JSONEncoder().encode(report)), options: .sortedKeys)
         )
 
-        let last = await client.lastVerification
+        let last = await client.lastVerificationAttempt
         XCTAssertEqual(last?.report, report)
         let again = try await client.ensureVerified()
         XCTAssertEqual(again, report, "The client's state is unchanged.")

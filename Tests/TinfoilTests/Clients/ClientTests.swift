@@ -254,7 +254,7 @@ final class ClientTests: XCTestCase {
 
         let client = try await OpenAIClient(
             httpClient: RouterHTTPClient(
-                options: .init(userCacheSecret: Self.testUserCacheSecret, onVerification: { _, result in captured.value = result })
+                options: .init(userCacheSecret: Self.testUserCacheSecret, onVerificationAttempt: { _, result in captured.value = result })
             ),
             apiKey: try getAPIKey()
         )
@@ -284,7 +284,7 @@ final class ClientTests: XCTestCase {
                 httpClient: EnclaveHTTPClient(
                     enclave: "127.0.0.1:9",
                     trust: .repo(TinfoilConstants.defaultGithubRepo),
-                    options: .init(transport: .ehbp(), onVerification: { _, result in captured.value = result })
+                    options: .init(transport: .ehbp(), onVerificationAttempt: { _, result in captured.value = result })
                 ),
                 apiKey: "test-key"
             )
@@ -309,7 +309,7 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(verification.tlsPublicKeyFingerprint.count, 64)
         XCTAssertNotNil(verification.codeMeasurement)
         XCTAssertNotNil(verification.enclaveMeasurement)
-        let latest = await client.lastVerification
+        let latest = await client.lastVerificationAttempt
         XCTAssertEqual(latest?.report, report)
     }
 

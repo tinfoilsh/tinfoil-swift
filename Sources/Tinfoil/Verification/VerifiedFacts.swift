@@ -5,8 +5,9 @@ import Foundation
 /// retry, each router that discovery tries, and every later verification,
 /// whether because the attestation expired, the enclave rejected its key, or
 /// the caller asked. It receives the host of the enclave that the attempt
-/// verified and the outcome that `lastVerification` returns for it. It only
-/// observes; reject an enclave with `VerificationCheck`.
+/// verified and the outcome that `lastVerificationAttempt` returns for it,
+/// failed attempts included. It only observes; reject an enclave with
+/// `VerificationCheck`.
 ///
 /// The client calls it outside its actors, so that the callback can call the
 /// client, but requests that wait for the verification wait for it too, so

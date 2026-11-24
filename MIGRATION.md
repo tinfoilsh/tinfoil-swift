@@ -38,7 +38,7 @@ let client = try await OpenAIClient(apiKey: key)
 | `baseURL` (a proxy) and `attestationBundleURL` | the HTTP client's `options: .init(transport: .ehbp(proxyURL:), fetchAttestation: .relay(_:))`; see below |
 | `parsingOptions`, `customHeaders`, `tinfoilEvents` | the same, on `OpenAIClient` |
 | `userCacheSecret` | the `userCacheSecret` option of `RouterHTTPClient` and `GatewayHTTPClient`; see "Prompt cache" |
-| `onVerification: (VerificationDocument?) -> Void` | `onVerification: (String, Result<VerificationReport, TinfoilError>) -> Void`, which observes each attempt, and `verificationCheck: (VerifiedFacts) throws -> Void`, which can reject an enclave |
+| `onVerification: (VerificationDocument?) -> Void` | `onVerificationAttempt: (String, Result<VerificationReport, TinfoilError>) -> Void`, which observes each attempt, and `verificationCheck: (VerifiedFacts) throws -> Void`, which can reject an enclave |
 
 ### Proxies and attestation
 
@@ -84,7 +84,7 @@ initializer returns, so there is no separate `verify()`.
 | `SecureClient(githubRepo:enclaveURL:)` | `try await EnclaveHTTPClient(enclave:trust:)` (the enclave is a host, not a URL) |
 | `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `try await EnclaveHTTPClient(enclave:trust:options: .init(fetchAttestation: .relay(_:)))` |
 | `verify()` | `ensureVerified()` (valid now, verifying only if needed) or `reverify()` |
-| `verificationDocument`, `verifiedGroundTruth` | `lastVerification`, a `Result<VerificationReport, TinfoilError>?` |
+| `verificationDocument`, `verifiedGroundTruth` | `currentVerification`, the `VerificationReport?` of the verification that requests use now, or `lastVerificationAttempt`, the most recent attempt as a `Result<VerificationReport, TinfoilError>?` |
 | `verifiedEnclaveURL` | `enclave` and `baseURL` |
 | `get(url:headers:)`, `post(url:headers:body:)` → `SecureResponse` | `data(from:)`, `data(for:)` → `(Data, HTTPURLResponse)` |
 
@@ -135,8 +135,8 @@ task is cancelled, and the OpenAI SDK's own errors for an API failure.
 
 `EHBPURLSession`, `EHBPURLSessionFactory`, `TinfoilConstants`, `SecureResponse`
 and the 0.8.x `VerificationCallback` are no longer public; the
-`VerificationCallback` of this release is the type of the `onVerification`
-option. Send requests of your own with
+`VerificationCallback` of this release is the type of the
+`onVerificationAttempt` option. Send requests of your own with
 an HTTP client's `data(for:)`, or with `recoverableBytes(for:)` for a streamed
 EHBP response and its session recovery token.
 
@@ -215,9 +215,10 @@ other version.
 | `Verification` | `VerifiedFacts`, the `verifiedFacts` of a `VerificationReport`; `metadata` moved to the report |
 | `Verification.Measurement` | `VerifiedFacts.Measurement` |
 | `ensureVerified()`, `reverify()`, the gateway's `ensureVerified(model:)` returning a `Verification` | the same calls, returning a `VerificationReport` |
-| `current`, the last successful verification, kept after a later failure | `lastVerification`: the most recent attempt, as a `Result<VerificationReport, TinfoilError>?`, so a failure replaces an earlier success |
-| `GatewayHTTPClient.current`, with each replica's last successful `verification` | `GatewayHTTPClient.lastVerification`, with each replica tried, failed ones included, and its `lastVerification` attempt |
-| `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, called once per verification run | `onVerification: (String, Result<VerificationReport, TinfoilError>) -> Void`, called once for every attempt, retries and each router that discovery tries included, with the host that the attempt verified |
+| `current`, the last successful verification, kept after a later failure | `currentVerification`: the report of the verification that requests are bound to now, nil once it has expired or an attestation failure discarded it; and `lastVerificationAttempt`: the most recent attempt, as a `Result<VerificationReport, TinfoilError>?`, so a failure replaces an earlier success |
+| `GatewayHTTPClient.current`, with each replica's last successful `verification` | `GatewayHTTPClient.replicas`, with each replica tried, failed ones included, its `current` verification and its `lastAttempt` |
+| — | `GatewayHTTPClient.reverify(model:)`, which verifies again the replica that `ensureVerified(model:)` would return |
+| `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, called once per verification run | `onVerificationAttempt: (String, Result<VerificationReport, TinfoilError>) -> Void`, called once for every attempt, retries and each router that discovery tries included, with the host that the attempt verified |
 | `VerificationResultCallback` | `VerificationCallback` |
 | `VerificationCheck` receiving a `Verification` | `VerificationCheck` receiving the `VerifiedFacts` |
 | `Verification.Measurement`, `Verification.CryptoMaterial` conforming to `Decodable` | `VerifiedFacts.Measurement`, `VerifiedFacts.CryptoMaterial` conforming to `Encodable` only |

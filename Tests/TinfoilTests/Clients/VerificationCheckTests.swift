@@ -30,7 +30,7 @@ final class VerificationCheckTests: XCTestCase {
     /// An EHBP client for enclave.example that sends to the local server
     private func client(
         verificationCheck: @escaping VerificationCheck = { _ in },
-        onVerification: VerificationCallback? = nil,
+        onVerificationAttempt: VerificationCallback? = nil,
         path: String = ""
     ) async throws -> EnclaveHTTPClient {
         let network = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
@@ -45,7 +45,7 @@ final class VerificationCheckTests: XCTestCase {
                     retryDelay: 0,
                     verificationCheck: verificationCheck
                 ),
-                onVerification: onVerification
+                onVerificationAttempt: onVerificationAttempt
             ),
             transportMode: .ehbp,
             baseURL: URL(string: server.baseURL + path)!,
@@ -153,7 +153,7 @@ final class VerificationCheckTests: XCTestCase {
             _ = try await OpenAIClient(
                 httpClient: try client(
                     verificationCheck: { _ in throw Refusal() },
-                    onVerification: { _, result in reported.value = result }
+                    onVerificationAttempt: { _, result in reported.value = result }
                 ),
                 apiKey: "test-key"
             )
@@ -175,7 +175,7 @@ final class VerificationCheckTests: XCTestCase {
         _ = try await OpenAIClient(
             httpClient: client(
                 verificationCheck: { _ in events.record("enclave verified") },
-                onVerification: { _, _ in events.record("result") }
+                onVerificationAttempt: { _, _ in events.record("result") }
             ),
             apiKey: "test-key"
         )

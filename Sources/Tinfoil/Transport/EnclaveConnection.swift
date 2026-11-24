@@ -50,7 +50,7 @@ final class EnclaveConnection: Sendable {
         transportMode: TransportMode,
         baseURL: URL?,
         userCacheSecret: String?,
-        onVerification: VerificationCallback?
+        onVerificationAttempt: VerificationCallback?
     ) async throws -> EnclaveConnection {
         // Checked before discovery, so a misconfiguration costs no network I/O.
         if let baseURL {
@@ -58,7 +58,7 @@ final class EnclaveConnection: Sendable {
         }
         // Discovery reports each router that it tries, the chosen one
         // included.
-        let discovered = try await attestor.discoverRouter(onVerification: onVerification)
+        let discovered = try await attestor.discoverRouter(onVerificationAttempt: onVerificationAttempt)
         return try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: discovered?.host ?? TinfoilConstants.fallbackEnclave,
@@ -66,7 +66,7 @@ final class EnclaveConnection: Sendable {
                 attestationRelay: nil,
                 attestor: attestor,
                 initial: discovered?.report,
-                onVerification: onVerification,
+                onVerificationAttempt: onVerificationAttempt,
                 requiresHPKEKey: transportMode == .ehbp
             ),
             initial: discovered?.report,
@@ -166,11 +166,17 @@ final class EnclaveConnection: Sendable {
         await handle.close()
     }
 
+    /// The report of the verification that requests are bound to now,
+    /// without I/O. See `EnclaveHTTPClient.currentVerification`.
+    var currentVerification: VerificationReport? {
+        get async { await handle.currentVerification }
+    }
+
     /// The outcome of the most recent attempt to verify the enclave, without
     /// I/O, or nil before the first. See
-    /// `EnclaveHTTPClient.lastVerification`.
-    var lastVerification: Result<VerificationReport, TinfoilError>? {
-        get async { await handle.lastVerification }
+    /// `EnclaveHTTPClient.lastVerificationAttempt`.
+    var lastVerificationAttempt: Result<VerificationReport, TinfoilError>? {
+        get async { await handle.lastVerificationAttempt }
     }
 
     /// Returns the report of a verification that is valid now, verifying

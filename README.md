@@ -91,7 +91,7 @@ Every verification returns a `VerificationReport`: one step for each layer of th
 
 ```swift
 let client = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(
-    onVerification: { host, result in
+    onVerificationAttempt: { host, result in
         // Called once for every attempt, outside the client's actors.
         if case .failure(.attestationError(let failure)) = result, let rejected = failure.verificationError {
             print(host, rejected.report.steps.map { "\($0.layer): \($0.status)" })
@@ -99,8 +99,25 @@ let client = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .
     }
 ))
 let report = try await client.ensureVerified()
-let last = await client.lastVerification  // the most recent attempt, success or failure
+let current = await client.currentVerification  // the verification that requests use now, or nil
+let last = await client.lastVerificationAttempt  // the most recent attempt, success or failure
 ```
+
+The clients split the verification in use from the attempts that produced it:
+
+| Call | I/O | Returns |
+|---|---|---|
+| `ensureVerified()` | Only if needed | The report of a verification that is valid now, verifying first if the cached one has expired or been discarded |
+| `reverify()` | Always | The report of a new verification, or its error |
+| `currentVerification` | None | The report of the verification that requests are bound to now: fresh and not discarded. Nil before the first success, after a `TinfoilError.attestationError` discarded it, and once it has expired |
+| `lastVerificationAttempt` | None | The most recent attempt: its report if it passed, its error if it failed |
+| `onVerificationAttempt` option | Push | Each attempt as it is decided, failed attempts included |
+
+The two getters differ after a `reverify()` that fails for a reason other than attestation, such as a `TinfoilError.networkError`: `lastVerificationAttempt` returns the error, while `currentVerification` still returns the cached report, under which requests still go through until it expires. A `reverify()` that fails with `TinfoilError.attestationError` discards the cached verification, so `currentVerification` is nil and the next request verifies again.
+
+- Health and readiness checks call `ensureVerified()`. It returns at once while the cached verification is valid, and verifies when it isn't. Clients don't verify again in the background, so `currentVerification` is nil between the expiry of a verification and the next request; don't treat that as a failure.
+- Status displays show `currentVerification` for the verification in use, and `lastVerificationAttempt` for the outcome of the latest attempt, which may be a failure.
+- Live status and logging use `onVerificationAttempt`, which sees every attempt, including retries that `lastVerificationAttempt` has already moved past.
 
 `JSONEncoder` writes a report, its `verifiedFacts` or its `partialFacts` and their parts (but not a `CPUEvidence` alone, whose measurement `MeasuredFacts` writes as `cpu_measurement`), in the JSON form that every Tinfoil SDK writes, so that a verification user interface or a service that relays results reads the reports of every SDK in the same way:
 
@@ -116,6 +133,8 @@ Member names are snake_case, hex is lowercase and times are RFC 3339 in UTC. A f
 ### Gateway (experimental)
 
 `GatewayHTTPClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. It serves only the models that are pinned to repositories with the `modelPins` option, so at least one pin is required, and a request for any other model fails with a configuration error without contacting a replica. The gateway API may change in a later release.
+
+The gateway client verifies each model's replicas separately. Its `ensureVerified(model:)` and `reverify(model:)` take the model, and `reverify(model:)` verifies again the replica that `ensureVerified(model:)` would return for it. When that replica fails with `TinfoilError.attestationError`, its verification is discarded and `reverify(model:)` moves on to the next replica, as `ensureVerified(model:)` then does; when no replica passes or keeps a valid verification, it throws the last failure. `replicas` returns an entry for each replica that the client has tried to verify, with its host, the models requested through it, its trusted reference and pinned model, `current`, which follows `currentVerification`'s rule for that replica, and `lastAttempt`, the replica's last attempt as a `Result`.
 
 ## Documentation
 

@@ -31,7 +31,7 @@ public final class GatewayHTTPClient: Sendable {
     ///   when it is not set
     public convenience init(options: GatewayOptions) async throws {
         let verificationCheck = options.verificationCheck
-        let onVerification = options.onVerification
+        let onVerificationAttempt = options.onVerificationAttempt
         let base = Self.directory(options.url ?? Self.defaultURL)
         try EnclaveConnection.validateBaseURL(base, transportMode: .ehbp)
         guard base.scheme?.lowercased() == "https" else {
@@ -68,7 +68,7 @@ public final class GatewayHTTPClient: Sendable {
                         pin: pin,
                         attestationRelay: relay,
                         attestor: attestor,
-                        onVerification: onVerification,
+                        onVerificationAttempt: onVerificationAttempt,
                         requiresHPKEKey: true
                     ),
                     transportMode: .ehbp,
@@ -132,15 +132,38 @@ public final class GatewayHTTPClient: Sendable {
         try await router.ensureVerified(model: model)
     }
 
+    /// Verifies again the replica that `ensureVerified(model:)` would
+    /// return, even if its cached verification is still valid, and returns
+    /// the new report. It tries the model's replicas in the order that
+    /// `ensureVerified(model:)` tries them, verifying each again, and stops
+    /// at the first that passes, or that fails but keeps a valid
+    /// verification, which requests for model still use; it then throws that
+    /// failure. Each failure follows the rule that
+    /// `EnclaveHTTPClient.reverify()` describes, for its replica: a
+    /// `TinfoilError.attestationError` discards the replica's cached
+    /// verification, so that `reverify(model:)` moves on to the next replica,
+    /// as `ensureVerified(model:)` then does, and a failure of any other
+    /// category keeps it while it is still valid. When no replica passes or
+    /// keeps a valid verification, it throws the last failure. A model that
+    /// isn't pinned fails with `TinfoilError.configurationError`, and no
+    /// replica is verified.
+    @discardableResult
+    public func reverify(model: String) async throws -> VerificationReport {
+        try await router.reverify(model: model)
+    }
+
     /// One entry for each replica that the client has tried to verify and
-    /// whose attempt has finished, failed replicas included, without I/O,
-    /// each holding that replica's last attempt: its report if the attempt passed, and otherwise its
-    /// error, as `EnclaveHTTPClient.lastVerification` describes. A replica's
-    /// earlier success is not kept once a later attempt for it fails.
-    /// Reports may have expired or been discarded since; a discarded
-    /// replica's next request verifies it again.
-    public var lastVerification: [ReplicaVerification] {
-        get async { await router.lastVerification }
+    /// whose attempt has finished, failed replicas included, sorted by host,
+    /// without I/O. An entry's `current` follows the rule of
+    /// `EnclaveHTTPClient.currentVerification` for that replica: the report
+    /// of the replica's verification while it is fresh and has not been
+    /// discarded, and otherwise nil. Its `lastAttempt` holds the replica's
+    /// most recent attempt, as `EnclaveHTTPClient.lastVerificationAttempt`
+    /// describes: a failed attempt replaces an earlier success there, though
+    /// `current` keeps that success while the failure leaves it valid. A
+    /// discarded replica's next request verifies it again.
+    public var replicas: [ReplicaVerification] {
+        get async { await router.replicaVerifications }
     }
 
     /// Closes the client: later requests and verifications fail with
@@ -224,10 +247,10 @@ public struct GatewayOptions: Sendable {
     /// throw to reject it, and the next
     /// replica of the model is tried.
     public var verificationCheck: VerificationCheck?
-    /// Called once for every attempt to verify a replica, with the replica's
-    /// host and the attempt's report or error. It only observes.
-    /// `VerificationCallback` describes when it runs.
-    public var onVerification: VerificationCallback?
+    /// Called once for every attempt to verify a replica, failed attempts
+    /// included, with the replica's host and the attempt's report or error.
+    /// It only observes. `VerificationCallback` describes when it runs.
+    public var onVerificationAttempt: VerificationCallback?
     /// Read on every request in place of the gateway's catalog. Nil fetches
     /// the gateway's catalog when the client is created and refreshes it every
     /// 10 seconds while the client is used; a failed refresh keeps the last
@@ -240,7 +263,7 @@ public struct GatewayOptions: Sendable {
         policy: Policy = Policy(),
         userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
-        onVerification: VerificationCallback? = nil,
+        onVerificationAttempt: VerificationCallback? = nil,
         catalog: (@Sendable () -> Catalog)? = nil
     ) {
         self.url = url
@@ -248,7 +271,7 @@ public struct GatewayOptions: Sendable {
         self.policy = policy
         self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck
-        self.onVerification = onVerification
+        self.onVerificationAttempt = onVerificationAttempt
         self.catalog = catalog
     }
 }

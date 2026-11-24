@@ -85,7 +85,7 @@ final class GatewayClientTests: XCTestCase {
         }
         let models = try await client.models()
         XCTAssertEqual(models, ["pinned"])
-        let attempts = await client.lastVerification
+        let attempts = await client.replicas
         XCTAssertTrue(attempts.isEmpty, "No replica is contacted for an unpinned model.")
         await client.close()
     }
@@ -137,7 +137,7 @@ final class GatewayClientTests: XCTestCase {
         let client = try await GatewayHTTPClient(options: .init(
             modelPins: catalog.mapValues { ModelPin(repo: $0.repo) },
             userCacheSecret: "test-secret",
-            onVerification: { results.record(($0, $1)) },
+            onVerificationAttempt: { results.record(($0, $1)) },
             catalog: { catalog }
         ))
         let models = try await client.models()
@@ -148,9 +148,9 @@ final class GatewayClientTests: XCTestCase {
 
         XCTAssertTrue(verification.configRepo.hasPrefix("tinfoilsh/"), verification.configRepo)
         XCTAssertFalse(verification.hpkePublicKey.isEmpty, "Gateway replicas seal with EHBP.")
-        let current = await client.lastVerification
+        let current = await client.replicas
         XCTAssertEqual(current.count, 1)
-        XCTAssertEqual(current.first?.lastVerification.report, report)
+        XCTAssertEqual(current.first?.lastAttempt.report, report)
         XCTAssertEqual(current.first?.pinnedModel, model)
         guard let (host, reported) = results.values.last, case .success = reported else {
             return XCTFail("the verification should be reported, got \(results.values)")
@@ -180,7 +180,7 @@ final class GatewayClientTests: XCTestCase {
             model: model
         ))
         XCTAssertFalse((result.choices.first?.message.content ?? "").isEmpty)
-        let current = await gateway.lastVerification
+        let current = await gateway.replicas
         XCTAssertEqual(current.first?.models, [model])
     }
 }
