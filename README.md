@@ -87,7 +87,7 @@ It also takes the runtime and platform artifacts' trust (`artifacts: .endorsed(f
 
 ### Verification reports
 
-Every verification returns a `VerificationReport`: one step for each layer of the verifier (`envelope`, `provenance`, `quote` and `policy`), each `passed`, `failed`, `skipped` or `notRun`, and the `verifiedFacts` that the document proved. When the verifier rejects a document, the client throws `TinfoilError.attestationError`, whose `verificationError` names the `layer` that rejected it and carries the report, with the step that failed and the `partialFacts` that the steps before it established, such as the expected and measured registers side by side. Its key fingerprints are only the document's claim. A report authorizes nothing; the client binds its channel only to verified facts.
+Every verification returns a `VerificationReport`: one step for each layer of the verifier (`envelope`, `provenance`, `quote` and `policy`), each `passed`, `failed`, `skipped` or `notRun`, and the `verifiedFacts` that the document proved. When the verifier rejects a document, the client throws `TinfoilError.attestationError`, whose `verificationError` names the `layer` that rejected it and carries the report, with the step that failed and the `partialFacts` that the steps before it established, such as the expected and measured registers side by side. Its key fingerprints are only the document's claim. A report authorizes nothing; the client binds its channel only to verified facts. A rejection that the verifier reports without a report has no `verificationError`; its message leads with the layer, as in `quote: <detail>`.
 
 ```swift
 let client = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(

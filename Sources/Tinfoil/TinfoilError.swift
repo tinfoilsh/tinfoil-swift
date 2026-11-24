@@ -37,14 +37,15 @@ public enum TinfoilError: Error, Equatable {
     public struct Attestation: Equatable, Sendable {
         public let message: String
         /// The cause of the error when the verifier rejected the attestation
-        /// document: the verifier's error, with the layer that rejected the
-        /// document and the verification report that shows the step that
+        /// document with a report: the verifier's error, with the layer that
+        /// rejected the document and the report that shows the step that
         /// failed and the facts that the steps before it established. It is
-        /// nil for every other attestation error, such as expired verified
-        /// facts, a rejection by a `verificationCheck` or a channel-binding
-        /// failure, whose message alone says what failed.
-        /// It is diagnostic: choose what to do from the category, not from
-        /// the report.
+        /// nil for every other attestation error, whose message alone says
+        /// what failed: expired verified facts, a rejection by a
+        /// `verificationCheck`, a channel-binding failure, or a rejection
+        /// that the verifier reported without a report, whose message leads
+        /// with the layer, as in "quote: <detail>". It is diagnostic: choose
+        /// what to do from the category, not from the report.
         public let verificationError: VerificationError?
     }
 
