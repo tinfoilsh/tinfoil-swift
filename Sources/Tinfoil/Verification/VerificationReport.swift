@@ -11,10 +11,14 @@ import Foundation
 ///   `verifiedFacts` are not.
 ///
 /// A report authorizes nothing: the only output that authorizes an action is
-/// the endorsed key material in `verifiedFacts`. A report decoded from JSON is
-/// a record of a verification, not a verification; only a client's own
-/// verifier produces the reports that it binds channels to.
-public struct VerificationReport: Sendable, Equatable, Codable {
+/// the endorsed key material in `verifiedFacts`, and only in a report that the
+/// client's own verifier produced.
+///
+/// `JSONEncoder` writes a report, and each of the facts that it holds, in the
+/// JSON form that every Tinfoil SDK writes, for display and transport. The
+/// types are `Encodable` but not `Decodable`: nothing reads the form back into
+/// a report, since anyone can write verified facts in JSON.
+public struct VerificationReport: Sendable, Equatable {
     /// One step for each layer of the verifier, in layer order: today
     /// `envelope`, `provenance`, `quote` and `policy`. Every step is always
     /// present. More layers may be added.
@@ -29,7 +33,7 @@ public struct VerificationReport: Sendable, Equatable, Codable {
 }
 
 /// One step of a verification: the checks of one layer of the verifier
-public struct Step: Sendable, Equatable, Codable {
+public struct Step: Sendable, Equatable {
     /// The layer that the step covers
     public let layer: VerificationLayer
     /// Whether the step's checks ran and passed. Only the verifier sets a
@@ -43,7 +47,7 @@ public struct Step: Sendable, Equatable, Codable {
 
 /// The outcome of one step of a verification. More statuses may be added, so
 /// match the ones that you handle and tolerate any other.
-public struct StepStatus: RawRepresentable, Hashable, Sendable, Codable, CustomStringConvertible {
+public struct StepStatus: RawRepresentable, Hashable, Sendable, CustomStringConvertible {
     /// Every check of the step's layer ran and passed
     public static let passed = StepStatus(rawValue: "passed")
     /// A check of the step's layer failed. At most one step fails: the one
@@ -68,7 +72,7 @@ public struct StepStatus: RawRepresentable, Hashable, Sendable, Codable, CustomS
 
 /// What a verification established before a step failed, in two groups.
 /// Each fact is set only once the step that establishes it passed.
-public struct PartialFacts: Sendable, Equatable, Codable {
+public struct PartialFacts: Sendable, Equatable {
     /// Facts from authenticated reference values, set once the `provenance`
     /// step passed
     public let expected: ExpectedFacts?
@@ -80,7 +84,7 @@ public struct PartialFacts: Sendable, Equatable, Codable {
 /// The reference values that the verifier authenticated before a step
 /// failed. A measurement mismatch shows `measurement` against
 /// `MeasuredFacts.cpu`, register by register.
-public struct ExpectedFacts: Sendable, Equatable, Codable {
+public struct ExpectedFacts: Sendable, Equatable {
     /// The selected config repository
     public let configRepo: String
     /// The authenticated release artifact
@@ -91,9 +95,9 @@ public struct ExpectedFacts: Sendable, Equatable, Codable {
     public let platform: ArtifactVerification?
     /// The registers that the release fixes, in the layout of the platform
     /// that the document's CPU evidence declares, with an empty register for
-    /// one that the release leaves to the platform. The values are
-    /// authenticated; the platform that selects their layout is
-    /// authenticated only once the `quote` step passed.
+    /// one that the release leaves to the platform, which the JSON form
+    /// omits. The values are authenticated; the platform that selects their
+    /// layout is authenticated only once the `quote` step passed.
     public let codeMeasurement: VerifiedFacts.Measurement?
     /// The full set of registers that the quote had to attest: the code
     /// measurement, the caller's register pins, and the registers that the
@@ -107,7 +111,7 @@ public struct ExpectedFacts: Sendable, Equatable, Codable {
 /// keys are bound to the enclave only when the `policy` step passes, which
 /// it did not in a failed report. Present them as unverified, and never bind
 /// a channel to them.
-public struct MeasuredFacts: Sendable, Equatable, Codable {
+public struct MeasuredFacts: Sendable, Equatable {
     /// The hardware evidence, set only once the `quote` step passed
     public let cpu: CPUEvidence?
     /// The lowercase hex SHA-256 of the TLS key's DER `SubjectPublicKeyInfo`
@@ -118,8 +122,9 @@ public struct MeasuredFacts: Sendable, Equatable, Codable {
     public let hpkePublicKeyFingerprint: String
 }
 
-/// The authenticated hardware evidence of a CPU
-public struct CPUEvidence: Sendable, Equatable, Codable {
+/// The authenticated hardware evidence of a CPU. The JSON form writes its
+/// measurement as `MeasuredFacts`' `cpu_measurement`.
+public struct CPUEvidence: Sendable, Equatable {
     /// Every register that the hardware measured, in its platform's native
     /// layout
     public let measurement: VerifiedFacts.Measurement
@@ -144,8 +149,9 @@ public struct VerificationError: Error, Sendable, Equatable, CustomStringConvert
 }
 
 extension VerificationReport {
-    /// The verification result schema that this SDK decodes
-    static let supportedSchemaVersion = 2
+    /// The verification result schema that this SDK decodes: the bridge's
+    /// wrapper, which versions itself apart from the report's JSON form
+    static let supportedSchemaVersion = 3
 
     /// When the verified facts expire, or the distant past for a report
     /// without them, which then never admits a request
@@ -168,22 +174,32 @@ extension VerificationReport {
     /// `TinfoilError.attestationError` for a rejected one, with the
     /// verifier's error and report as its `verificationError`.
     ///
+    /// The result is the only JSON that the SDK decodes into a report: it
+    /// comes from the verifier in this process. Nothing public decodes a
+    /// report's JSON form.
+    ///
     /// - Parameter verificationPrefix: The prefix that leads the message of
     ///   a verifier's rejection
     static func decodeResult(_ payload: String, verificationPrefix: String) throws -> VerificationReport {
         let data = Data(payload.utf8)
         let decoder = JSONDecoder()
-        // Read the version alone first, so that a payload in another schema is
-        // reported as such rather than as a missing field.
-        let version: SchemaVersion
+        // Read the versions alone first, so that a payload in another schema
+        // is reported as such rather than as a missing field.
+        let version: SchemaVersions
         do {
-            version = try decoder.decode(SchemaVersion.self, from: data)
+            version = try decoder.decode(SchemaVersions.self, from: data)
         } catch {
             throw TinfoilError.attestation("unreadable verification result: \(error.localizedDescription)")
         }
         guard version.schemaVersion == supportedSchemaVersion else {
             throw TinfoilError.attestation(
                 "unsupported verification schema version \(version.schemaVersion); this SDK reads version \(supportedSchemaVersion)"
+            )
+        }
+        guard let reportVersion = version.report?.schemaVersion, reportVersion == jsonSchemaVersion else {
+            let found = version.report?.schemaVersion.map(String.init) ?? "none"
+            throw TinfoilError.attestation(
+                "unsupported verification report schema version \(found); this SDK reads version \(jsonSchemaVersion)"
             )
         }
         let decoded: ResultPayload
@@ -206,6 +222,9 @@ extension VerificationReport {
         guard report.verifiedFacts == nil else {
             throw TinfoilError.attestation("verification result has an error but carries verified facts")
         }
+        guard report.partialFacts != nil else {
+            throw TinfoilError.attestation("verification result has an error but no partial facts")
+        }
         let layer = VerificationLayer(rawValue: rejection.layer)
         let message = rejection.message.hasPrefix(verificationPrefix)
             ? String(rejection.message.dropFirst(verificationPrefix.count))
@@ -217,17 +236,30 @@ extension VerificationReport {
         )
     }
 
-    private struct SchemaVersion: Decodable {
+    /// The wrapper's version, and the report's version within it
+    private struct SchemaVersions: Decodable {
         let schemaVersion: Int
+        let report: ReportVersion?
+
+        struct ReportVersion: Decodable {
+            let schemaVersion: Int?
+
+            private enum CodingKeys: String, CodingKey {
+                case schemaVersion = "schema_version"
+            }
+        }
 
         private enum CodingKeys: String, CodingKey {
+            case report
             case schemaVersion = "schema_version"
         }
     }
 
     // The payload as the TinfoilGo framework declares it, as resultJSON in
-    // its source's mobile/verification.go; a change there needs a matching
-    // change here.
+    // its source's mobile/verification.go: a wrapper around the report's JSON
+    // form, which this SDK's encoder writes back out
+    // (VerificationReportJSON.swift). A change there needs a matching change
+    // here.
 
     private struct ResultPayload: Decodable {
         let report: ReportPayload
@@ -258,6 +290,8 @@ extension VerificationReport {
                 },
                 verifiedFacts: try verifiedFacts?.facts(),
                 partialFacts: try partialFacts?.facts(),
+                // The framework names no verifier, since it can't know its own
+                // version; the SDK that did the verifying records itself.
                 metadata: VerificationMetadata(
                     verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion),
                     verifiedAt: try parseDate(metadata.verifiedAt, field: "metadata.verified_at")
@@ -285,7 +319,7 @@ extension VerificationReport {
         let measured: MeasuredFactsPayload?
 
         func facts() throws -> PartialFacts {
-            PartialFacts(expected: try expected?.facts(), measured: measured?.facts())
+            PartialFacts(expected: try expected?.facts(), measured: try measured?.facts())
         }
     }
 
@@ -294,8 +328,8 @@ extension VerificationReport {
         let artifact: ArtifactPayload
         let config: ConfigPayload?
         let platform: ArtifactPayload?
-        let codeMeasurement: VerifiedFacts.Measurement?
-        let measurement: VerifiedFacts.Measurement?
+        let codeMeasurement: MeasurementPayload?
+        let measurement: MeasurementPayload?
 
         private enum CodingKeys: String, CodingKey {
             case artifact, config, platform, measurement
@@ -309,14 +343,14 @@ extension VerificationReport {
                 artifact: try artifact.verification(of: "partial_facts.expected.artifact"),
                 config: try config?.verification(of: "partial_facts.expected.config"),
                 platform: try platform?.verification(of: "partial_facts.expected.platform"),
-                codeMeasurement: codeMeasurement,
-                measurement: measurement
+                codeMeasurement: try codeMeasurement?.measurement(of: "partial_facts.expected.code_measurement"),
+                measurement: try measurement?.measurement(of: "partial_facts.expected.measurement")
             )
         }
     }
 
     private struct MeasuredFactsPayload: Decodable {
-        let cpuMeasurement: VerifiedFacts.Measurement?
+        let cpuMeasurement: MeasurementPayload?
         let tlsPublicKeyFP: String?
         let hpkePublicKeyFP: String?
 
@@ -326,9 +360,11 @@ extension VerificationReport {
             case hpkePublicKeyFP = "hpke_public_key_fp"
         }
 
-        func facts() -> MeasuredFacts {
+        func facts() throws -> MeasuredFacts {
             MeasuredFacts(
-                cpu: cpuMeasurement.map { CPUEvidence(measurement: $0) },
+                cpu: try cpuMeasurement.map {
+                    CPUEvidence(measurement: try $0.measurement(of: "partial_facts.measured.cpu_measurement"))
+                },
                 tlsPublicKeyFingerprint: tlsPublicKeyFP ?? "",
                 hpkePublicKeyFingerprint: hpkePublicKeyFP ?? ""
             )
@@ -339,14 +375,12 @@ extension VerificationReport {
         let configRepo: String
         let codeDigest: String
         let codeTag: String?
-        let codeMeasurement: VerifiedFacts.Measurement?
-        let enclaveMeasurement: VerifiedFacts.Measurement?
+        let codeMeasurement: MeasurementPayload?
+        let enclaveMeasurement: MeasurementPayload?
         let config: ConfigPayload?
         let runtime: ArtifactPayload?
         let platform: ArtifactPayload?
-        let tlsPublicKeyFP: String
-        let hpkePublicKey: String?
-        let cryptoMaterial: [VerifiedFacts.CryptoMaterial]
+        let cryptoMaterial: [CryptoMaterialPayload]
         let freshnessExpiresAt: String
 
         private enum CodingKeys: String, CodingKey {
@@ -356,27 +390,67 @@ extension VerificationReport {
             case codeMeasurement = "code_measurement"
             case enclaveMeasurement = "enclave_measurement"
             case config, runtime, platform
-            case tlsPublicKeyFP = "tls_public_key_fp"
-            case hpkePublicKey = "hpke_public_key"
             case cryptoMaterial = "crypto_material"
             case freshnessExpiresAt = "freshness_expires_at"
         }
 
         func facts() throws -> VerifiedFacts {
-            VerifiedFacts(
+            let material = cryptoMaterial.map { VerifiedFacts.CryptoMaterial(id: $0.id, format: $0.format, data: $0.data) }
+            // The channel keys are crypto material items, found by id and
+            // format; a TLS-only enclave endorses no HPKE key.
+            func data(id: String, format: String) -> String {
+                material.first { $0.id == id && $0.format == format }?.data ?? ""
+            }
+            return VerifiedFacts(
                 configRepo: configRepo,
                 codeDigest: codeDigest,
                 codeTag: codeTag ?? "",
-                codeMeasurement: codeMeasurement,
-                enclaveMeasurement: enclaveMeasurement,
+                codeMeasurement: try codeMeasurement?.measurement(of: "verified_facts.code_measurement"),
+                enclaveMeasurement: try enclaveMeasurement?.measurement(of: "verified_facts.enclave_measurement"),
                 config: try config?.verification(of: "verified_facts.config"),
                 runtime: try runtime?.verification(of: "verified_facts.runtime"),
                 platform: try platform?.verification(of: "verified_facts.platform"),
-                tlsPublicKeyFingerprint: tlsPublicKeyFP,
-                hpkePublicKey: hpkePublicKey ?? "",
-                cryptoMaterial: cryptoMaterial,
+                tlsPublicKeyFingerprint: data(id: "tls", format: VerifiedFacts.CryptoMaterial.tlsFormat),
+                hpkePublicKey: data(id: "hpke", format: VerifiedFacts.CryptoMaterial.hpkeFormat),
+                cryptoMaterial: material,
                 freshnessExpiresAt: try parseDate(freshnessExpiresAt, field: "verified_facts.freshness_expires_at")
             )
+        }
+    }
+
+    private struct CryptoMaterialPayload: Decodable {
+        let id: String
+        let format: String
+        let data: String
+    }
+
+    /// A measurement with its registers named by platform, without one that
+    /// is unconstrained
+    private struct MeasurementPayload: Decodable {
+        let platform: String
+        let registers: [String: String]
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: JSONKey.self)
+            platform = try container.decode(String.self, forKey: JSONKey("platform"))
+            // Only the platform's own registers are read, so that a member
+            // that a later version adds is ignored.
+            var registers: [String: String] = [:]
+            for name in VerifiedFacts.Measurement.Layout.of(platform: platform)?.registers ?? [] {
+                registers[name] = try container.decodeIfPresent(String.self, forKey: JSONKey(name))
+            }
+            self.registers = registers
+        }
+
+        /// The measurement, with an empty register for one that is absent.
+        /// A platform that the SDK doesn't know fails closed.
+        ///
+        /// - Parameter field: The measurement's member, which errors name
+        func measurement(of field: String) throws -> VerifiedFacts.Measurement {
+            guard let layout = VerifiedFacts.Measurement.Layout.of(platform: platform) else {
+                throw TinfoilError.attestation("verification result has an unknown \(field) platform: \(platform)")
+            }
+            return VerifiedFacts.Measurement(type: layout.type, registers: layout.registers.map { registers[$0] ?? "" })
         }
     }
 
@@ -441,20 +515,13 @@ extension VerificationReport {
         }
     }
 
-    /// The framework writes RFC 3339 and drops a zero fractional part, so
-    /// both forms arrive. Each style is tried in turn because older Foundation
-    /// releases parse only the form that a style names.
+    /// The framework writes RFC 3339 in UTC, with a fractional second only
+    /// when it has one.
     private static func parseDate(_ value: String, field: String) throws -> Date {
-        let styles = [
-            Date.ISO8601FormatStyle(includingFractionalSeconds: true),
-            Date.ISO8601FormatStyle(),
-        ]
-        for style in styles {
-            if let date = try? style.parse(value) {
-                return date
-            }
+        guard let date = ReportTime.parse(value) else {
+            throw TinfoilError.attestation("verification result has an invalid \(field): \(value)")
         }
-        throw TinfoilError.attestation("verification result has an invalid \(field): \(value)")
+        return date
     }
 }
 
