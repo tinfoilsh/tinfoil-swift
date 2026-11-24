@@ -203,7 +203,8 @@ rejected the document, the `PartialFacts` that the steps before the failure
 established. A rejection is still a `TinfoilError.attestationError`; its
 `verificationError` carries the verifier's error and the report. This
 release needs a TinfoilGo framework that returns the result in schema
-version 2, and refuses any other version.
+version 3, which carries the report in the JSON form below, and refuses any
+other version.
 
 | 0.9.0-rc.6 | now |
 |---|---|
@@ -215,6 +216,17 @@ version 2, and refuses any other version.
 | `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, called once per verification run | `onVerification: (String, Result<VerificationReport, TinfoilError>) -> Void`, called once for every attempt, retries and each router that discovery tries included, with the host that the attempt verified |
 | `VerificationResultCallback` | `VerificationCallback` |
 | `VerificationCheck` receiving a `Verification` | `VerificationCheck` receiving the `VerifiedFacts` |
+| `Verification.Measurement`, `Verification.CryptoMaterial` conforming to `Decodable` | `VerifiedFacts.Measurement`, `VerifiedFacts.CryptoMaterial` conforming to `Encodable` only |
+
+`JSONEncoder` writes a report, and each of the facts that it holds, in the
+JSON form that every Tinfoil SDK writes: snake_case members, lowercase hex,
+RFC 3339 times in UTC, `"schema_version": 1`, and no member that is null or
+`""`. A measurement names its registers by platform, as
+`{"platform": "tdx", "rtmr1": "…", "rtmr2": "…"}`, without one that is
+unconstrained, and the TLS and HPKE keys appear only in
+`verified_facts.crypto_material`. The types are `Encodable` but not
+`Decodable`: nothing reads the form back into a report, since anyone can write
+verified facts in JSON, so the form never authorizes a channel.
 
 ### Gateway model pins (after 0.9.0-rc.6)
 

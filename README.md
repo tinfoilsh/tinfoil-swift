@@ -102,6 +102,17 @@ let report = try await client.ensureVerified()
 let last = await client.lastVerification  // the most recent attempt, success or failure
 ```
 
+`JSONEncoder` writes a report, or any of the facts that it holds, in the JSON form that every Tinfoil SDK writes, so that a verification user interface or a service that relays results reads the reports of every SDK in the same way:
+
+```swift
+let json = try JSONEncoder().encode(report)
+// {"schema_version":1,"steps":[{"layer":"envelope","status":"passed"},...],
+//  "verified_facts":{"config_repo":"...","code_digest":"...","enclave_measurement":{"platform":"tdx","mrtd":"...",...},
+//  "crypto_material":[...],"freshness_expires_at":"2026-12-01T16:00:00Z"},"metadata":{...}}
+```
+
+Member names are snake_case, hex is lowercase and times are RFC 3339 in UTC. A fact that was not established is omitted, measurements name their registers by platform, and the TLS and HPKE keys appear only in `verified_facts.crypto_material`. The JSON is for display and transport, and it authorizes nothing: the types are `Encodable` but not `Decodable`, so no report or verified facts can be read back from JSON, and a channel is never bound to a key that was read from it.
+
 ### Gateway (experimental)
 
 `GatewayHTTPClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. It serves only the models that are pinned to repositories with the `modelPins` option, so at least one pin is required, and a request for any other model fails with a configuration error without contacting a replica. The gateway API may change in a later release.
@@ -116,6 +127,13 @@ let last = await client.lastVerification  // the most recent attempt, success or
 ## Development
 
 Run `swift test`. Live tests run only with `RUN_TINFOIL_INTEGRATION=true`, and those that send inference requests also need `TINFOIL_API_KEY`. `./update_verifier.sh [tag]` pins a new tinfoil-go release of the verifier framework.
+
+To test against a TinfoilGo framework that you built from tinfoil-go's source with `scripts/build-mobile.sh`, set `TINFOIL_GO_XCFRAMEWORK` to its path, relative to this package. With a framework that was built with `MOBILE_BUILD_TAGS=tinfoil_conformance`, also set `TINFOIL_CONFORMANCE=1` and `TINFOIL_CONFORMANCE_VECTORS` to the vectors directory of [tinfoil-conformance](https://github.com/tinfoilsh/tinfoil-conformance) to verify the vectors of the report's JSON golden cases through it:
+
+```sh
+TINFOIL_GO_XCFRAMEWORK=.build/TinfoilGo.xcframework TINFOIL_CONFORMANCE=1 \
+TINFOIL_CONFORMANCE_VECTORS=/path/to/tinfoil-conformance/vectors swift test
+```
 
 ## Reporting Vulnerabilities
 
