@@ -90,12 +90,54 @@ final class GatewayClientTests: XCTestCase {
         await client.close()
     }
 
-    func testTheRelayKeepsThePortAndBracketsAnIPv6Host() {
-        let authority = { GatewayHTTPClient.authority(of: URL(string: $0)!) }
-        XCTAssertEqual(authority("https://gw.example/v1/"), "gw.example")
-        XCTAssertEqual(authority("https://gw.example:8443/v1/"), "gw.example:8443")
-        XCTAssertEqual(authority("https://[2001:db8::1]:8443/v1/"), "[2001:db8::1]:8443")
-        XCTAssertEqual(authority("https://[2001:db8::1]/v1/"), "[2001:db8::1]")
+    /// A gateway that records every URL that the client fetches: the
+    /// catalog, and each replica's attestation document through the relay.
+    private func recordingGateway(url: URL?, urls: Recorder<URL>) async throws -> GatewayHTTPClient {
+        try await GatewayHTTPClient(
+            options: .init(modelPins: ["m": ModelPin(repo: "tinfoilsh/model-repo")], url: url, userCacheSecret: "test-secret"),
+            get: { url in
+                urls.record(url)
+                if url.path.hasSuffix("/catalog") {
+                    return Data(#"{"m":{"repo":"tinfoilsh/model-repo","hosts":["replica.example"]}}"#.utf8)
+                }
+                return Data(FakeNetwork.document("ok", for: url).utf8)
+            },
+            verifier: { _ in FakeVerifier() }
+        )
+    }
+
+    /// The URL is the gateway's root: the catalog, the attestation relay and
+    /// the OpenAI client's API path join under its path, whether or not it
+    /// ends with a slash.
+    func testTheCatalogTheRelayAndTheAPIPathJoinUnderTheGatewayURL() async throws {
+        let cases: [(url: String?, root: String)] = [
+            (nil, "https://inference-gateway.tinfoil.sh/"),
+            ("https://gw.example", "https://gw.example/"),
+            ("https://gw.example/", "https://gw.example/"),
+            ("https://gw.example:8443/relay", "https://gw.example:8443/relay/"),
+            ("https://gw.example:8443/relay/", "https://gw.example:8443/relay/"),
+        ]
+        for (url, root) in cases {
+            let urls = Recorder<URL>()
+            let client = try await recordingGateway(url: url.map { URL(string: $0)! }, urls: urls)
+            let report = try await client.ensureVerified(model: "m")
+            XCTAssertEqual(report.metadata.host, "replica.example")
+
+            let fetched = urls.values.map(\.absoluteString)
+            XCTAssertEqual(fetched.first, root + "catalog", "\(url ?? "default")")
+            let relayed = try XCTUnwrap(fetched.dropFirst().first, "\(url ?? "default")")
+            XCTAssertTrue(
+                relayed.hasPrefix(root + ".well-known/tinfoil-attestation?nonce=") && relayed.hasSuffix("&enclave=replica.example"),
+                relayed
+            )
+            XCTAssertEqual(fetched.count, 2, "Nothing else is fetched: \(fetched)")
+
+            let openAI = try OpenAIClient(httpClient: client, apiKey: "k")
+            XCTAssertEqual(openAI.baseURL.absoluteString, root + "v1/")
+            let custom = try OpenAIClient(httpClient: client, options: .init(apiPath: "/openai/v1"), apiKey: "k")
+            XCTAssertEqual(custom.baseURL.absoluteString, root + "openai/v1/")
+            await client.close()
+        }
     }
 
     func testABaseURLIsADirectory() {
@@ -107,7 +149,7 @@ final class GatewayClientTests: XCTestCase {
 
     func testTheDefaultsNameTinfoilsGateway() async throws {
         let client = try await GatewayHTTPClient(options: .init(modelPins: Self.pins, userCacheSecret: "pinned", catalog: { [:] }))
-        XCTAssertEqual(client.baseURL.absoluteString, "https://inference-gateway.tinfoil.sh/v1/")
+        XCTAssertEqual(client.baseURL.absoluteString, "https://inference-gateway.tinfoil.sh/")
         let models = try await client.models()
         XCTAssertEqual(models, [])
         let openAI = try OpenAIClient(httpClient: client, apiKey: "test-key")

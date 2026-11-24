@@ -69,17 +69,22 @@ final class OpenAIClientTests: XCTestCase {
         }
     }
 
-    func testAGatewayClientUsesItsURLAndTakesNoAPIPath() async throws {
-        let gateway = try await GatewayHTTPClient(options: .init(
-            modelPins: ["m": ModelPin(repo: "tinfoilsh/model")],
-            url: URL(string: "https://gw.example/openai/v1")!,
-            userCacheSecret: "pinned",
-            catalog: { [:] }
-        ))
-        let client = try OpenAIClient(httpClient: gateway, apiKey: "k")
-        XCTAssertEqual(client.baseURL.absoluteString, "https://gw.example/openai/v1/")
-        XCTAssertEqual(client.openAI.configuration.basePath, "/openai/v1")
-        assertConfigurationError({ try OpenAIClient(httpClient: gateway, options: .init(apiPath: "/v1/"), apiKey: "k") }, containing: "already carries the API path")
+    func testAGatewayClientJoinsTheAPIPathUnderItsURL() async throws {
+        for url in ["https://gw.example/relay", "https://gw.example/relay/"] {
+            let gateway = try await GatewayHTTPClient(options: .init(
+                modelPins: ["m": ModelPin(repo: "tinfoilsh/model")],
+                url: URL(string: url)!,
+                userCacheSecret: "pinned",
+                catalog: { [:] }
+            ))
+            XCTAssertEqual(gateway.baseURL.absoluteString, "https://gw.example/relay/")
+            let client = try OpenAIClient(httpClient: gateway, apiKey: "k")
+            XCTAssertEqual(client.baseURL.absoluteString, "https://gw.example/relay/v1/", url)
+            XCTAssertEqual(client.openAI.configuration.basePath, "/relay/v1")
+            let custom = try OpenAIClient(httpClient: gateway, options: .init(apiPath: "/openai/v1"), apiKey: "k")
+            XCTAssertEqual(custom.baseURL.absoluteString, "https://gw.example/relay/openai/v1/", url)
+            XCTAssertEqual(custom.openAI.configuration.basePath, "/relay/openai/v1")
+        }
     }
 
     func testAMissingAPIKeyIsRefused() async throws {

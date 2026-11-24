@@ -54,7 +54,7 @@ The trust argument names who vouches for the config that the enclave runs: `.rep
 
 ### Transport
 
-The enclave and router clients pin each TLS connection to the attested key by default (`transport: .tls`), which protects the whole request and response. With `transport: .ehbp(proxyURL:)`, request and response bodies are sealed to the attested key instead, so they stay private through the proxy; the method, URL and headers are not sealed, and neither is a request without a body or its response. `OpenAIClient` adds the API path, `/v1/` by default (`OpenAIOptions.apiPath`), under the proxy URL or, without one, the origin of the enclave or router that the HTTP client verified. The gateway client always uses EHBP, since the gateway sits between the client and the replica.
+The enclave and router clients pin each TLS connection to the attested key by default (`transport: .tls`), which protects the whole request and response. With `transport: .ehbp(proxyURL:)`, request and response bodies are sealed to the attested key instead, so they stay private through the proxy; the method, URL and headers are not sealed, and neither is a request without a body or its response. `OpenAIClient` adds the API path, `/v1/` by default (`OpenAIOptions.apiPath`), under the proxy URL or, without one, the origin of the enclave or router that the HTTP client verified; for a gateway client, under its URL. The gateway client always uses EHBP, since the gateway sits between the client and the replica.
 
 ### Relays: reaching only your own origin
 
@@ -136,6 +136,8 @@ Member names are snake_case, hex is lowercase and times are RFC 3339 in UTC. A f
 ### Gateway (experimental)
 
 `GatewayHTTPClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. It serves only the models that are pinned to repositories with the `modelPins` option, so at least one pin is required, and a request for any other model fails with a configuration error without contacting a replica. The gateway API may change in a later release.
+
+Its `url` option is the gateway's origin, `https://inference-gateway.tinfoil.sh/` by default, or the URL that the gateway is mounted under, as a proxy URL's path is: the catalog, the attestation relay and an `OpenAIClient`'s API path join under it.
 
 The gateway client verifies each model's replicas separately. Its `ensureVerified(model:)` and `reverify(model:)` take the model, and `reverify(model:)` verifies again the replica that `ensureVerified(model:)` would return for it. When that replica fails with `TinfoilError.attestationError`, its verification is discarded and `reverify(model:)` moves on to the next replica, as `ensureVerified(model:)` then does; when no replica passes or keeps a valid verification, it throws the last failure. `replicas` returns an entry for each replica that the client has tried to verify, with its host, the models requested through it, its trusted reference and pinned model, `current`, which follows `currentVerification`'s rule for that replica, and `lastAttempt`, the replica's last attempt as a `Result`.
 

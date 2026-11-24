@@ -181,7 +181,9 @@ least one, are still checked before any network I/O.
 | `Verifier(freshnessSigningKeys: k)` | `Policy(artifacts: .endorsed(freshnessKeys: k))` |
 | `Verifier(embeddedReferences: .init(runtime: r, platform: p))` | `Policy(artifacts: .embedded(runtime: r, platform: p))` |
 | `ModelPin(repo: r, verifier: v)` | `ModelPin(repo: r, policy: p)` |
-| `GatewayHTTPClient(baseURL: u)`, `GatewayHTTPClient.defaultBaseURL` | `GatewayHTTPClient(options: .init(url: u))`, `GatewayHTTPClient.defaultURL` |
+| `GatewayHTTPClient(baseURL: u)`, `GatewayHTTPClient.defaultBaseURL` | `GatewayHTTPClient(options: .init(url: u))`, `GatewayHTTPClient.defaultURL`. The URL is the gateway's origin, or the URL that it is mounted under, without the API path: `https://inference-gateway.tinfoil.sh/v1/` becomes `https://inference-gateway.tinfoil.sh/`, and the OpenAI client adds the API path under it |
+| the gateway's catalog and attestation relay at the URL's origin | under the URL's path: `{url}/catalog` and `{url}/.well-known/tinfoil-attestation` |
+| a gateway client's relative request URL, such as `chat/completions`, resolved under `/v1/` | resolved under the gateway's URL: write `v1/chat/completions` |
 | `transportMode: .tls` | `transport: .tls`, or unset |
 | `transportMode: .ehbp` | `transport: .ehbp()` |
 | `transportMode: .ehbp, baseURL: proxy` | `transport: .ehbp(proxyURL: proxy)`; the OpenAI client adds the API path under it, so `https://proxy.example/v1/` becomes `https://proxy.example/` |
@@ -191,7 +193,7 @@ least one, are still checked before any network I/O.
 | `EnclaveOpenAIClient(enclave:pin:…apiKey:)` | `OpenAIClient(httpClient: try await EnclaveHTTPClient(enclave:trust:options:), apiKey:)` |
 | `RouterOpenAIClient(…)`, `GatewayOpenAIClient(…)` | `OpenAIClient(httpClient:apiKey:)` over a `RouterHTTPClient` or a `GatewayHTTPClient` |
 | `Client(apiKey:)` | `OpenAIClient(apiKey:)` |
-| the OpenAI client's base URL from the HTTP client's `baseURL` | set by the SDK: `OpenAIOptions.apiPath`, `/v1/` by default, under the proxy URL or the enclave's origin; the gateway's URL for a gateway client |
+| the OpenAI client's base URL from the HTTP client's `baseURL` | set by the SDK: `OpenAIOptions.apiPath`, `/v1/` by default, under the proxy URL, the enclave's origin or the gateway's URL |
 | `userCacheSecret` on an enclave client | gone: the enclave client sends bodies as they are; set `user_cache_secret` per request |
 | `attestationRelay: "relay.example"`, a host that serves `/.well-known/tinfoil-attestation?nonce=…&enclave=…` | `fetchAttestation: .relay(URL(string: "https://relay.example")!)`, a URL whose path is where the relay is mounted, or `AttestationFetcher { host, nonce in … }` |
 | a router client with `attestationRelay`, which skipped discovery and asked the relay for the fallback router | discovery always runs, and fetches every router's document through `fetchAttestation`; set `fetchRouterList: .relay(url)` to fetch the list through `{url}/routers` too |

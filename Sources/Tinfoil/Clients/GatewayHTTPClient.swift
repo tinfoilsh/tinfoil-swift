@@ -15,8 +15,9 @@ import FoundationNetworking
 /// Experimental: the gateway route is new, and this API may change or be
 /// removed in a later release.
 public final class GatewayHTTPClient: Sendable {
-    /// Tinfoil's gateway
-    public static let defaultURL = URL(string: "https://inference-gateway.tinfoil.sh/v1/")!
+    /// Tinfoil's gateway, at its origin. The OpenAI client adds the API
+    /// path, `/v1/` by default, under it.
+    public static let defaultURL = URL(string: "https://inference-gateway.tinfoil.sh/")!
 
     let router: GatewayRouter
 
@@ -30,6 +31,18 @@ public final class GatewayHTTPClient: Sendable {
     /// - Parameter options: The client's options; each one's default applies
     ///   when it is not set
     public convenience init(options: GatewayOptions) async throws {
+        try await self.init(options: options, get: nil, verifier: { try GoAttestationVerifier(trust: nil, policy: $0) })
+    }
+
+    /// - Parameters:
+    ///   - get: Fetches the catalog and the replicas' attestation documents;
+    ///     nil fetches them over the network
+    ///   - verifier: The verifier for a policy
+    convenience init(
+        options: GatewayOptions,
+        get: (@Sendable (URL) async throws -> Data)?,
+        verifier: @escaping (Policy) throws -> any AttestationVerifier
+    ) async throws {
         let verificationCheck = options.verificationCheck
         let onVerificationAttempt = options.onVerificationAttempt
         let base = Self.directory(options.url ?? Self.defaultURL)
@@ -37,11 +50,14 @@ public final class GatewayHTTPClient: Sendable {
         guard base.scheme?.lowercased() == "https" else {
             throw TinfoilError.configuration("invalid gateway URL: the gateway URL must use HTTPS")
         }
-        guard let relay = Self.authority(of: base) else {
-            throw TinfoilError.configuration("invalid gateway URL: the gateway URL has no host")
+        guard let catalogURL = URL(string: joined(base, path: "catalog")) else {
+            throw TinfoilError.configuration("invalid gateway URL: cannot form the catalog URL under \(base.absoluteString)")
         }
+        // Attestation documents are relayed through the gateway, under the
+        // URL that it is mounted at.
+        let relay = AttestationFetcher.relay(base, get: get ?? { try await DocumentFetcher().fetch($0) })
         let attestor = { (policy: Policy) throws -> Attestor in
-            Attestor(verifier: try GoAttestationVerifier(trust: nil, policy: policy), verificationCheck: verificationCheck)
+            Attestor(verifier: try verifier(policy), verificationCheck: verificationCheck, fetchAttestation: relay)
         }
         let policy = try GatewayPolicy(
             pins: options.modelPins.mapValues { pin in (repo: pin.repo, attestor: try pin.policy.map { try attestor($0) }) },
@@ -51,7 +67,12 @@ public final class GatewayHTTPClient: Sendable {
         if let catalog = options.catalog {
             source = { catalog() }
         } else {
-            let cache = CatalogCache(fetch: { try await GatewayCatalog.fetch(host: relay) })
+            let cache = CatalogCache(fetch: {
+                if let get {
+                    return try await GatewayCatalog.fetch(url: catalogURL, fetch: get)
+                }
+                return try await GatewayCatalog.fetch(url: catalogURL)
+            })
             source = { try await cache.get() }
         }
         try await self.init(router: GatewayRouter(
@@ -66,7 +87,7 @@ public final class GatewayHTTPClient: Sendable {
                     handle: EnclaveHandle(
                         enclave: replica.host,
                         pin: pin,
-                        attestationRelay: relay,
+                        attestationRelay: nil,
                         attestor: attestor,
                         onVerificationAttempt: onVerificationAttempt,
                         requiresHPKEKey: true
@@ -91,16 +112,6 @@ public final class GatewayHTTPClient: Sendable {
         return URL(string: url.absoluteString + "/") ?? url
     }
 
-    /// The host and any port of base, which attestation and the catalog are
-    /// fetched through, with an IPv6 address in brackets
-    static func authority(of base: URL) -> String? {
-        guard let host = base.host, !host.isEmpty else {
-            return nil
-        }
-        let bracketed = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
-        return base.port.map { "\(bracketed):\($0)" } ?? bracketed
-    }
-
     /// Reads the catalog through router before the client is handed out.
     init(router: GatewayRouter) async throws {
         _ = try await router.models()
@@ -114,8 +125,10 @@ public final class GatewayHTTPClient: Sendable {
     }
 
     /// The gateway's URL, which requests are sent to: the `url` option, with
-    /// a trailing slash on its path, or Tinfoil's gateway. Relative URLs
-    /// passed to `data(for:)` resolve against it.
+    /// a trailing slash on its path, or Tinfoil's gateway. It is the
+    /// gateway's origin, or the URL that the gateway is mounted under, never
+    /// the API path: relative URLs passed to `data(for:)` resolve against
+    /// it, so name the API path in them, as in `v1/chat/completions`.
     public var baseURL: URL { router.baseURL }
 
     /// The catalog's models that the client's policy serves, sorted, without
@@ -217,10 +230,14 @@ public final class GatewayHTTPClient: Sendable {
 /// removed in a later release.
 public struct GatewayOptions: Sendable {
     /// The gateway's URL, which requests are sent to; nil selects Tinfoil's
-    /// gateway. It must be HTTPS, and is treated as a directory: a path
-    /// without a trailing slash gets one. Request paths join under it, so a
-    /// URL with credentials, a query or a fragment, even an empty one, is
-    /// refused.
+    /// gateway, `https://inference-gateway.tinfoil.sh/`. It is the gateway's
+    /// origin, or the URL that the gateway is mounted under, not the API
+    /// path: the catalog (`{url}/catalog`), the attestation relay
+    /// (`{url}/.well-known/tinfoil-attestation`) and an `OpenAIClient`'s API
+    /// path join under it, whether or not it ends with a slash. It must be
+    /// HTTPS, and is treated as a directory: a path without a trailing slash
+    /// gets one. Request paths join under it, so a URL with credentials, a
+    /// query or a fragment, even an empty one, is refused.
     public var url: URL?
     /// Pins models to repositories. The client serves only the models that
     /// it has pins for, so at least one pin is required, and a request for

@@ -56,13 +56,16 @@ enum GatewayCatalog {
         Pin(repo: reference, project: reference)
     }
 
-    /// Reads the catalog of the gateway at host, keeping only the entries that
-    /// can be routed to.
+    /// The catalog fetch's default GET, bounded in time and size
+    static let defaultFetch: @Sendable (URL) async throws -> Data = {
+        try await DocumentFetcher(timeout: fetchTimeout, maximumBodyBytes: maximumBytes).fetch($0)
+    }
+
+    /// Reads the catalog of the gateway at host, `https://{host}/catalog`,
+    /// keeping only the entries that can be routed to.
     static func fetch(
         host: String,
-        fetch: @Sendable (URL) async throws -> Data = {
-            try await DocumentFetcher(timeout: fetchTimeout, maximumBodyBytes: maximumBytes).fetch($0)
-        }
+        fetch: @Sendable (URL) async throws -> Data = defaultFetch
     ) async throws -> Catalog {
         // host is an authority: a host with an optional port, nothing else.
         guard !host.isEmpty, !host.contains(where: { "/?#@".contains($0) }),
@@ -70,6 +73,15 @@ enum GatewayCatalog {
         else {
             throw TinfoilError.configuration("the gateway host must be a host with an optional port, not \(host)")
         }
+        return try await self.fetch(url: url, fetch: fetch)
+    }
+
+    /// Reads the catalog at url, keeping only the entries that can be routed
+    /// to.
+    static func fetch(
+        url: URL,
+        fetch: @Sendable (URL) async throws -> Data = defaultFetch
+    ) async throws -> Catalog {
         let body = try await fetch(url)
         let catalog: Catalog
         do {

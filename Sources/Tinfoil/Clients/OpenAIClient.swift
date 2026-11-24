@@ -51,11 +51,10 @@ extension GatewayHTTPClient: AttestedHTTPClient {
 /// Configures an `OpenAIClient`.
 public struct OpenAIOptions: Sendable, Equatable {
     /// The path of the OpenAI API, joined under the EHBP proxy URL or, when
-    /// there is none, under the enclave's origin. Nil selects "/v1/". It must
-    /// be an absolute path, without a query, a fragment, an encoded slash, or
-    /// a "." or ".." segment, percent-encoded or not. A gateway client's URL
-    /// already carries the API path, so setting one with a gateway client is
-    /// a configuration error.
+    /// there is none, under the enclave's origin; for a gateway client,
+    /// under its URL. Nil selects "/v1/". It must be an absolute path,
+    /// without a query, a fragment, an encoded slash, or a "." or ".."
+    /// segment, percent-encoded or not.
     public var apiPath: String?
 
     public init(apiPath: String? = nil) {
@@ -85,9 +84,9 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
     ///
     /// The client sets the OpenAI base URL itself: `options.apiPath`, "/v1/"
     /// by default, joined under the EHBP proxy URL or, when there is none,
-    /// under the enclave's origin; for a gateway client, its URL. No other
-    /// parameter changes where requests go; set `options.apiPath` to change
-    /// the API path.
+    /// under the enclave's origin; for a gateway client, under its URL. No
+    /// other parameter changes where requests go; set `options.apiPath` to
+    /// change the API path.
     ///
     /// - Parameters:
     ///   - httpClient: The attested client that requests go through
@@ -128,12 +127,7 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
                 streamingFactory = PinnedSessionFactory(open: connection.open)
             }
         case let .gateway(gateway):
-            guard options.apiPath == nil else {
-                throw TinfoilError.configuration(
-                    "invalid API path: a gateway client's URL already carries the API path; set GatewayOptions.url instead"
-                )
-            }
-            baseURL = gateway.baseURL
+            baseURL = try Self.join(gateway.baseURL, apiPath: options.apiPath ?? Self.defaultAPIPath)
             session = StreamingSession(delegate: nil, open: gateway.open)
             streamingFactory = PinnedSessionFactory(open: gateway.open)
         }
