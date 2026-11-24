@@ -193,7 +193,7 @@ least one, are still checked before any network I/O.
 | `EnclaveOpenAIClient(enclave:pin:…apiKey:)` | `OpenAIClient(httpClient: try await EnclaveHTTPClient(enclave:trust:options:), apiKey:)` |
 | `RouterOpenAIClient(…)`, `GatewayOpenAIClient(…)` | `OpenAIClient(httpClient:apiKey:)` over a `RouterHTTPClient` or a `GatewayHTTPClient` |
 | `Client(apiKey:)` | `OpenAIClient(apiKey:)` |
-| the OpenAI client's base URL from the HTTP client's `baseURL` | set by the SDK: `OpenAIOptions.apiPath`, `/v1/` by default, under the proxy URL, the enclave's origin or the gateway's URL |
+| the OpenAI client's base URL from the HTTP client's `baseURL`, whose path was the API path, or `/v1` for a bare origin | set by the SDK: the `apiPath` argument of `OpenAIClient`, `/v1/` by default, joined under the proxy URL, the enclave's origin or the gateway's URL, whose path is where the proxy or gateway is mounted. An empty or invalid API path is a configuration error |
 | `userCacheSecret` on an enclave client | gone: the enclave client sends bodies as they are; set `user_cache_secret` per request |
 | `attestationRelay: "relay.example"`, a host that serves `/.well-known/tinfoil-attestation?nonce=…&enclave=…` | `fetchAttestation: .relay(URL(string: "https://relay.example")!)`, a URL whose path is where the relay is mounted, or `AttestationFetcher { host, nonce in … }` |
 | a router client with `attestationRelay`, which skipped discovery and asked the relay for the fallback router | discovery always runs, and fetches every router's document through `fetchAttestation`; set `fetchRouterList: .relay(url)` to fetch the list through `{url}/routers` too |

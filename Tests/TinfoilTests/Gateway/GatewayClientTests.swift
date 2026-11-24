@@ -134,7 +134,7 @@ final class GatewayClientTests: XCTestCase {
 
             let openAI = try OpenAIClient(httpClient: client, apiKey: "k")
             XCTAssertEqual(openAI.baseURL.absoluteString, root + "v1/")
-            let custom = try OpenAIClient(httpClient: client, options: .init(apiPath: "/openai/v1"), apiKey: "k")
+            let custom = try OpenAIClient(httpClient: client, apiPath: "/openai/v1", apiKey: "k")
             XCTAssertEqual(custom.baseURL.absoluteString, root + "openai/v1/")
             await client.close()
         }
