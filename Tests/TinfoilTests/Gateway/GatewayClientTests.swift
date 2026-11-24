@@ -6,17 +6,20 @@ import OpenAI
 /// The public gateway clients: the configuration checks that come before any
 /// network I/O, and live runs against Tinfoil's gateway.
 final class GatewayClientTests: XCTestCase {
+    /// A valid pin set for tests in which the pinned model is never requested
+    private static let pins = ["pinned": ModelPin(repo: "tinfoilsh/pinned")]
+
     private func assertRefusedBeforeIO(
         _ expected: String,
-        modelPins: [String: ModelPin] = [:],
-        pinnedModelsOnly: Bool = false,
+        modelPins: [String: ModelPin] = GatewayClientTests.pins,
+        policy: Policy = Policy(),
         url: URL? = nil,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         do {
             _ = try await GatewayHTTPClient(
-                options: .init(modelPins: modelPins, pinnedModelsOnly: pinnedModelsOnly, url: url, userCacheSecret: "test-secret", catalog: {
+                options: .init(modelPins: modelPins, url: url, policy: policy, userCacheSecret: "test-secret", catalog: {
                     XCTFail("the catalog was read despite a refused configuration", file: file, line: line)
                     return [:]
                 })
@@ -34,10 +37,57 @@ final class GatewayClientTests: XCTestCase {
         await assertRefusedBeforeIO("must not carry a query or a fragment", url: URL(string: "https://gw.example/v1/?")!)
         await assertRefusedBeforeIO("must not carry a query or a fragment", url: URL(string: "https://gw.example/v1/#x")!)
         await assertRefusedBeforeIO("carry no credentials", url: URL(string: "https://user:pass@gw.example/v1/")!)
-        await assertRefusedBeforeIO("pinned-only mode requires at least one model pin", pinnedModelsOnly: true)
+        await assertRefusedBeforeIO("requires at least one model pin", modelPins: [:])
         await assertRefusedBeforeIO("must belong to tinfoilsh/", modelPins: ["m": ModelPin(repo: "someone/model")])
         await assertRefusedBeforeIO(#"model "m""#, modelPins: ["m": ModelPin(repo: "tinfoilsh/")])
         await assertRefusedBeforeIO("freshness maximum age", modelPins: ["m": ModelPin(repo: "tinfoilsh/model", policy: Policy(freshnessMaxAge: -1))])
+        // The gateway's policy is checked even when every pin sets its own.
+        await assertRefusedBeforeIO(
+            "freshness maximum age",
+            modelPins: ["m": ModelPin(repo: "tinfoilsh/model", policy: Policy())],
+            policy: Policy(freshnessMaxAge: -1)
+        )
+    }
+
+    func testAnUnpinnedModelIsRefusedWithoutContactingAReplica() async throws {
+        let client = try await GatewayHTTPClient(options: .init(
+            modelPins: Self.pins,
+            url: URL(string: "https://gw.example/v1/")!,
+            userCacheSecret: "test-secret",
+            catalog: {
+                [
+                    "pinned": CatalogEntry(repo: "tinfoilsh/pinned", hosts: ["p.example"]),
+                    "unpinned": CatalogEntry(repo: "tinfoilsh/unpinned", hosts: ["u.example"]),
+                ]
+            }
+        ))
+        let isUnpinned = { (error: Error) -> Bool in
+            if case TinfoilError.configurationError(let failure) = error {
+                return failure.message == #"model "unpinned" is not pinned"#
+            }
+            return false
+        }
+        do {
+            _ = try await client.ensureVerified(model: "unpinned")
+            XCTFail("a model that the catalog lists but that has no pin should be refused")
+        } catch {
+            XCTAssertTrue(isUnpinned(error), "\(error)")
+        }
+        var request = URLRequest(url: URL(string: "chat/completions", relativeTo: client.baseURL)!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(#"{"model":"unpinned","messages":[]}"#.utf8)
+        do {
+            _ = try await client.data(for: request)
+            XCTFail("a request for an unpinned model should be refused")
+        } catch {
+            XCTAssertTrue(isUnpinned(error), "\(error)")
+        }
+        let models = try await client.models()
+        XCTAssertEqual(models, ["pinned"])
+        let attempts = await client.lastVerification
+        XCTAssertTrue(attempts.isEmpty, "No replica is contacted for an unpinned model.")
+        await client.close()
     }
 
     func testTheRelayKeepsThePortAndBracketsAnIPv6Host() {
@@ -56,7 +106,7 @@ final class GatewayClientTests: XCTestCase {
     }
 
     func testTheDefaultsNameTinfoilsGateway() async throws {
-        let client = try await GatewayHTTPClient(options: .init(userCacheSecret: "pinned", catalog: { [:] }))
+        let client = try await GatewayHTTPClient(options: .init(modelPins: Self.pins, userCacheSecret: "pinned", catalog: { [:] }))
         XCTAssertEqual(client.baseURL.absoluteString, "https://inference-gateway.tinfoil.sh/v1/")
         let models = try await client.models()
         XCTAssertEqual(models, [])
@@ -70,14 +120,26 @@ final class GatewayClientTests: XCTestCase {
 
     // MARK: - Live
 
+    /// One snapshot of the live gateway's catalog. A test pins every model
+    /// in it and gives the client the same snapshot, so that the two can't
+    /// drift apart.
+    private func liveCatalog() async throws -> Catalog {
+        let host = try XCTUnwrap(GatewayHTTPClient.defaultURL.host)
+        return try await GatewayHTTPClient.fetchCatalog(host: host)
+    }
+
     /// Fetches the gateway's catalog and verifies a replica through it, which
     /// needs no API key.
     func testLiveGatewayVerifiesAReplica() async throws {
         try requireLiveIntegration()
         let results = Recorder<(String, Result<VerificationReport, TinfoilError>)>()
-        let client = try await GatewayHTTPClient(
-            options: .init(userCacheSecret: "test-secret", onVerification: { results.record(($0, $1)) })
-        )
+        let catalog = try await liveCatalog()
+        let client = try await GatewayHTTPClient(options: .init(
+            modelPins: catalog.mapValues { ModelPin(repo: $0.repo) },
+            userCacheSecret: "test-secret",
+            onVerification: { results.record(($0, $1)) },
+            catalog: { catalog }
+        ))
         let models = try await client.models()
         let model = try XCTUnwrap(models.first, "the gateway's catalog lists no routable model")
 
@@ -89,7 +151,7 @@ final class GatewayClientTests: XCTestCase {
         let current = await client.lastVerification
         XCTAssertEqual(current.count, 1)
         XCTAssertEqual(current.first?.lastVerification.report, report)
-        XCTAssertEqual(current.first?.pinnedModel, "")
+        XCTAssertEqual(current.first?.pinnedModel, model)
         guard let (host, reported) = results.values.last, case .success = reported else {
             return XCTFail("the verification should be reported, got \(results.values)")
         }
@@ -104,7 +166,12 @@ final class GatewayClientTests: XCTestCase {
         guard let apiKey = ProcessInfo.processInfo.environment["TINFOIL_API_KEY"], !apiKey.isEmpty else {
             throw XCTSkip("set TINFOIL_API_KEY to send inference through the gateway")
         }
-        let gateway = try await GatewayHTTPClient(options: .init(userCacheSecret: "test-secret"))
+        let catalog = try await liveCatalog()
+        let gateway = try await GatewayHTTPClient(options: .init(
+            modelPins: catalog.mapValues { ModelPin(repo: $0.repo) },
+            userCacheSecret: "test-secret",
+            catalog: { catalog }
+        ))
         let client = try OpenAIClient(httpClient: gateway, apiKey: apiKey)
         let models = try await gateway.models()
         let model = try XCTUnwrap(models.first { $0.contains("llama") || $0.contains("gpt-oss") } ?? models.first)

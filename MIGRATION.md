@@ -161,8 +161,8 @@ The clients take a trust argument, on the enclave client only, and their
 optional settings as one options value. Settings that only make sense
 together are one value, such as a proxy URL inside `.ehbp(proxyURL:)`, so
 the combinations that used to be refused at run time can no longer be
-written. Single values, and the gateway's pinned-only mode, which needs a
-model pin, are still checked before any network I/O.
+written. Single values, and the gateway's model pins, of which it needs at
+least one, are still checked before any network I/O.
 
 | 0.9.0-rc.6 | now |
 |---|---|
@@ -215,6 +215,22 @@ version 2, and refuses any other version.
 | `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, called once per verification run | `onVerification: (String, Result<VerificationReport, TinfoilError>) -> Void`, called once for every attempt, retries and each router that discovery tries included, with the host that the attempt verified |
 | `VerificationResultCallback` | `VerificationCallback` |
 | `VerificationCheck` receiving a `Verification` | `VerificationCheck` receiving the `VerifiedFacts` |
+
+### Gateway model pins (after 0.9.0-rc.6)
+
+A gateway client serves only the models that it has pins for, and
+`models()` lists only those. A request or `ensureVerified(model:)` for any
+other model, including one that a catalog refresh adds later, fails with
+`TinfoilError.configurationError` and contacts no replica; a model that the
+catalog lists without a pin is no longer verified against the catalog's
+repository.
+
+| 0.9.0-rc.6 | now |
+|---|---|
+| `GatewayOptions(modelPins: pins, pinnedModelsOnly: true)` | `GatewayOptions(modelPins: pins)`; `pinnedModelsOnly` is gone |
+| `GatewayOptions()` with no pins, serving every model in the catalog | pin each model to serve: `GatewayOptions(modelPins: ["model": ModelPin(repo: "tinfoilsh/repo")])`; `modelPins` is required, and an empty set is refused before any network I/O |
+| `policy` for unpinned models and for pins that set none | `policy` for pins that set none; a pin's own `policy` still replaces it entirely |
+| `ReplicaVerification.pinnedModel` of `""` for an unpinned model | always the pinned model's name |
 
 ## Prompt cache
 

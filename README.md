@@ -104,7 +104,7 @@ let last = await client.lastVerification  // the most recent attempt, success or
 
 ### Gateway (experimental)
 
-`GatewayHTTPClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. Models can be pinned to repositories with the `modelPins` option. The gateway API may change in a later release.
+`GatewayHTTPClient` sends each request through Tinfoil's inference gateway, sealed with EHBP to a verified replica of the model that the request names. It serves only the models that are pinned to repositories with the `modelPins` option, so at least one pin is required, and a request for any other model fails with a configuration error without contacting a replica. The gateway API may change in a later release.
 
 ## Documentation
 

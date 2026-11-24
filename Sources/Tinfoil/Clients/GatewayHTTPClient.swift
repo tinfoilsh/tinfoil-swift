@@ -29,7 +29,7 @@ public final class GatewayHTTPClient: Sendable {
     ///
     /// - Parameter options: The client's options; each one's default applies
     ///   when it is not set
-    public convenience init(options: GatewayOptions = GatewayOptions()) async throws {
+    public convenience init(options: GatewayOptions) async throws {
         let verificationCheck = options.verificationCheck
         let onVerification = options.onVerification
         let base = Self.directory(options.url ?? Self.defaultURL)
@@ -45,7 +45,6 @@ public final class GatewayHTTPClient: Sendable {
         }
         let policy = try GatewayPolicy(
             pins: options.modelPins.mapValues { pin in (repo: pin.repo, attestor: try pin.policy.map { try attestor($0) }) },
-            pinnedOnly: options.pinnedModelsOnly,
             attestor: attestor(options.policy)
         )
         let source: @Sendable () async throws -> Catalog
@@ -188,8 +187,8 @@ public final class GatewayHTTPClient: Sendable {
     }
 }
 
-/// Configures a `GatewayHTTPClient`. Every option is optional, and the
-/// default value of each one selects its default.
+/// Configures a `GatewayHTTPClient`. Every option but `modelPins` is
+/// optional, and the default value of each one selects its default.
 ///
 /// Experimental: the gateway route is new, and this API may change or be
 /// removed in a later release.
@@ -200,13 +199,14 @@ public struct GatewayOptions: Sendable {
     /// URL with credentials, a query or a fragment, even an empty one, is
     /// refused.
     public var url: URL?
-    /// Pins models to repositories. With `pinnedModelsOnly`, only pinned
-    /// models are served, which requires at least one pin.
+    /// Pins models to repositories. The client serves only the models that
+    /// it has pins for, so at least one pin is required, and a request for
+    /// any other model fails with `TinfoilError.configurationError` without
+    /// contacting a replica.
     public var modelPins: [String: ModelPin]
-    /// Serve only the pinned models
-    public var pinnedModelsOnly: Bool
-    /// The verification policy for unpinned models, and pinned ones without
-    /// their own; the default policy keeps every default
+    /// The verification policy for pins that set none; a pin's own policy
+    /// replaces it entirely. It is checked when the client is created even
+    /// if every pin sets its own. The default policy keeps every default.
     public var policy: Policy
     /// The default prompt-cache scope of the client's requests; nil or empty
     /// uses a random secret that is generated once per process and that its
@@ -220,8 +220,7 @@ public struct GatewayOptions: Sendable {
     /// cache prefix keyed on it, and could test guesses of a guessable secret
     /// and then of the prompt.
     public var userCacheSecret: String?
-    /// Called with each replica's verified facts, for pinned and unpinned
-    /// models, before its keys are used; throw to reject it, and the next
+    /// Called with each replica's verified facts before its keys are used; throw to reject it, and the next
     /// replica of the model is tried.
     public var verificationCheck: VerificationCheck?
     /// Called once for every attempt to verify a replica, with the replica's
@@ -235,8 +234,7 @@ public struct GatewayOptions: Sendable {
     public var catalog: (@Sendable () -> Catalog)?
 
     public init(
-        modelPins: [String: ModelPin] = [:],
-        pinnedModelsOnly: Bool = false,
+        modelPins: [String: ModelPin],
         url: URL? = nil,
         policy: Policy = Policy(),
         userCacheSecret: String? = nil,
@@ -246,7 +244,6 @@ public struct GatewayOptions: Sendable {
     ) {
         self.url = url
         self.modelPins = modelPins
-        self.pinnedModelsOnly = pinnedModelsOnly
         self.policy = policy
         self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck
