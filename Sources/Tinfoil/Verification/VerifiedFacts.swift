@@ -30,13 +30,33 @@ public struct SoftwareIdentity: Sendable, Equatable, Encodable {
     public let version: String
 }
 
-/// How a verification was performed. The verifier fills it in from its own
-/// state; none of it is attested by or checked against the document.
+/// How a verification was performed. The verifier and the client fill it in
+/// from their own state; none of it is attested by or checked against the
+/// document.
 public struct VerificationMetadata: Sendable, Equatable {
     /// The SDK that performed the verification
     public let verifier: SoftwareIdentity
     /// When the document was appraised. It is not a freshness guarantee.
     public let verifiedAt: Date
+    /// The host, with an optional port, that the client contacted for the
+    /// attestation document: for an `EnclaveHTTPClient`, its enclave, even
+    /// when requests go through an EHBP proxy; for a `RouterHTTPClient`, the
+    /// router that it chose, or each router that discovery tries; and for a
+    /// `GatewayHTTPClient`, the replica. Every report that a client hands
+    /// out has it, including the report that a rejection's
+    /// `verificationError` carries; it is nil in a report that the verifier
+    /// returned to a caller directly.
+    ///
+    /// It is what the client connected to, not an attested fact: the
+    /// document doesn't name it, so it proves nothing about the enclave.
+    /// Never authorize anything because of it.
+    public let host: String?
+
+    init(verifier: SoftwareIdentity, verifiedAt: Date, host: String? = nil) {
+        self.verifier = verifier
+        self.verifiedAt = verifiedAt
+        self.host = host
+    }
 }
 
 /// Why a verification accepted a component's reference values. More sources

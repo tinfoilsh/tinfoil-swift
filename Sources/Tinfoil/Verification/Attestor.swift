@@ -148,6 +148,10 @@ struct Attestor: Sendable {
         try accepted(await verifyOnce(host: host, relay: relay, pin: pin), host: host)
     }
 
+    /// Every attempt runs the verifier here, so this is where its report,
+    /// and the report that a rejection carries, gets the host that was
+    /// contacted: the verifier, and the bridge under it, know only the
+    /// document.
     private func verifyOnce(host: String, relay: String?, pin: Pin) async throws -> VerificationReport {
         let nonce = verifier.newNonce()
         let document: Data
@@ -156,7 +160,11 @@ struct Attestor: Sendable {
         } else {
             document = try await fetch(verifier.attestationURL(host: host, relay: relay, nonce: nonce))
         }
-        return try verifier.verify(document: document, nonce: nonce, pin: pin)
+        do {
+            return try verifier.verify(document: document, nonce: nonce, pin: pin).withHost(host)
+        } catch let error as TinfoilError {
+            throw error.withReportHost(host)
+        }
     }
 
     /// A rejection is a decision about this evidence, so callers check it

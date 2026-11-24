@@ -18,7 +18,8 @@ import Foundation
 //       "partial_facts": { ...on a rejection only... },
 //       "metadata": {
 //         "verified_at": "<RFC 3339, UTC>",
-//         "verifier": {"name": "tinfoil-swift", "version": "<version>"}
+//         "verifier": {"name": "tinfoil-swift", "version": "<version>"},
+//         "host": "<the host that the client contacted>"
 //       }
 //     }
 //
@@ -29,7 +30,8 @@ import Foundation
 // its registers: {"platform": "sev-snp", "launch"} or {"platform": "tdx",
 // "mrtd", "rtmr0", ..., "rtmr3"}, without a register that the release leaves
 // to the platform. The channel keys appear only in
-// verified_facts.crypto_material.
+// verified_facts.crypto_material. metadata.host, in a report that a client
+// produced, is the host that the client contacted, which is not attested.
 //
 // The types conform to `Encodable` only. Nothing in the SDK reads the form
 // back into a report or into verified facts, since anyone can write verified
@@ -87,17 +89,19 @@ extension StepStatus: Encodable {
 
 extension VerificationMetadata: Encodable {
     private enum CodingKeys: String, CodingKey {
-        case verifier
+        case verifier, host
         case verifiedAt = "verified_at"
     }
 
-    /// Writes `{"verified_at", "verifier"}`
+    /// Writes `{"verified_at", "verifier", "host"}`, without a host that is
+    /// nil or empty
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(ReportTime.format(verifiedAt), forKey: .verifiedAt)
         if !verifier.name.isEmpty, !verifier.version.isEmpty {
             try container.encode(verifier, forKey: .verifier)
         }
+        try container.encodeIfNotEmpty(host ?? "", forKey: .host)
     }
 }
 

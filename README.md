@@ -125,8 +125,11 @@ The two getters differ after a `reverify()` that fails for a reason other than a
 let json = try JSONEncoder().encode(report)
 // {"schema_version":1,"steps":[{"layer":"envelope","status":"passed"},...],
 //  "verified_facts":{"config_repo":"...","code_digest":"...","enclave_measurement":{"platform":"tdx","mrtd":"...",...},
-//  "crypto_material":[...],"freshness_expires_at":"2026-12-01T16:00:00Z"},"metadata":{...}}
+//  "crypto_material":[...],"freshness_expires_at":"2026-12-01T16:00:00Z"},
+//  "metadata":{"verified_at":"...","verifier":{...},"host":"enclave.example.com"}}
 ```
+
+A report from one of the SDK's clients names the host that the client contacted in `metadata.host` (the enclave, even through a proxy; the chosen router, or each router that discovery tries; or the gateway replica), on every path that hands out a report, including a rejection's, so a proxy that passes a report on needn't add the host itself. The host is what the client connected to, not an attested fact, so it proves nothing about the enclave.
 
 Member names are snake_case, hex is lowercase and times are RFC 3339 in UTC. A fact that was not established is omitted, measurements name their registers by platform, and the TLS and HPKE keys appear only in `verified_facts.crypto_material`. The JSON is for display and transport, and it authorizes nothing: the types are `Encodable` but not `Decodable`, so no report or verified facts can be read back from JSON, and a channel is never bound to a key that was read from it.
 

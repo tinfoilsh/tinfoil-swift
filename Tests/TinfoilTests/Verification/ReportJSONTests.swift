@@ -155,6 +155,7 @@ final class ReportJSONTests: XCTestCase {
                 ["name": "tinfoil-swift", "version": TinfoilConstants.sdkVersion],
                 golden.name
             )
+            XCTAssertNil(metadata["host"], "The verifier knows no host: \(golden.name)")
         }
     }
 
@@ -225,6 +226,17 @@ final class ReportJSONTests: XCTestCase {
             "Empty and nil facts are omitted, and the channel keys are only in crypto_material."
         )
         XCTAssertEqual(facts["freshness_expires_at"] as? String, "2026-10-03T12:00:00.25Z")
+    }
+
+    func testTheMetadataNamesTheHostOnlyWhenItIsSet() throws {
+        let report = VerificationReport.stub()
+        let without = try XCTUnwrap(try json(report)["metadata"] as? [String: Any])
+        XCTAssertEqual(Set(without.keys), ["verified_at", "verifier"], "A report without a host writes none.")
+
+        let named = try XCTUnwrap(try json(report.withHost("enclave.example:8443"))["metadata"] as? [String: Any])
+        XCTAssertEqual(Set(named.keys), ["verified_at", "verifier", "host"])
+        XCTAssertEqual(named["host"] as? String, "enclave.example:8443")
+        XCTAssertNil(try json(report.withHost(""))["metadata"].flatMap { ($0 as? [String: Any])?["host"] }, "An empty host is never written.")
     }
 
     func testARejectedReportWritesItsPartialFacts() throws {

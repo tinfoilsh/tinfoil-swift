@@ -159,6 +159,17 @@ extension VerificationReport {
         verifiedFacts?.freshnessExpiresAt ?? .distantPast
     }
 
+    /// The same report, with host as the host that the client contacted.
+    /// A report is immutable, so this builds a copy.
+    func withHost(_ host: String) -> VerificationReport {
+        VerificationReport(
+            steps: steps,
+            verifiedFacts: verifiedFacts,
+            partialFacts: partialFacts,
+            metadata: VerificationMetadata(verifier: metadata.verifier, verifiedAt: metadata.verifiedAt, host: host)
+        )
+    }
+
     /// The verified facts of a report that passed. Every report that the
     /// SDK's verifier returns has them; one that doesn't fails closed.
     func passedFacts() throws -> VerifiedFacts {

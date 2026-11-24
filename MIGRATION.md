@@ -231,7 +231,9 @@ RFC 3339 times in UTC, `"schema_version": 1`, and no member that is null or
 unconstrained, and the TLS and HPKE keys appear only in
 `verified_facts.crypto_material`. The types are `Encodable` but not
 `Decodable`: nothing reads the form back into a report, since anyone can write
-verified facts in JSON, so the form never authorizes a channel.
+verified facts in JSON, so the form never authorizes a channel. A report that
+a client hands out names the host that the client contacted, as
+`metadata.host` (`VerificationMetadata.host`); it is not attested.
 
 ### Gateway model pins (after 0.9.0-rc.6)
 
