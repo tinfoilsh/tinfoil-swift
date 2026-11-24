@@ -243,6 +243,13 @@ final class VerificationDecodingTests: XCTestCase {
         )
     }
 
+    func testRejectsANullRegister() throws {
+        assertAttestationError(
+            try decode(payload(["code_measurement": ["platform": "tdx", "rtmr1": NSNull(), "rtmr2": "cc"]])),
+            containing: "unreadable verification result"
+        )
+    }
+
     func testRejectsAnotherReportSchemaVersion() throws {
         var result = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payload().utf8)) as? [String: Any])
         var report = try XCTUnwrap(result["report"] as? [String: Any])

@@ -434,10 +434,11 @@ extension VerificationReport {
             let container = try decoder.container(keyedBy: JSONKey.self)
             platform = try container.decode(String.self, forKey: JSONKey("platform"))
             // Only the platform's own registers are read, so that a member
-            // that a later version adds is ignored.
+            // that a later version adds is ignored. A register is absent or a
+            // string: the form never writes null.
             var registers: [String: String] = [:]
-            for name in VerifiedFacts.Measurement.Layout.of(platform: platform)?.registers ?? [] {
-                registers[name] = try container.decodeIfPresent(String.self, forKey: JSONKey(name))
+            for name in VerifiedFacts.Measurement.Layout.of(platform: platform)?.registers ?? [] where container.contains(JSONKey(name)) {
+                registers[name] = try container.decode(String.self, forKey: JSONKey(name))
             }
             self.registers = registers
         }

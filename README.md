@@ -102,7 +102,7 @@ let report = try await client.ensureVerified()
 let last = await client.lastVerification  // the most recent attempt, success or failure
 ```
 
-`JSONEncoder` writes a report, or any of the facts that it holds, in the JSON form that every Tinfoil SDK writes, so that a verification user interface or a service that relays results reads the reports of every SDK in the same way:
+`JSONEncoder` writes a report, its `verifiedFacts` or its `partialFacts` and their parts (but not a `CPUEvidence` alone, whose measurement `MeasuredFacts` writes as `cpu_measurement`), in the JSON form that every Tinfoil SDK writes, so that a verification user interface or a service that relays results reads the reports of every SDK in the same way:
 
 ```swift
 let json = try JSONEncoder().encode(report)
