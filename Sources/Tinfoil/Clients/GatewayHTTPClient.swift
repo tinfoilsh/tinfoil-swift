@@ -220,7 +220,8 @@ public struct GatewayOptions: Sendable {
     /// cache prefix keyed on it, and could test guesses of a guessable secret
     /// and then of the prompt.
     public var userCacheSecret: String?
-    /// Called with each replica's verified facts before its keys are used; throw to reject it, and the next
+    /// Called with each replica's verified facts before its keys are used;
+    /// throw to reject it, and the next
     /// replica of the model is tried.
     public var verificationCheck: VerificationCheck?
     /// Called once for every attempt to verify a replica, with the replica's

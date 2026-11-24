@@ -311,7 +311,7 @@ actor GatewayRouter {
         if let existing = replicas[replica] {
             transport = existing.replica
         } else {
-            transport = try makeReplica(replica, try policy.attestor(for: replica))
+            transport = try makeReplica(replica, policy.attestor(for: replica))
             replicas[replica] = (transport, [])
         }
         let verification = try await transport.usableVerification()
