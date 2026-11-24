@@ -75,13 +75,12 @@ final class GoAttestationVerifierTests: XCTestCase {
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("unexpected error \(error)")
             }
-            XCTAssertEqual(failure.layer, .envelope, "A malformed document is rejected by the envelope layer.")
             // The framework's result carries the report, which becomes the
             // cause of the attestation error.
             guard let rejected = failure.verificationError else {
                 return XCTFail("the verifier's error and report must be the cause")
             }
-            XCTAssertEqual(rejected.layer, .envelope)
+            XCTAssertEqual(rejected.layer, .envelope, "A malformed document is rejected by the envelope layer.")
             XCTAssertEqual(rejected.message, failure.message)
             XCTAssertEqual(rejected.report.steps.map(\.layer), [.envelope, .provenance, .quote, .policy])
             XCTAssertEqual(rejected.report.steps.first?.status, .failed)

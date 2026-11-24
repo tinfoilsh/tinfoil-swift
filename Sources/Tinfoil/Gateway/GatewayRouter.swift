@@ -364,7 +364,7 @@ extension TinfoilError {
         case .networkError(let failure):
             .network("\(context): \(failure.message)", urlError: failure.urlError, status: failure.status)
         case .attestationError(let failure):
-            .attestation("\(context): \(failure.message)", layer: failure.layer, verificationError: failure.verificationError)
+            .attestation("\(context): \(failure.message)", verificationError: failure.verificationError)
         }
     }
 }

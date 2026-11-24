@@ -176,7 +176,7 @@ final class PolicyTests: XCTestCase {
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("expected an attestation error, got \(error)")
             }
-            XCTAssertEqual(failure.layer, .provenance)
+            XCTAssertEqual(failure.verificationError?.layer, .provenance)
             XCTAssertTrue(failure.message.contains("config is not on the allow list"), failure.message)
         }
         XCTAssertEqual(seen.endorsements, [
@@ -196,7 +196,7 @@ final class PolicyTests: XCTestCase {
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("expected an attestation error, got \(error)")
             }
-            XCTAssertEqual(failure.layer, .quote, "Approving a config never bypasses the hardware check.")
+            XCTAssertEqual(failure.verificationError?.layer, .quote, "Approving a config never bypasses the hardware check.")
         }
         XCTAssertEqual(seen.endorsements.map(\.config), [fixture.config])
     }

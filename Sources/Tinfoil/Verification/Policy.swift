@@ -227,10 +227,10 @@ struct VerifierOptions: Sendable {
 
 /// Decides whether a deployment's config is authorized, in place of verifying
 /// its endorsement. Throw to reject it: the document then fails verification
-/// with `TinfoilError.attestationError` at the provenance layer, carrying the
-/// error's description. Return to authorize it; the runtime, platform and
-/// hardware are still verified, but approving a config authenticates no
-/// registry, name or approval time.
+/// with `TinfoilError.attestationError`, whose `verificationError` names the
+/// provenance layer and carries the error's description. Return to authorize
+/// it; the runtime, platform and hardware are still verified, but approving a
+/// config authenticates no registry, name or approval time.
 ///
 /// It runs synchronously during verification, possibly on several threads at
 /// once, so it must be thread-safe and fast.
