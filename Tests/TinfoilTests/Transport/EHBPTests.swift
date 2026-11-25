@@ -1047,6 +1047,27 @@ final class EHBPTests: XCTestCase {
         XCTAssertTrue(server.requestStore.requests.isEmpty, "Nothing unsealed may leave the client.")
     }
 
+    func testRefusesAStreamedBody() async {
+        let state = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey, expiresAt: .distantFuture),
+            refresh: nil
+        )
+        let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: state)
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBodyStream = InputStream(data: Data(#"{"model":"m"}"#.utf8))
+
+        do {
+            _ = try await session.data(for: request, delegate: nil)
+            XCTFail("a streamed body must be refused")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertTrue(failure.message.contains("not a stream"), failure.message)
+        } catch {
+            XCTFail("expected a configuration error, got \(error)")
+        }
+        XCTAssertTrue(server.requestStore.requests.isEmpty, "A request must not be sent without its body.")
+    }
+
     func testExpiredAttestationIsRefreshedBeforeTheRequestIsSent() async throws {
         let clock = TestClock()
         let refreshCounter = AsyncCounter()
