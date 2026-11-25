@@ -11,8 +11,8 @@ let environment = ProcessInfo.processInfo.environment
 // also compiles the tests that run the conformance vectors through it.
 let releasedTinfoilGo = Target.binaryTarget(
     name: "TinfoilGo",
-    url: "https://github.com/tinfoilsh/tinfoil-go/releases/download/v0.17.0-rc.11/TinfoilGo.xcframework.zip",
-    checksum: "7344f36eddffe1cd22e9d634924aa38dad612071552f57a9464e963a70d350ee")
+    url: "https://github.com/tinfoilsh/tinfoil-go/releases/download/v0.17.0-rc.13/TinfoilGo.xcframework.zip",
+    checksum: "035b4f2744b5b98af00f145029c725caf68177f61f352d76450dc53e9bc2dc6a")
 let tinfoilGo: Target = if let path = environment["TINFOIL_GO_XCFRAMEWORK"], !path.isEmpty {
     .binaryTarget(name: "TinfoilGo", path: path)
 } else {
