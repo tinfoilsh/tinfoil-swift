@@ -15,6 +15,9 @@ final class GatewayRouterTests: XCTestCase {
         private let lock = NSLock()
         private var _sent: [URLRequest] = []
         private var _last: Result<VerificationReport, TinfoilError>?
+        /// The verification in use: the last that passed, until an
+        /// attestation failure discards it
+        private var _current: VerificationReport?
         private var _closed = false
         let fails: Bool
         let respond: @Sendable (URLRequest) -> (Int, [String: String])
@@ -40,11 +43,17 @@ final class GatewayRouterTests: XCTestCase {
         func usableVerification() async throws -> VerificationReport {
             if fails {
                 let error = TinfoilError.attestation("\(replica.host) failed verification")
-                lock.withLock { _last = .failure(error) }
+                lock.withLock {
+                    _last = .failure(error)
+                    _current = nil
+                }
                 throw error
             }
             let verification = VerificationReport.stub(repo: replica.reference)
-            lock.withLock { _last = .success(verification) }
+            lock.withLock {
+                _last = .success(verification)
+                _current = verification
+            }
             return verification
         }
 
@@ -53,7 +62,9 @@ final class GatewayRouterTests: XCTestCase {
         }
 
         var currentVerification: VerificationReport? {
-            get async { lock.withLock { _last?.report } }
+            get async {
+                lock.withLock { _current.flatMap { Date() < $0.freshnessExpiresAt ? $0 : nil } }
+            }
         }
 
         func open(_ request: URLRequest) async throws -> RecoverableResponse {

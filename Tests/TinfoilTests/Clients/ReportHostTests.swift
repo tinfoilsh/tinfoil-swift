@@ -115,15 +115,19 @@ final class ReportHostTests: XCTestCase {
     /// A gateway client names each replica, in its entries and from
     /// ensureVerified(model:), including a replica that failed.
     func testAGatewayClientNamesEachReplica() async throws {
+        // The replica that the model's order tries first rejects, so that
+        // both replicas are tried.
+        let hosts = ["a.example", "b.example"]
+        let order = GatewayRouter.rank(hosts, prefix: "m", first: "")
         let network = FakeNetwork { url, _ in
-            FakeNetwork.document(url.host == "a.example" ? "reject" : "ok", for: url)
+            FakeNetwork.document(url.host == order[0] ? "reject" : "ok", for: url)
         }
         let base = URL(string: "https://gw.example/")!
         let attestor = Attestor(verifier: FakeVerifier(), fetch: { try network.fetch($0) }, retryDelay: 0)
         let router = GatewayRouter(
             baseURL: base,
             policy: try GatewayPolicy(pins: ["m": ("tinfoilsh/model-repo", nil)], attestor: attestor),
-            catalog: { ["m": CatalogEntry(repo: "tinfoilsh/model-repo", hosts: ["a.example", "b.example"])] },
+            catalog: { ["m": CatalogEntry(repo: "tinfoilsh/model-repo", hosts: hosts)] },
             secret: "",
             makeReplica: { replica, attestor in
                 try EnclaveConnection(
@@ -135,12 +139,14 @@ final class ReportHostTests: XCTestCase {
             }
         )
 
-        // a.example rejects, so whatever the order, b.example is verified.
-        _ = try? await router.ensureVerified(model: "m")
-        _ = try? await router.ensureVerified(model: "m")
+        let ensured = try await router.ensureVerified(model: "m")
+        XCTAssertEqual(try jsonHost(ensured), order[1])
         let verified = try await router.reverify(model: "m")
-        XCTAssertEqual(try jsonHost(verified), "b.example")
-        for entry in await router.replicaVerifications {
+        XCTAssertEqual(try jsonHost(verified), order[1])
+        let entries = await router.replicaVerifications
+        XCTAssertEqual(entries.map(\.host), hosts, "Both replicas were tried.")
+        XCTAssertNotNil(entries.first { $0.host == order[0] }?.lastAttempt.error?.verificationError, "The first replica was rejected.")
+        for entry in entries {
             switch entry.lastAttempt {
             case .success(let report):
                 XCTAssertEqual(try jsonHost(report), entry.host)
