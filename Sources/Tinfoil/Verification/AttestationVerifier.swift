@@ -15,10 +15,12 @@ protocol AttestationVerifier: Sendable {
     /// port, not a URL.
     func attestationURL(host: String, relay: String?, nonce: Data) throws -> URL
 
-    /// Appraises document, fetched with nonce, against pin. Fails with a
-    /// `TinfoilError`, including for a result already past its freshness
-    /// deadline.
-    func verify(document: Data, nonce: Data, pin: Pin) throws -> Verification
+    /// Appraises document, fetched with nonce, against pin, and returns the
+    /// report of a document that verified, whose verified facts are set.
+    /// Fails with a `TinfoilError`, including for a result already past its
+    /// freshness deadline. When the verifier rejected the document, the
+    /// error's `verificationError` carries the report.
+    func verify(document: Data, nonce: Data, pin: Pin) throws -> VerificationReport
 
     /// Throws the configuration error that `verify` would throw for pin
     /// whatever the document, so a client can refuse it before any I/O.

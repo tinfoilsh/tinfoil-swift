@@ -198,7 +198,7 @@ final class FetcherTests: XCTestCase {
             transportMode: .tls,
             baseURL: nil,
             userCacheSecret: "secret",
-            onVerificationResult: nil
+            onVerification: nil
         )
         _ = try await connection.ensureVerified()
 
@@ -230,7 +230,7 @@ final class FetcherTests: XCTestCase {
             transportMode: .ehbp,
             baseURL: URL(string: "https://app.example/tinfoil/proxy")!,
             userCacheSecret: "secret",
-            onVerificationResult: nil
+            onVerification: nil
         )
 
         XCTAssertEqual(connection.enclave, "router-a.example")

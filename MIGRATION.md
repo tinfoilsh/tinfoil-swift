@@ -38,7 +38,7 @@ let client = try await OpenAIClient(apiKey: key)
 | `baseURL` (a proxy) and `attestationBundleURL` | the HTTP client's `options: .init(transport: .ehbp(proxyURL:), fetchAttestation: .relay(_:))`; see below |
 | `parsingOptions`, `customHeaders`, `tinfoilEvents` | the same, on `OpenAIClient` |
 | `userCacheSecret` | the `userCacheSecret` option of `RouterHTTPClient` and `GatewayHTTPClient`; see "Prompt cache" |
-| `onVerification: (VerificationDocument?) -> Void` | `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, which observes, and `verificationCheck: (Verification) throws -> Void`, which can reject an enclave |
+| `onVerification: (VerificationDocument?) -> Void` | `onVerification: (String, Result<VerificationReport, TinfoilError>) -> Void`, which observes each attempt, and `verificationCheck: (VerifiedFacts) throws -> Void`, which can reject an enclave |
 
 ### Proxies and attestation
 
@@ -84,25 +84,27 @@ initializer returns, so there is no separate `verify()`.
 | `SecureClient(githubRepo:enclaveURL:)` | `try await EnclaveHTTPClient(enclave:trust:)` (the enclave is a host, not a URL) |
 | `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `try await EnclaveHTTPClient(enclave:trust:options: .init(fetchAttestation: .relay(_:)))` |
 | `verify()` | `ensureVerified()` (valid now, verifying only if needed) or `reverify()` |
-| `verificationDocument`, `verifiedGroundTruth` | `current`, a `Verification` |
+| `verificationDocument`, `verifiedGroundTruth` | `lastVerification`, a `Result<VerificationReport, TinfoilError>?` |
 | `verifiedEnclaveURL` | `enclave` and `baseURL` |
 | `get(url:headers:)`, `post(url:headers:body:)` → `SecureResponse` | `data(from:)`, `data(for:)` → `(Data, HTTPURLResponse)` |
 
 ### Verification results
 
 `VerificationDocument`, `GroundTruth`, `AttestationResponse`, `Measurement`,
-`HardwareMeasurement` and the step states are replaced by one `Verification`:
+`HardwareMeasurement` and the step states are replaced by a
+`VerificationReport`: its `steps`, one for each layer of the verifier, and the
+`VerifiedFacts` of a verification that passed:
 
-| 0.8.x | `Verification` |
+| 0.8.x | `VerifiedFacts` |
 |---|---|
 | `configRepo` | `configRepo` |
 | `releaseDigest`, `digest` | `codeDigest` |
 | `releaseTag` | `codeTag` (`""` when there is none) |
-| `codeMeasurement`, `enclaveMeasurement` | `codeMeasurement`, `enclaveMeasurement` (`Verification.Measurement`) |
+| `codeMeasurement`, `enclaveMeasurement` | `codeMeasurement`, `enclaveMeasurement` (`VerifiedFacts.Measurement`) |
 | `tlsPublicKey` | `tlsPublicKeyFingerprint` |
 | `hpkePublicKey` | `hpkePublicKey` (`""` for a TLS-only enclave) |
-| `verifier`, `verifiedAt` | `metadata.verifier`, `metadata.verifiedAt` (a `Date`) |
-| `securityVerified`, `steps` | gone: a `Verification` exists only when every check passed |
+| `verifier`, `verifiedAt` | `metadata.verifier`, `metadata.verifiedAt` (a `Date`), on the report |
+| `securityVerified`, `steps` | the report's `steps`; `verifiedFacts` are set only when every step passed |
 | — | `freshnessExpiresAt`, `cryptoMaterial`, and `config`, `runtime` and `platform` for a deployment verified from its config |
 
 ### Errors
@@ -128,7 +130,9 @@ task is cancelled, and the OpenAI SDK's own errors for an API failure.
 ### Low-level types
 
 `EHBPURLSession`, `EHBPURLSessionFactory`, `TinfoilConstants`, `SecureResponse`
-and `VerificationCallback` are no longer public. Send requests of your own with
+and the 0.8.x `VerificationCallback` are no longer public; the
+`VerificationCallback` of this release is the type of the `onVerification`
+option. Send requests of your own with
 an HTTP client's `data(for:)`, or with `recoverableBytes(for:)` for a streamed
 EHBP response and its session recovery token.
 
@@ -139,8 +143,8 @@ EHBP response and its session recovery token.
 | `policy: VerificationPolicy(pinnedRegisters:freshnessMaxAge:)` | `options: .init(policy: Policy(pinnedRegisters:freshnessMaxAge:))` |
 | `onEnclaveVerified`, `EnclaveVerifiedCallback` | `verificationCheck`, `VerificationCheck`; a rejection reads "verification check rejected <host>: <cause>" |
 | `RouterHTTPClient`, `RouterOpenAIClient`, `EnclaveOpenAIClient` sealed with EHBP | pinned TLS by default; pass `transport: .ehbp()` to keep sealing, as a proxy requires |
-| `Verification.codeTag: String?`, `hpkePublicKey: String?` | `String`, `""` when absent |
-| `Verification.verifiedAt`, `verifier` | `metadata.verifiedAt`, `metadata.verifier` |
+| `Verification.codeTag: String?`, `hpkePublicKey: String?` | `VerifiedFacts.codeTag`, `hpkePublicKey`: `String`, `""` when absent |
+| `Verification.verifiedAt`, `verifier` | `VerificationReport.metadata.verifiedAt`, `metadata.verifier` |
 | `TINFOIL_API_KEY` read when no key is given | not read: pass `apiKey` or `apiKeyProvider` |
 | `localizedDescription` of a `TinfoilError` | now led by the category, as in "configuration error: …"; `message` is the text alone |
 | a base URL with `?` or `#` | refused |
@@ -190,6 +194,27 @@ model pin, are still checked before any network I/O.
 
 `OpenAIClient.httpClient` is an `any AttestedHTTPClient`; cast it to the
 concrete client for that client's own members.
+
+### Verification reports (after 0.9.0-rc.6)
+
+Verification returns a `VerificationReport`: the steps that the verifier ran,
+the `VerifiedFacts` of a verification that passed, and, when the verifier
+rejected the document, the `PartialFacts` that the steps before the failure
+established. A rejection is still a `TinfoilError.attestationError`; its
+`verificationError` carries the verifier's error and the report. This
+release needs a TinfoilGo framework that returns the result in schema
+version 2, and refuses any other version.
+
+| 0.9.0-rc.6 | now |
+|---|---|
+| `Verification` | `VerifiedFacts`, the `verifiedFacts` of a `VerificationReport`; `metadata` moved to the report |
+| `Verification.Measurement` | `VerifiedFacts.Measurement` |
+| `ensureVerified()`, `reverify()`, the gateway's `ensureVerified(model:)` returning a `Verification` | the same calls, returning a `VerificationReport` |
+| `current`, the last successful verification, kept after a later failure | `lastVerification`: the most recent attempt, as a `Result<VerificationReport, TinfoilError>?`, so a failure replaces an earlier success |
+| `GatewayHTTPClient.current`, with each replica's last successful `verification` | `GatewayHTTPClient.lastVerification`, with each replica tried, failed ones included, and its `lastVerification` attempt |
+| `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, called once per verification run | `onVerification: (String, Result<VerificationReport, TinfoilError>) -> Void`, called once for every attempt, retries and each router that discovery tries included, with the host that the attempt verified |
+| `VerificationResultCallback` | `VerificationCallback` |
+| `VerificationCheck` receiving a `Verification` | `VerificationCheck` receiving the `VerifiedFacts` |
 
 ## Prompt cache
 

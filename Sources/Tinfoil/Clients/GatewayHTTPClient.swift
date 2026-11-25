@@ -31,7 +31,7 @@ public final class GatewayHTTPClient: Sendable {
     ///   when it is not set
     public convenience init(options: GatewayOptions = GatewayOptions()) async throws {
         let verificationCheck = options.verificationCheck
-        let onVerificationResult = options.onVerificationResult
+        let onVerification = options.onVerification
         let base = Self.directory(options.url ?? Self.defaultURL)
         try EnclaveConnection.validateBaseURL(base, transportMode: .ehbp)
         guard base.scheme?.lowercased() == "https" else {
@@ -69,7 +69,8 @@ public final class GatewayHTTPClient: Sendable {
                         pin: pin,
                         attestationRelay: relay,
                         attestor: attestor,
-                        onVerificationResult: onVerificationResult
+                        onVerification: onVerification,
+                        requiresHPKEKey: true
                     ),
                     transportMode: .ehbp,
                     baseURL: base,
@@ -125,19 +126,22 @@ public final class GatewayHTTPClient: Sendable {
         try await router.models()
     }
 
-    /// Returns a verification that is valid now of a replica serving model,
-    /// verifying replicas only if needed.
+    /// Returns the report of a verification that is valid now of a replica
+    /// serving model, verifying replicas only if needed.
     @discardableResult
-    public func ensureVerified(model: String) async throws -> Verification {
+    public func ensureVerified(model: String) async throws -> VerificationReport {
         try await router.ensureVerified(model: model)
     }
 
-    /// The last successful verification of each replica used so far, without
-    /// checking them. They may have expired or been discarded by a
-    /// re-verification that failed attestation; a discarded replica's next
-    /// request verifies it again.
-    public var current: [ReplicaVerification] {
-        get async { await router.current }
+    /// One entry for each replica that the client has tried to verify and
+    /// whose attempt has finished, failed replicas included, without I/O,
+    /// each holding that replica's last attempt: its report if the attempt passed, and otherwise its
+    /// error, as `EnclaveHTTPClient.lastVerification` describes. A replica's
+    /// earlier success is not kept once a later attempt for it fails.
+    /// Reports may have expired or been discarded since; a discarded
+    /// replica's next request verifies it again.
+    public var lastVerification: [ReplicaVerification] {
+        get async { await router.lastVerification }
     }
 
     /// Closes the client: later requests and verifications fail with
@@ -216,13 +220,14 @@ public struct GatewayOptions: Sendable {
     /// cache prefix keyed on it, and could test guesses of a guessable secret
     /// and then of the prompt.
     public var userCacheSecret: String?
-    /// Called with each replica's verification, for pinned and unpinned
+    /// Called with each replica's verified facts, for pinned and unpinned
     /// models, before its keys are used; throw to reject it, and the next
     /// replica of the model is tried.
     public var verificationCheck: VerificationCheck?
-    /// Called with each replica verification's final result. It only
-    /// observes.
-    public var onVerificationResult: VerificationResultCallback?
+    /// Called once for every attempt to verify a replica, with the replica's
+    /// host and the attempt's report or error. It only observes.
+    /// `VerificationCallback` describes when it runs.
+    public var onVerification: VerificationCallback?
     /// Read on every request in place of the gateway's catalog. Nil fetches
     /// the gateway's catalog when the client is created and refreshes it every
     /// 10 seconds while the client is used; a failed refresh keeps the last
@@ -236,7 +241,7 @@ public struct GatewayOptions: Sendable {
         policy: Policy = Policy(),
         userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
-        onVerificationResult: VerificationResultCallback? = nil,
+        onVerification: VerificationCallback? = nil,
         catalog: (@Sendable () -> Catalog)? = nil
     ) {
         self.url = url
@@ -245,7 +250,7 @@ public struct GatewayOptions: Sendable {
         self.policy = policy
         self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck
-        self.onVerificationResult = onVerificationResult
+        self.onVerification = onVerification
         self.catalog = catalog
     }
 }

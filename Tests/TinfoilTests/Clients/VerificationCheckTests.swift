@@ -30,7 +30,7 @@ final class VerificationCheckTests: XCTestCase {
     /// An EHBP client for enclave.example that sends to the local server
     private func client(
         verificationCheck: @escaping VerificationCheck = { _ in },
-        onVerificationResult: VerificationResultCallback? = nil,
+        onVerification: VerificationCallback? = nil,
         path: String = ""
     ) async throws -> EnclaveHTTPClient {
         let network = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
@@ -45,7 +45,7 @@ final class VerificationCheckTests: XCTestCase {
                     retryDelay: 0,
                     verificationCheck: verificationCheck
                 ),
-                onVerificationResult: onVerificationResult
+                onVerification: onVerification
             ),
             transportMode: .ehbp,
             baseURL: URL(string: server.baseURL + path)!,
@@ -147,13 +147,13 @@ final class VerificationCheckTests: XCTestCase {
     }
 
     func testCreateFailsWhenTheEnclaveIsRejected() async {
-        let reported = Box<Result<Verification, TinfoilError>?>(value: nil)
+        let reported = Box<Result<VerificationReport, TinfoilError>?>(value: nil)
 
         do {
             _ = try await OpenAIClient(
                 httpClient: try client(
                     verificationCheck: { _ in throw Refusal() },
-                    onVerificationResult: { reported.value = $0 }
+                    onVerification: { _, result in reported.value = result }
                 ),
                 apiKey: "test-key"
             )
@@ -175,7 +175,7 @@ final class VerificationCheckTests: XCTestCase {
         _ = try await OpenAIClient(
             httpClient: client(
                 verificationCheck: { _ in events.record("enclave verified") },
-                onVerificationResult: { _ in events.record("result") }
+                onVerification: { _, _ in events.record("result") }
             ),
             apiKey: "test-key"
         )

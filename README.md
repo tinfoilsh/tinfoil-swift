@@ -77,13 +77,30 @@ A `Policy` sets what an enclave must prove on top of its trust. Every HTTP clien
 
 ```swift
 let policy = Policy(
-    pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
+    pinnedRegisters: VerifiedFacts.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
     freshnessMaxAge: 3600
 )
 let enclave = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(policy: policy))
 ```
 
-It also takes the runtime and platform artifacts' trust (`artifacts: .endorsed(freshnessKeys:)` or `.embedded(runtime:platform:freshnessKeys:)`). Pass the `verificationCheck` option to inspect each `Verification` before its keys are used, and throw to reject it.
+It also takes the runtime and platform artifacts' trust (`artifacts: .endorsed(freshnessKeys:)` or `.embedded(runtime:platform:freshnessKeys:)`). Pass the `verificationCheck` option to inspect the `VerifiedFacts` of each verification before its keys are used, and throw to reject it.
+
+### Verification reports
+
+Every verification returns a `VerificationReport`: one step for each layer of the verifier (`envelope`, `provenance`, `quote` and `policy`), each `passed`, `failed`, `skipped` or `notRun`, and the `verifiedFacts` that the document proved. When the verifier rejects a document, the client throws `TinfoilError.attestationError`, whose `verificationError` carries the report, with the step that failed and the `partialFacts` that the steps before it established, such as the expected and measured registers side by side. Its key fingerprints are only the document's claim. A report authorizes nothing; the client binds its channel only to verified facts.
+
+```swift
+let client = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(
+    onVerification: { host, result in
+        // Called once for every attempt, outside the client's actors.
+        if case .failure(.attestationError(let failure)) = result, let rejected = failure.verificationError {
+            print(host, rejected.report.steps.map { "\($0.layer): \($0.status)" })
+        }
+    }
+))
+let report = try await client.ensureVerified()
+let last = await client.lastVerification  // the most recent attempt, success or failure
+```
 
 ### Gateway (experimental)
 

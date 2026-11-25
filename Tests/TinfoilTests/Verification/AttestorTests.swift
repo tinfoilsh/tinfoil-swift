@@ -91,7 +91,7 @@ final class AttestorTests: XCTestCase {
 
         await assertThrows(
             { try await self.attestor(FakeVerifier(), network).attest(host: "enclave.example", relay: nil, pin: Pin(repo: "org/repo")) },
-            { $0 as? TinfoilError == .attestation("rejected") }
+            { ($0 as? TinfoilError)?.verificationError?.layer == .policy }
         )
         XCTAssertEqual(network.urls.count, 2)
     }
@@ -180,6 +180,38 @@ final class AttestorTests: XCTestCase {
             "The deadline ends the probe in flight and skips the routers left."
         )
         XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+    }
+
+    func testARouterAbandonedAtTheDeadlineIsNotReported() async throws {
+        let network = FakeNetwork { url, _ in
+            url == self.routerList ? #"["router-a.example"]"# : FakeNetwork.document("ok", for: url)
+        }
+        let gate = AsyncGate()
+        let finished = expectation(description: "the abandoned fetch finished")
+        let reported = Recorder<String>()
+        let attestor = Attestor(
+            verifier: FakeVerifier(),
+            fetch: { url in
+                // Ignores cancellation, so the router finishes verifying after
+                // discovery has given up on it.
+                if url.host == "router-a.example" {
+                    await gate.wait()
+                    defer { finished.fulfill() }
+                    return try network.fetch(url)
+                }
+                return try network.fetch(url)
+            },
+            retryDelay: 0,
+            discoveryTimeout: 0.2
+        )
+
+        let discovered = try await attestor.discoverRouter(onVerification: { host, _ in reported.record(host) })
+        XCTAssertNil(discovered)
+        await gate.open()
+        await fulfillment(of: [finished], timeout: 5)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(reported.values.isEmpty, "A router that discovery abandoned is not reported: \(reported.values)")
     }
 
     func testDiscoveryDeadlineCoversTheRouterList() async throws {

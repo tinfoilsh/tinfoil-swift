@@ -101,7 +101,7 @@ final class CloseTests: XCTestCase {
         for observesCancellation in [true, false] {
             let entered = AsyncGate()
             let gate = AsyncGate()
-            let reported = Box<[Result<Verification, TinfoilError>]>(value: [])
+            let reported = Box<[Result<VerificationReport, TinfoilError>]>(value: [])
             let handle = EnclaveHandle(
                 enclave: "enclave.example",
                 pin: Pin(repo: "org/repo"),
@@ -114,7 +114,7 @@ final class CloseTests: XCTestCase {
                     }
                     return Data(FakeNetwork.document("ok", for: url).utf8)
                 }, retryDelay: 0),
-                onVerificationResult: { reported.value.append($0) }
+                onVerification: { _, result in reported.value.append(result) }
             )
             let verification = Task { try await handle.reverify() }
             await entered.wait()
@@ -132,8 +132,10 @@ final class CloseTests: XCTestCase {
             } catch {
                 XCTFail("unexpected \(error)")
             }
-            let current = await handle.current
-            XCTAssertNil(current, "A verification finished after close is not kept.")
+            let usable = await handle.usable
+            XCTAssertNil(usable, "A verification finished after close is not kept.")
+            let last = await handle.lastVerification
+            XCTAssertNil(last, "A run that close ended is not an attempt.")
             XCTAssertTrue(reported.value.isEmpty, "A run that close ended isn't reported as a result: \(reported.value)")
         }
     }

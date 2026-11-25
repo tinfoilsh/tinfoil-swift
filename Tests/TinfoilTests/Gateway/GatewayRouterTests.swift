@@ -14,7 +14,7 @@ final class GatewayRouterTests: XCTestCase {
         let replica: GatewayRouter.Replica
         private let lock = NSLock()
         private var _sent: [URLRequest] = []
-        private var _verified: Verification?
+        private var _last: Result<VerificationReport, TinfoilError>?
         private var _closed = false
         let fails: Bool
         let respond: @Sendable (URLRequest) -> (Int, [String: String])
@@ -37,12 +37,14 @@ final class GatewayRouterTests: XCTestCase {
         var sent: [URLRequest] { lock.withLock { _sent } }
         var closed: Bool { lock.withLock { _closed } }
 
-        func usableVerification() async throws -> Verification {
+        func usableVerification() async throws -> VerificationReport {
             if fails {
-                throw TinfoilError.attestation("\(replica.host) failed verification")
+                let error = TinfoilError.attestation("\(replica.host) failed verification")
+                lock.withLock { _last = .failure(error) }
+                throw error
             }
-            let verification = Verification.stub(repo: replica.reference)
-            lock.withLock { _verified = verification }
+            let verification = VerificationReport.stub(repo: replica.reference)
+            lock.withLock { _last = .success(verification) }
             return verification
         }
 
@@ -57,8 +59,8 @@ final class GatewayRouterTests: XCTestCase {
             )
         }
 
-        var current: Verification? {
-            get async { lock.withLock { _verified } }
+        var lastVerification: Result<VerificationReport, TinfoilError>? {
+            get async { lock.withLock { _last } }
         }
 
         func close() async {
@@ -164,7 +166,7 @@ final class GatewayRouterTests: XCTestCase {
         XCTAssertEqual(sent.value(forHTTPHeaderField: GatewayRequest.modelHeader), "m")
         XCTAssertEqual(sent.url?.absoluteString, "https://gw.example/v1/chat/completions")
 
-        let current = await router.current
+        let current = await router.lastVerification
         XCTAssertEqual(current.map(\.host), ["d.example"])
         XCTAssertEqual(current.first?.models, ["m"])
         XCTAssertEqual(current.first?.reference, "tinfoilsh/model-repo")
@@ -176,6 +178,17 @@ final class GatewayRouterTests: XCTestCase {
         let router = try harness.router()
         _ = try await router.open(chat(prefix: "m"))
         XCTAssertEqual(harness.sealedTo, ["c.example"], "Nothing is sealed to a replica that failed verification.")
+
+        // Each replica tried keeps its own last attempt, failed ones included.
+        let attempts = await router.lastVerification
+        XCTAssertEqual(attempts.map(\.host), ["b.example", "c.example", "d.example"])
+        for entry in attempts {
+            if entry.host == "c.example" {
+                XCTAssertNotNil(entry.lastVerification.report, "c.example verified.")
+            } else {
+                XCTAssertEqual(entry.lastVerification.error?.message, "\(entry.host) failed verification")
+            }
+        }
     }
 
     func testWhenNoReplicaVerifiesTheLastFailureIsThrown() async throws {
@@ -269,7 +282,7 @@ final class GatewayRouterTests: XCTestCase {
         harness.failing = ["d.example"]
         let router = try harness.router()
         let verification = try await router.ensureVerified(model: "m")
-        XCTAssertEqual(verification.configRepo, "tinfoilsh/model-repo")
+        XCTAssertEqual(verification.verifiedFacts?.configRepo, "tinfoilsh/model-repo")
         XCTAssertEqual(harness.replicas.map(\.replica.host), ["d.example", "b.example"])
         XCTAssertTrue(harness.sealedTo.isEmpty, "Verifying sends nothing.")
     }
@@ -293,7 +306,7 @@ final class GatewayRouterTests: XCTestCase {
         let router = try harness.router(pins: ["m": ("tinfoilsh/model-repo@v2", nil)])
         _ = try await router.open(chat(prefix: "m"))
         XCTAssertEqual(harness.replicas.first?.replica, GatewayRouter.Replica(host: "d.example", reference: "tinfoilsh/model-repo@v2", pinnedModel: "m"))
-        let current = await router.current
+        let current = await router.lastVerification
         XCTAssertEqual(current.first?.pinnedModel, "m")
     }
 

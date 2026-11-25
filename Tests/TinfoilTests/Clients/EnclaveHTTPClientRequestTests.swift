@@ -78,7 +78,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         let log = SendLog()
         let client = try client(network: approving(), log: log)
         XCTAssertEqual(client.baseURL.absoluteString, "https://enclave.example/")
-        let before = await client.current
+        let before = await client.lastVerification
         XCTAssertNil(before, "Creating a connection does no network I/O.")
 
         let (data, response) = try await client.data(from: URL(string: "/health?verbose=1")!)
@@ -88,8 +88,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         let sent = try XCTUnwrap(log.sent.first)
         XCTAssertEqual(sent.request.url?.absoluteString, "https://enclave.example/health?verbose=1")
         XCTAssertEqual(sent.fingerprint, "deadbeef", "Pinned to the verification's TLS key")
-        let after = await client.current
-        XCTAssertNotNil(after)
+        let after = await client.lastVerification
+        XCTAssertNotNil(after?.report)
     }
 
     func testRelativeURLResolvesAgainstABaseURLPath() async throws {
@@ -389,7 +389,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         let log = SendLog()
         let client = try client(network: network, log: log)
         _ = try await client.data(from: URL(string: "/health")!)
-        let verified = await client.current
+        let verified = await client.lastVerification?.report
         let first = try XCTUnwrap(verified)
 
         verdict.value = "reject"
@@ -398,8 +398,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
             XCTFail("a rejected attestation must fail the re-verification")
         } catch TinfoilError.attestationError {
         }
-        let last = await client.current
-        XCTAssertEqual(last, first, "current still returns the last successful verification.")
+        let last = await client.lastVerification
+        XCTAssertNotNil(last?.error, "lastVerification returns the failure, not \(first).")
         let fetched = network.urls.count
         do {
             _ = try await client.data(from: URL(string: "/health")!)
@@ -412,7 +412,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         verdict.value = "ok"
         _ = try await client.data(from: URL(string: "/health")!)
         XCTAssertEqual(log.sent.count, 2, "Once the enclave verifies again, requests go through.")
-        let recovered = await client.current
+        let recovered = await client.lastVerification?.report
         XCTAssertNotNil(recovered)
         XCTAssertNotEqual(recovered, first, "The request went out under the new verification.")
     }
@@ -435,8 +435,10 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
 
         XCTAssertEqual(log.sent.count, 1, "The still-valid verification carries the request.")
         XCTAssertEqual(network.urls.count, fetched, "No new verification was needed.")
-        let current = await client.current
-        XCTAssertEqual(current, first)
+        let usable = await client.handle.usable
+        XCTAssertEqual(usable, first)
+        let last = await client.lastVerification
+        XCTAssertNotNil(last?.error, "lastVerification still returns the failed attempt.")
     }
 
     func testAFailedRecoveryFromARejectedKeyStopsRequests() async throws {
@@ -455,8 +457,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
             XCTFail("a key that no verification endorses must not be used")
         } catch TinfoilError.attestationError {
         }
-        let last = await client.current
-        XCTAssertEqual(last, first, "current still returns the last successful verification.")
+        let last = await client.lastVerification
+        XCTAssertNotNil(last?.error, "lastVerification returns the failed recovery, not \(first).")
         do {
             _ = try await client.data(from: URL(string: "/health")!)
             XCTFail("a request must not go out under the discarded verification")
@@ -548,7 +550,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
     func testLivePinnedStream() async throws {
         try requireLiveIntegration()
         let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, trust: .either(repo: TinfoilConstants.defaultGithubRepo, project: TinfoilConstants.defaultGithubRepo))
-        let verification = try await client.ensureVerified()
+        let report = try await client.ensureVerified()
+        let verification = try XCTUnwrap(report.verifiedFacts)
         let request = URLRequest(url: URL(string: "https://\(TinfoilConstants.fallbackEnclave)/health")!)
 
         let (body, response) = try await PinnedTLS.stream(request, expecting: verification.tlsPublicKeyFingerprint)

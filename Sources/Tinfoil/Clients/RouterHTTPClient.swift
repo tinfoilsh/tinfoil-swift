@@ -35,7 +35,7 @@ public final class RouterHTTPClient: Sendable {
             transportMode: options.transport.mode,
             baseURL: options.transport.proxyURL,
             userCacheSecret: options.userCacheSecret,
-            onVerificationResult: options.onVerificationResult
+            onVerification: options.onVerification
         ))
     }
 
@@ -66,19 +66,30 @@ public final class RouterHTTPClient: Sendable {
     /// when requests go through a proxy.
     public var enclave: String { connection.enclave }
 
-    /// The last successful verification, without checking it. It may have
-    /// expired or been discarded by a re-verification that failed
-    /// attestation, and a failed verification doesn't change it; use
-    /// `ensureVerified()` for one that is valid now.
-    public var current: Verification? {
-        get async { await connection.current }
+    /// The outcome of the client's most recent attempt to verify the router
+    /// that it chose, without I/O, or nil before the first: the attempt's
+    /// report if it passed, and otherwise the error that the client reported
+    /// for it.
+    /// When the verifier rejected the document, the error is
+    /// `TinfoilError.attestationError`, whose `verificationError` carries the
+    /// report that shows the step that failed; an attempt that failed before
+    /// the verifier ran, such as a failed fetch, or that the
+    /// `verificationCheck` rejected, has none. Every attempt counts: the first
+    /// verification, retries, and every verification again, so a failure
+    /// replaces an earlier success.
+    ///
+    /// It doesn't check freshness, so a report that it returns may have
+    /// expired or been discarded since; use `ensureVerified()` for one that
+    /// is valid now.
+    public var lastVerification: Result<VerificationReport, TinfoilError>? {
+        get async { await connection.lastVerification }
     }
 
-    /// Returns a verification that is valid now, verifying first only if the
-    /// cached one has expired. A returned verification means requests can be
-    /// sent.
+    /// Returns the report of a verification that is valid now, verifying
+    /// first only if the cached one has expired. A returned report means
+    /// requests can be sent.
     @discardableResult
-    public func ensureVerified() async throws -> Verification {
+    public func ensureVerified() async throws -> VerificationReport {
         try await connection.ensureVerified()
     }
 
@@ -89,12 +100,14 @@ public final class RouterHTTPClient: Sendable {
     /// this throws it and the client discards its cached verification, even
     /// one that is still valid: no later request is sent under it, and the
     /// next request verifies again, failing while the problem persists.
-    /// `current` still returns the discarded verification. Other
-    /// failures, such as a `TinfoilError.networkError` or a cancellation,
-    /// keep a cached verification that is still valid. Requests already in
-    /// flight finish.
+    /// Other failures, such as a `TinfoilError.networkError` or a
+    /// cancellation, keep a cached verification that is still valid.
+    /// Requests already in flight finish. Either way, the failed attempt
+    /// becomes `lastVerification`. It returns the new report. Cancelling the
+    /// call ends only its own wait: the verification that it started or
+    /// joined still finishes, and its outcome becomes `lastVerification`.
     @discardableResult
-    public func reverify() async throws -> Verification {
+    public func reverify() async throws -> VerificationReport {
         try await connection.reverify()
     }
 

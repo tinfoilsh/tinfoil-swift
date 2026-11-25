@@ -11,11 +11,11 @@ internal struct EHBPVerifiedEndpoint: Sendable {
     /// No new request may be sealed to this key at or after this instant. A
     /// key supplied by the caller rather than attested never expires.
     let expiresAt: Date
-    /// The verification that endorses the key, or nil for a key that the
-    /// caller supplied
-    let verification: Verification?
+    /// The report of the verification that endorses the key, or nil for a
+    /// key that the caller supplied
+    let verification: VerificationReport?
 
-    init(enclaveURL: String, publicKey: Data, expiresAt: Date = .distantFuture, verification: Verification? = nil) {
+    init(enclaveURL: String, publicKey: Data, expiresAt: Date = .distantFuture, verification: VerificationReport? = nil) {
         self.enclaveURL = enclaveURL
         self.publicKey = publicKey
         self.expiresAt = expiresAt
@@ -24,13 +24,15 @@ internal struct EHBPVerifiedEndpoint: Sendable {
 }
 
 extension EHBPVerifiedEndpoint {
-    /// The endpoint a verification of the enclave at enclaveURL endorses: its
-    /// HPKE key, until its freshness deadline.
-    init(enclaveURL: String, verification: Verification) throws {
+    /// The endpoint that a verification of the enclave at enclaveURL
+    /// endorses: the HPKE key of its verified facts, until their freshness
+    /// deadline.
+    init(enclaveURL: String, verification: VerificationReport) throws {
+        let facts = try verification.passedFacts()
         self.init(
             enclaveURL: enclaveURL,
-            publicKey: try Self.publicKey(hex: verification.hpkePublicKey),
-            expiresAt: verification.freshnessExpiresAt,
+            publicKey: try Self.publicKey(hex: facts.hpkePublicKey),
+            expiresAt: facts.freshnessExpiresAt,
             verification: verification
         )
     }

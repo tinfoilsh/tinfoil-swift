@@ -74,24 +74,26 @@ final class GatewayClientTests: XCTestCase {
     /// needs no API key.
     func testLiveGatewayVerifiesAReplica() async throws {
         try requireLiveIntegration()
-        let results = Box<[Result<Verification, TinfoilError>]>(value: [])
+        let results = Recorder<(String, Result<VerificationReport, TinfoilError>)>()
         let client = try await GatewayHTTPClient(
-            options: .init(userCacheSecret: "test-secret", onVerificationResult: { results.value.append($0) })
+            options: .init(userCacheSecret: "test-secret", onVerification: { results.record(($0, $1)) })
         )
         let models = try await client.models()
         let model = try XCTUnwrap(models.first, "the gateway's catalog lists no routable model")
 
-        let verification = try await client.ensureVerified(model: model)
+        let report = try await client.ensureVerified(model: model)
+        let verification = try XCTUnwrap(report.verifiedFacts)
 
         XCTAssertTrue(verification.configRepo.hasPrefix("tinfoilsh/"), verification.configRepo)
         XCTAssertFalse(verification.hpkePublicKey.isEmpty, "Gateway replicas seal with EHBP.")
-        let current = await client.current
+        let current = await client.lastVerification
         XCTAssertEqual(current.count, 1)
-        XCTAssertEqual(current.first?.verification, verification)
+        XCTAssertEqual(current.first?.lastVerification.report, report)
         XCTAssertEqual(current.first?.pinnedModel, "")
-        if case .success = results.value.last {} else {
-            XCTFail("the verification should be reported, got \(results.value)")
+        guard let (host, reported) = results.values.last, case .success = reported else {
+            return XCTFail("the verification should be reported, got \(results.values)")
         }
+        XCTAssertEqual(host, current.first?.host, "The callback names the replica.")
         await client.close()
     }
 
@@ -111,7 +113,7 @@ final class GatewayClientTests: XCTestCase {
             model: model
         ))
         XCTAssertFalse((result.choices.first?.message.content ?? "").isEmpty)
-        let current = await gateway.current
+        let current = await gateway.lastVerification
         XCTAssertEqual(current.first?.models, [model])
     }
 }
