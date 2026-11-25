@@ -244,7 +244,7 @@ final class VerificationReportTests: XCTestCase {
         let attestor = Attestor(verifier: FakeVerifier(), fetch: { try network.fetch($0) }, retryDelay: 0)
         let router = GatewayRouter(
             baseURL: base,
-            policy: try GatewayPolicy(pins: [:], pinnedOnly: false, attestor: attestor),
+            policy: try GatewayPolicy(pins: ["m1": ("tinfoilsh/model-repo", nil), "m2": ("tinfoilsh/model-repo", nil)], attestor: attestor),
             catalog: {
                 [
                     "m1": CatalogEntry(repo: "tinfoilsh/model-repo", hosts: ["a.example"]),
