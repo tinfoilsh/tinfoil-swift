@@ -231,7 +231,6 @@ extension VerificationReport {
             : rejection.message
         throw TinfoilError.attestation(
             message,
-            layer: layer,
             verificationError: VerificationError(layer: layer, message: message, report: report)
         )
     }
@@ -532,9 +531,9 @@ extension TinfoilError {
     /// message alone, led by its category's prefix, which is dropped here
     /// because the case carries the category. A verification error's message
     /// then names the layer that rejected the document, as in
-    /// "quote: <detail>"; the layer is kept in the message and also lifted
-    /// out. A message with neither prefix is treated as a rejected
-    /// attestation.
+    /// "quote: <detail>", and it keeps that layer in the message: without a
+    /// report, the SDK has no `VerificationError` to carry. A message with
+    /// neither prefix is treated as a rejected attestation.
     static func fromVerifier(
         _ error: Error,
         usagePrefix: String,
@@ -545,23 +544,8 @@ extension TinfoilError {
             return .configuration(String(message.dropFirst(usagePrefix.count)))
         }
         if message.hasPrefix(verificationPrefix) {
-            let rejection = String(message.dropFirst(verificationPrefix.count))
-            return .attestation(rejection, layer: layer(leading: rejection))
+            return .attestation(String(message.dropFirst(verificationPrefix.count)))
         }
         return .attestation(message)
-    }
-
-    /// The layer that a verification error's message leads with, as in
-    /// "quote: <detail>". Layer names are single lowercase words, so a message
-    /// whose text before ": " is anything else names no layer.
-    private static func layer(leading message: String) -> VerificationLayer? {
-        guard let separator = message.range(of: ": ") else {
-            return nil
-        }
-        let name = message[..<separator.lowerBound]
-        guard !name.isEmpty, name.allSatisfy({ $0.isASCII && $0.isLowercase }) else {
-            return nil
-        }
-        return VerificationLayer(rawValue: String(name))
     }
 }

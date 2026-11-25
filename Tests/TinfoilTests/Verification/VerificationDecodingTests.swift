@@ -302,7 +302,6 @@ final class VerificationDecodingTests: XCTestCase {
                 return XCTFail("expected an attestation error, got \(error)")
             }
             XCTAssertEqual(failure.message, "quote: signature does not verify", "The bridge's prefix is dropped.")
-            XCTAssertEqual(failure.layer, .quote)
             guard let rejected = failure.verificationError else {
                 return XCTFail("the verifier's error must be the cause")
             }
@@ -403,18 +402,12 @@ final class VerificationDecodingTests: XCTestCase {
             )
         }
         XCTAssertEqual(classify("usage error: bad repo"), .configuration("bad repo"))
-        XCTAssertEqual(classify("verification error: quote: rejected"), .attestation("quote: rejected", layer: .quote))
         XCTAssertEqual(
-            classify("verification error: firmware: rejected"),
-            .attestation("firmware: rejected", layer: VerificationLayer(rawValue: "firmware")),
-            "A layer this SDK doesn't name is still carried."
+            classify("verification error: quote: rejected"),
+            .attestation("quote: rejected"),
+            "Without a report there is no verifier error to carry, so the layer stays in the message."
         )
-        XCTAssertEqual(classify("verification error: rejected"), .attestation("rejected"), "No layer, no guess.")
-        XCTAssertEqual(
-            classify("verification error: could not parse: bad JSON"),
-            .attestation("could not parse: bad JSON"),
-            "Text before a colon is a layer only if it is a single lowercase word."
-        )
+        XCTAssertEqual(classify("verification error: rejected"), .attestation("rejected"))
         XCTAssertEqual(
             classify("unexpected"),
             .attestation("unexpected"),

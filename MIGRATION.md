@@ -111,8 +111,12 @@ initializer returns, so there is no separate `verify()`.
 
 Failures of configuration, of fetching attestation and of verification are a
 `TinfoilError`, with one of three cases: `.configurationError`,
-`.networkError` and `.attestationError`. An attestation error carries the
-verifier's `layer` (envelope, provenance, quote or policy). `message` is the
+`.networkError` and `.attestationError`. When the verifier rejected the
+document with a report, an attestation error's `verificationError` names the
+layer that rejected it (envelope, provenance, quote or policy) and carries
+the report. Otherwise `verificationError` is nil and the message alone says
+what failed; a rejection that the verifier reported without a report still
+leads its message with the layer, as in `quote: <detail>`. `message` is the
 text alone, and `category` names the case.
 
 Sending a request can also throw other errors: `URLError` for a transport
