@@ -38,7 +38,7 @@ final class OpenAIClientTests: XCTestCase {
     func testTheBaseURLJoinsTheAPIPathUnderTheEnclaveOrTheProxy() async throws {
         let direct = try await enclaveClient()
         XCTAssertEqual(try OpenAIClient(httpClient: direct, apiKey: "k").baseURL.absoluteString, "https://enclave.example/v1/")
-        let custom = try OpenAIClient(httpClient: direct, options: .init(apiPath: "/openai/v1"), apiKey: "k")
+        let custom = try OpenAIClient(httpClient: direct, apiPath: "/openai/v1", apiKey: "k")
         XCTAssertEqual(custom.baseURL.absoluteString, "https://enclave.example/openai/v1/")
         XCTAssertEqual(custom.openAI.configuration.scheme, "https")
         XCTAssertEqual(custom.openAI.configuration.host, "enclave.example")
@@ -59,26 +59,63 @@ final class OpenAIClientTests: XCTestCase {
         let direct = try await enclaveClient()
         let refused = [
             "", "v1/", "//v1/", "https://other.example/v1/", "/v1?x=1", "/v1?", "/v1#", "/v1/#x",
-            "/a/../b", "/a/./b", "/..", "/a/%2e%2e/b", "/a/%2E/b", "/a%2Fb/", "/a%2fb", "/a%zz/", "/a b/",
+            "/a/../b", "/a/./b", "/..", "/a/%2e%2e/b", "/a/%2E/b", "/a%2Fb/", "/a%2fb", "/a%5Cb/", "/a%5cb/",
+            "/a%zz/", "/a%+f/", "/a%4/", "/a b/", "/a\tb/", "/a\nb/", "/a\\b/", "/a[b]/", "/a^b/", "/a|b/",
+            "/a{b}/", "/a`b/", "/a\"b/", "/a<b>/", "/caf\u{e9}/", "/a\u{7f}b/",
         ]
         for apiPath in refused {
-            assertConfigurationError({ try OpenAIClient(httpClient: direct, options: .init(apiPath: apiPath), apiKey: "k") }, containing: "invalid API path")
+            assertConfigurationError({ try OpenAIClient(httpClient: direct, apiPath: apiPath, apiKey: "k") }, containing: "invalid API path")
         }
-        for apiPath in ["/", "/v1", "/v1/", "/openai/v1", "/a%20b/", "/a..b/", "/.well/"] {
-            XCTAssertNoThrow(try OpenAIClient(httpClient: direct, options: .init(apiPath: apiPath), apiKey: "k"), apiPath)
+        let accepted = [
+            "/", "/v1", "/v1/", "/openai/v1", "/a%20b/", "/a..b/", "/.well/", "/a;b=c/", "/a@b:c/", "/x!$&'()*+,/", "/~a-b_c.d/",
+        ]
+        for apiPath in accepted {
+            XCTAssertNoThrow(try OpenAIClient(httpClient: direct, apiPath: apiPath, apiKey: "k"), apiPath)
         }
     }
 
-    func testAGatewayClientUsesItsURLAndTakesNoAPIPath() async throws {
-        let gateway = try await GatewayHTTPClient(options: .init(
-            url: URL(string: "https://gw.example/openai/v1")!,
-            userCacheSecret: "pinned",
-            catalog: { [:] }
-        ))
-        let client = try OpenAIClient(httpClient: gateway, apiKey: "k")
-        XCTAssertEqual(client.baseURL.absoluteString, "https://gw.example/openai/v1/")
-        XCTAssertEqual(client.openAI.configuration.basePath, "/openai/v1")
-        assertConfigurationError({ try OpenAIClient(httpClient: gateway, options: .init(apiPath: "/v1/"), apiKey: "k") }, containing: "already carries the API path")
+    /// The OpenAI client takes its base path decoded, so an escape that
+    /// doesn't decode to UTF-8 can't be sent as written, and is refused
+    /// rather than sent elsewhere.
+    func testAnEscapeThatIsNotUTF8IsRefused() async throws {
+        let direct = try await enclaveClient()
+        assertConfigurationError({ try OpenAIClient(httpClient: direct, apiPath: "/%ff/", apiKey: "k") }, containing: "UTF-8")
+    }
+
+    func testTheRootAPIPathIsTheRootNotV1() async throws {
+        let direct = try await enclaveClient()
+        let client = try OpenAIClient(httpClient: direct, apiPath: "/", apiKey: "k")
+        XCTAssertEqual(client.baseURL.absoluteString, "https://enclave.example/")
+        XCTAssertEqual(client.openAI.configuration.basePath, "")
+    }
+
+    func testTheDropInClientChecksTheAPIPathBeforeAnyNetworkIO() async {
+        do {
+            _ = try await OpenAIClient(apiPath: "", apiKey: "k")
+            XCTFail("an empty API path must be refused")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertTrue(failure.message.contains("invalid API path"), failure.message)
+        } catch {
+            XCTFail("expected a configuration error before router discovery, got \(error)")
+        }
+    }
+
+    func testAGatewayClientJoinsTheAPIPathUnderItsURL() async throws {
+        for url in ["https://gw.example/relay", "https://gw.example/relay/"] {
+            let gateway = try await GatewayHTTPClient(options: .init(
+                modelPins: ["m": ModelPin(repo: "tinfoilsh/model")],
+                url: URL(string: url)!,
+                userCacheSecret: "pinned",
+                catalog: { [:] }
+            ))
+            XCTAssertEqual(gateway.baseURL.absoluteString, "https://gw.example/relay/")
+            let client = try OpenAIClient(httpClient: gateway, apiKey: "k")
+            XCTAssertEqual(client.baseURL.absoluteString, "https://gw.example/relay/v1/", url)
+            XCTAssertEqual(client.openAI.configuration.basePath, "/relay/v1")
+            let custom = try OpenAIClient(httpClient: gateway, apiPath: "/openai/v1", apiKey: "k")
+            XCTAssertEqual(custom.baseURL.absoluteString, "https://gw.example/relay/openai/v1/", url)
+            XCTAssertEqual(custom.openAI.configuration.basePath, "/relay/openai/v1")
+        }
     }
 
     func testAMissingAPIKeyIsRefused() async throws {

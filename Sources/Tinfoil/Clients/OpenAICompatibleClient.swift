@@ -178,13 +178,13 @@ extension OpenAI {
         return apiKey
     }
 
-    /// Sets up the OpenAI client over the given sessions. Requests go to
-    /// `baseURL`, under its path if it has one, and under `/v1` for a bare
-    /// origin.
+    /// Sets up the OpenAI client over the given sessions. Requests go under
+    /// `baseURL`, which already ends with the API path, so its path is used
+    /// as it is, even when it is empty.
     static func sealed(
         apiKey: String?,
         apiKeyProvider: (@Sendable () -> String?)?,
-        baseURL: String,
+        baseURL: URL,
         session: URLSessionProtocol,
         streamingFactory: URLSessionFactory,
         parsingOptions: ParsingOptions,
@@ -192,7 +192,7 @@ extension OpenAI {
         timeoutInterval: TimeInterval,
         tinfoilEvents: Set<TinfoilEvent>
     ) throws -> OpenAI {
-        let urlComponents = try URLHelpers.parseHTTPURL(baseURL)
+        let urlComponents = try URLHelpers.parseHTTPURL(baseURL.absoluteString)
         let defaultPort = urlComponents.scheme == "https" ? 443 : 80
         var basePath = urlComponents.url.path
         while basePath.hasSuffix("/") {
@@ -211,7 +211,7 @@ extension OpenAI {
             host: urlComponents.host,
             port: urlComponents.port ?? defaultPort,
             scheme: urlComponents.scheme,
-            basePath: basePath.isEmpty ? "/v1" : basePath,
+            basePath: basePath,
             timeoutInterval: timeoutInterval,
             customHeaders: mergedHeaders,
             parsingOptions: parsingOptions

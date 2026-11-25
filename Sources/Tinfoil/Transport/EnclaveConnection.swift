@@ -40,41 +40,39 @@ final class EnclaveConnection: Sendable {
     private let send: PinnedTLS.Send
     private let stream: PinnedTLS.Stream
 
-    /// A connection to the first of Tinfoil's routers that verifies, and
+    /// A connection to the first router that discovery verifies, and
     /// otherwise to the fallback router, which is left unverified for the
-    /// caller to verify. With an attestation relay, the relay is asked for the
-    /// fallback router instead. An unset `userCacheSecret` falls back to the
-    /// process's generated secret, since this is Tinfoil's router; when that
-    /// secret can't be generated, this throws `SecureRandomError` before any
-    /// network I/O.
+    /// caller to verify. Discovery always runs. An unset `userCacheSecret`
+    /// falls back to the process's generated secret, since this is Tinfoil's
+    /// router; when that secret can't be generated, this throws
+    /// `SecureRandomError` before any network I/O.
     static func router(
         attestor: Attestor,
         transportMode: TransportMode,
         baseURL: URL?,
-        attestationRelay: String?,
         userCacheSecret: String?,
         processSecret: UserCacheSecret.ProcessSecret = UserCacheSecret.processSecret,
-        onVerificationResult: VerificationResultCallback?
+        onVerificationAttempt: VerificationCallback?
     ) async throws -> EnclaveConnection {
         // Checked before discovery, so a misconfiguration costs no network I/O.
         if let baseURL {
             try validateBaseURL(baseURL, transportMode: transportMode)
         }
         let secret = try UserCacheSecret.resolve(explicit: userCacheSecret, process: processSecret)
-        let discovered = attestationRelay == nil ? try await attestor.discoverRouter() : nil
-        if let discovered {
-            onVerificationResult?(.success(discovered.verification))
-        }
+        // Discovery reports each router that it tries, the chosen one
+        // included.
+        let discovered = try await attestor.discoverRouter(onVerificationAttempt: onVerificationAttempt)
         return try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: discovered?.host ?? TinfoilConstants.fallbackEnclave,
                 pin: TinfoilConstants.routerPin,
-                attestationRelay: attestationRelay,
+                attestationRelay: nil,
                 attestor: attestor,
-                initial: discovered?.verification,
-                onVerificationResult: onVerificationResult
+                initial: discovered?.report,
+                onVerificationAttempt: onVerificationAttempt,
+                requiresHPKEKey: transportMode == .ehbp
             ),
-            initial: discovered?.verification,
+            initial: discovered?.report,
             transportMode: transportMode,
             baseURL: baseURL,
             userCacheSecret: secret
@@ -86,7 +84,7 @@ final class EnclaveConnection: Sendable {
     ///     need not wait on the handle to seal the first request.
     init(
         handle: EnclaveHandle,
-        initial: Verification? = nil,
+        initial: VerificationReport? = nil,
         transportMode: TransportMode,
         baseURL: URL?,
         userCacheSecret: String,
@@ -119,6 +117,17 @@ final class EnclaveConnection: Sendable {
             throw TinfoilError.configuration(
                 "invalid proxy URL: \(enclaveOrigin) is the enclave's own origin; leave the proxy URL nil to connect directly"
             )
+        }
+    }
+
+    /// Refuses a relay URL under the rules of an EHBP proxy URL: HTTPS, or
+    /// HTTP to a loopback host, with a host and without credentials, a query
+    /// or a fragment.
+    static func validateRelayURL(_ url: URL) throws {
+        do {
+            try validateBaseURL(url, transportMode: .ehbp)
+        } catch let error as TinfoilError {
+            throw TinfoilError.configuration("invalid relay URL: \(error.message)")
         }
     }
 
@@ -160,24 +169,39 @@ final class EnclaveConnection: Sendable {
         await handle.close()
     }
 
-    /// The last successful verification, without checking it. It may have
-    /// expired or been rejected; use `ensureVerified()` for one that is valid.
-    var current: Verification? {
-        get async { await handle.current }
+    /// The report of the verification that requests are bound to now,
+    /// without I/O. See `EnclaveHTTPClient.currentVerification`.
+    var currentVerification: VerificationReport? {
+        get async { await handle.currentVerification }
     }
 
-    /// Returns a verification that is valid now, verifying first only if the
-    /// cached one has expired or there is none. A returned verification means
-    /// requests can be sent.
+    /// The outcome of the most recent attempt to verify the enclave, without
+    /// I/O, or nil before the first. See
+    /// `EnclaveHTTPClient.lastVerificationAttempt`.
+    var lastVerificationAttempt: Result<VerificationReport, TinfoilError>? {
+        get async { await handle.lastVerificationAttempt }
+    }
+
+    /// Returns the report of a verification that is valid now, verifying
+    /// first only if the cached one has expired or there is none. A returned
+    /// report means requests can be sent.
     @discardableResult
-    func ensureVerified() async throws -> Verification {
+    func ensureVerified() async throws -> VerificationReport {
         try await handle.ensureVerified()
     }
 
     /// Verifies the enclave again, even if the cached verification is still
     /// valid.
+    ///
+    /// If the new verification fails with `TinfoilError.attestationError`,
+    /// this throws it and the client discards its cached verification, even
+    /// one that is still valid: no later request is sent under it, and the
+    /// next request verifies again, failing while the problem persists.
+    /// Other failures, such as a `TinfoilError.networkError` or a
+    /// cancellation, keep a cached verification that is still valid. Requests
+    /// already in flight finish.
     @discardableResult
-    func reverify() async throws -> Verification {
+    func reverify() async throws -> VerificationReport {
         try await handle.reverify()
     }
 
@@ -185,7 +209,7 @@ final class EnclaveConnection: Sendable {
     /// EHBP mode the enclave must also endorse an HPKE key, which every
     /// request is sealed to.
     @discardableResult
-    func ensureUsable() async throws -> Verification {
+    func ensureUsable() async throws -> VerificationReport {
         let verified = try await handle.ensureVerified()
         if ehbp != nil {
             _ = try EHBPVerifiedEndpoint(enclaveURL: "https://\(enclave)", verification: verified)
@@ -200,11 +224,12 @@ final class EnclaveConnection: Sendable {
     /// origin is HTTPS unless an EHBP base URL is HTTP on a loopback host.
     /// The request uses a valid verification, verifying first if needed.
     ///
-    /// In TLS mode, if the enclave presents a key the attestation does not
-    /// endorse before the request was sent, the client verifies again and
-    /// retries once; otherwise, or if it happens again, it fails with
-    /// `TinfoilError.attestationError`. Under EHBP, a rejected key is
-    /// refreshed and the request replayed in the same way. Either way the
+    /// In TLS mode, if the enclave presents a key that the attestation does
+    /// not endorse, the client discards that verification; if the request
+    /// hadn't been sent, it verifies again and retries once, and otherwise,
+    /// or if it happens again, it fails with `TinfoilError.attestationError`.
+    /// Under EHBP, a rejected key's verification is discarded, and the
+    /// request replayed under a refreshed key in the same way. Either way the
     /// same request goes out again, headers included; cancelling the task
     /// before the resend prevents it.
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -268,21 +293,28 @@ final class EnclaveConnection: Sendable {
     }
 
     /// Sends request over connections pinned to the verified TLS key, with
-    /// `transmit`. A key the enclave presents before the request left is
-    /// verified again and the request retried once.
+    /// `transmit`. A key that the enclave presents in place of the verified
+    /// one discards that verification; if the request hadn't left, the
+    /// enclave is verified again and the request retried once.
     private func pinned<Result>(
         _ request: URLRequest,
         transmit: (URLRequest, String) async throws -> Result
     ) async throws -> Result {
         var attempt = 0
         while true {
+            // After a rejection, the verification is discarded, so this
+            // verifies again, unless a concurrent request already has.
             let verification = try await handle.ensureVerified()
             // A caller that cancelled before a retry, as on signing out, must
             // not have its request, credentials included, sent again.
             try Task.checkCancellation()
             do {
-                return try await transmit(request, verification.tlsPublicKeyFingerprint)
+                return try await transmit(request, verification.passedFacts().tlsPublicKeyFingerprint)
             } catch let rejection as PinnedTLS.Rejection {
+                // The enclave doesn't hold the verified key, perhaps because
+                // it rotated the key, so no request may use that verification
+                // again, even if verifying again fails for another reason.
+                await handle.discard(verification)
                 attempt += 1
                 // Replaying is safe only if the request never left: a rejection
                 // on a later connection, as after a redirect, may follow one
@@ -290,8 +322,6 @@ final class EnclaveConnection: Sendable {
                 guard attempt < 2, !rejection.requestMayHaveBeenSent else {
                     throw TinfoilError.attestation(rejection.description)
                 }
-                // The enclave may have rotated its key since it was verified.
-                _ = try await handle.reverify()
             }
         }
     }
@@ -339,23 +369,46 @@ struct EHBPChannel: Sendable {
     let session: EHBPURLSession
     let streamingFactory: EHBPURLSessionFactory
 
-    init(origin: String, enclaveURL: String, handle: EnclaveHandle, initial: Verification?, userCacheSecret: String) {
+    init(origin: String, enclaveURL: String, handle: EnclaveHandle, initial: VerificationReport?, userCacheSecret: String) {
         // Without a verification yet, the state starts expired, so the first
         // request takes its key from the handle.
         let endpoint = initial.flatMap { try? EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: $0) }
             ?? EHBPVerifiedEndpoint(enclaveURL: enclaveURL, publicKey: Data(), expiresAt: .distantPast)
-        state = EHBPVerifiedState(endpoint: endpoint, refresh: { stale in
-            // A newer verification than the stale endpoint's, as one made by
-            // ensureVerified() before the first request, is used as is. The
-            // stale endpoint's own verification being current means the
-            // enclave rejected its key, so verify again.
-            let verified = try await handle.ensureVerified()
-            if verified.freshnessExpiresAt == stale.expiresAt {
-                let fresh = try await handle.reverify()
-                return try EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: fresh)
+        state = EHBPVerifiedState(
+            endpoint: endpoint,
+            // A key that the enclave rejected discards its verification, so
+            // that no request is sealed to it again, even if verifying again
+            // fails for another reason.
+            discard: { rejected in
+                if let source = rejected.verification {
+                    await handle.discard(source)
+                }
+            },
+            refresh: { stale in
+                // The stale endpoint's own verification still being usable
+                // means that it expired, so verify again. Otherwise the handle
+                // has a newer one, as one made by ensureVerified() before the
+                // first request, or discarded it, as after a key rejection,
+                // and ensureVerified() returns a valid one, verifying again
+                // if it has none.
+                let verified: VerificationReport
+                if let source = stale.verification, await handle.usable == source {
+                    verified = try await handle.reverify()
+                } else {
+                    verified = try await handle.ensureVerified()
+                }
+                return try EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: verified)
+            },
+            // A key stops sealing new requests once its verification is no
+            // longer the handle's usable one, as when a failed
+            // re-verification discards it.
+            endorses: { endpoint in
+                guard let source = endpoint.verification else {
+                    return true
+                }
+                return await handle.usable == source
             }
-            return try EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: verified)
-        })
+        )
         session = EHBPURLSession(baseURL: origin, verifiedState: state, userCacheSecret: userCacheSecret)
         streamingFactory = EHBPURLSessionFactory(baseURL: origin, verifiedState: state, userCacheSecret: userCacheSecret)
     }

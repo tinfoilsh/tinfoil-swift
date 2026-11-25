@@ -82,15 +82,19 @@ public final class EnclaveHTTPClient: Sendable {
         options: EnclaveOptions = EnclaveOptions()
     ) async throws {
         let pin = try trust.pin()
+        try options.fetchAttestation?.relayURL.map { try EnclaveConnection.validateRelayURL($0) }
         let verifier = try GoAttestationVerifier(trust: trust, policy: options.policy)
         try await self.init(verifying: Self.connection(
             enclave: enclave,
             pin: pin,
             transportMode: options.transport.mode,
             baseURL: options.transport.proxyURL,
-            attestationRelay: options.attestationRelay,
-            attestor: Attestor(verifier: verifier, verificationCheck: options.verificationCheck),
-            onVerificationResult: options.onVerificationResult
+            attestor: Attestor(
+                verifier: verifier,
+                verificationCheck: options.verificationCheck,
+                fetchAttestation: options.fetchAttestation
+            ),
+            onVerificationAttempt: options.onVerificationAttempt
         ), trust: trust)
     }
 
@@ -102,9 +106,8 @@ public final class EnclaveHTTPClient: Sendable {
         pin: Pin,
         transportMode: TransportMode,
         baseURL: URL?,
-        attestationRelay: String?,
         attestor: Attestor,
-        onVerificationResult: VerificationResultCallback?
+        onVerificationAttempt: VerificationCallback?
     ) throws -> EnclaveConnection {
         if let proxyURL = baseURL {
             try EnclaveConnection.refuseEnclaveOriginProxy(proxyURL, enclave: enclave)
@@ -114,9 +117,10 @@ public final class EnclaveHTTPClient: Sendable {
             handle: EnclaveHandle(
                 enclave: enclave,
                 pin: pin,
-                attestationRelay: attestationRelay,
+                attestationRelay: nil,
                 attestor: attestor,
-                onVerificationResult: onVerificationResult
+                onVerificationAttempt: onVerificationAttempt,
+                requiresHPKEKey: transportMode == .ehbp
             ),
             transportMode: transportMode,
             baseURL: baseURL,
@@ -153,24 +157,70 @@ public final class EnclaveHTTPClient: Sendable {
     /// host when requests go through a proxy.
     public var enclave: String { connection.enclave }
 
-    /// The last successful verification, without checking it. It may have
-    /// expired or been rejected; use `ensureVerified()` for one that is valid.
-    public var current: Verification? {
-        get async { await connection.current }
+    /// The report of the verification that the client's requests are bound
+    /// to now, without I/O: the latest successful verification while it is
+    /// fresh, before its verified facts' `freshnessExpiresAt`, and has not
+    /// been discarded. It is nil before the first successful verification,
+    /// after a failure discarded the verification, such as a `reverify()`
+    /// that failed with `TinfoilError.attestationError` or the enclave's
+    /// rejection of the verified key, and once the verification has expired,
+    /// until a later verification succeeds. A
+    /// `reverify()` that fails in any other way, such as with a
+    /// `TinfoilError.networkError`, leaves it unchanged while it is fresh,
+    /// though `lastVerificationAttempt` then returns the failure.
+    ///
+    /// The client doesn't verify again in the background, so after expiry it
+    /// is nil until the next request or `ensureVerified()` verifies again.
+    /// It holds at the time of the call: the verification can expire right
+    /// after. Use `ensureVerified()` to check that requests can be sent,
+    /// verifying when needed.
+    public var currentVerification: VerificationReport? {
+        get async { await connection.currentVerification }
     }
 
-    /// Returns a verification that is valid now, verifying first only if the
-    /// cached one has expired. A returned verification means requests can be
-    /// sent.
+    /// The outcome of the client's most recent attempt to verify its
+    /// enclave, without I/O, or nil before the first: the attempt's report if
+    /// it passed, and otherwise the error that the client reported for it.
+    /// When the verifier rejected the document, the error is
+    /// `TinfoilError.attestationError`, whose `verificationError` carries the
+    /// report that shows the step that failed; an attempt that failed before
+    /// the verifier ran, such as a failed fetch, or that the
+    /// `verificationCheck` rejected, has none. Every attempt counts: the first
+    /// verification, retries, and every verification again, so a failure
+    /// replaces an earlier success.
+    ///
+    /// It doesn't check freshness, so a report that it returns may have
+    /// expired or been discarded since; `currentVerification` is the
+    /// verification that requests are bound to now.
+    public var lastVerificationAttempt: Result<VerificationReport, TinfoilError>? {
+        get async { await connection.lastVerificationAttempt }
+    }
+
+    /// Returns the report of a verification that is valid now, verifying
+    /// first only if the cached one has expired. A returned report means
+    /// requests can be sent.
     @discardableResult
-    public func ensureVerified() async throws -> Verification {
+    public func ensureVerified() async throws -> VerificationReport {
         try await connection.ensureVerified()
     }
 
     /// Verifies the enclave again, even if the cached verification is still
     /// valid.
+    ///
+    /// If the new verification fails with `TinfoilError.attestationError`,
+    /// this throws it and the client discards its cached verification, even
+    /// one that is still valid: no later request is sent under it,
+    /// `currentVerification` is nil, and the next request verifies again,
+    /// failing while the problem persists. Other failures, such as a
+    /// `TinfoilError.networkError` or a cancellation, keep a cached
+    /// verification that is still valid, which `currentVerification` still
+    /// returns. Requests already in flight finish. Either way, the failed
+    /// attempt becomes `lastVerificationAttempt`. It returns the new report.
+    /// Cancelling the call ends only its own wait: the verification that it
+    /// started or joined still finishes, and its outcome becomes
+    /// `lastVerificationAttempt`.
     @discardableResult
-    public func reverify() async throws -> Verification {
+    public func reverify() async throws -> VerificationReport {
         try await connection.reverify()
     }
 
@@ -186,8 +236,11 @@ public final class EnclaveHTTPClient: Sendable {
     /// client verifies again and retries once when that is safe. Over TLS, a
     /// key that still doesn't match fails with `TinfoilError.attestationError`;
     /// under EHBP, a refreshed key the enclave still rejects fails with EHBP's
-    /// key-configuration error. The retry sends the same request again,
-    /// headers such as `Authorization` included. To stop it, for example when
+    /// key-configuration error. The rejection discards the cached
+    /// verification first, so that `currentVerification` is nil and no
+    /// request uses the rejected key, even if verifying again then fails, as
+    /// with a `TinfoilError.networkError`. The retry sends the same request
+    /// again, headers such as `Authorization` included. To stop it, for example when
     /// the user signs out while it is pending, cancel the task awaiting this
     /// call: a request cancelled before the retry is not sent again and fails
     /// with `CancellationError`.

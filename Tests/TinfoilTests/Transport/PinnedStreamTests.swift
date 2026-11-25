@@ -218,7 +218,7 @@ final class StreamingSessionPublisherTests: XCTestCase {
         let opened = Box(value: 0)
         let session = StreamingSession(delegate: nil) { _ in
             opened.value += 1
-            throw TinfoilError.attestation("rejected", layer: .quote)
+            throw TinfoilError.attestation("rejected")
         }
         let publisher = session.dataTaskPublisher(for: URLRequest(url: URL(string: "https://enclave.example/v1/x")!))
         try await Task.sleep(nanoseconds: 20_000_000)
@@ -237,7 +237,7 @@ final class StreamingSessionPublisherTests: XCTestCase {
 
         XCTAssertEqual(opened.value, 1)
         let underlying = try XCTUnwrap(failure.value?.userInfo[NSUnderlyingErrorKey] as? TinfoilError)
-        XCTAssertEqual(underlying, TinfoilError.attestation("rejected", layer: .quote), "The real error is kept.")
+        XCTAssertEqual(underlying, TinfoilError.attestation("rejected"), "The real error is kept.")
     }
 }
 #endif

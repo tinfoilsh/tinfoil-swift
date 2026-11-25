@@ -11,6 +11,8 @@ import Combine
 #endif
 
 private struct PreparedEHBPRequest {
+    /// The endpoint that the request is sealed to
+    let endpoint: EHBPVerifiedEndpoint
     let rejectedGeneration: UInt64
     let client: EHBPClient
     let method: String
@@ -29,6 +31,7 @@ private func prepareEHBPRequest(
 ) async throws -> PreparedEHBPRequest {
     try Task.checkCancellation()
     try refuseUnsealedTraffic(request)
+    try refuseStreamedBody(request)
     guard let url = request.url else {
         throw EHBPError(.invalidInput, "request has no URL")
     }
@@ -53,6 +56,7 @@ private func prepareEHBPRequest(
     )
 
     return PreparedEHBPRequest(
+        endpoint: snapshot.endpoint,
         rejectedGeneration: snapshot.generation,
         client: client,
         method: request.httpMethod ?? "GET",
@@ -77,6 +81,14 @@ func refuseUnsealedTraffic(_ request: URLRequest) throws {
         throw TinfoilError.configuration(
             "EHBP seals only request and response bodies, so it can't protect a protocol upgrade, such as a WebSocket, or a CONNECT tunnel"
         )
+    }
+}
+
+/// Refuses a request whose body is a stream. Only `httpBody` is sealed, so a
+/// streamed body would be left out and the request sent without one.
+func refuseStreamedBody(_ request: URLRequest) throws {
+    guard request.httpBodyStream == nil else {
+        throw TinfoilError.configuration("EHBP needs a request's body as httpBody, not a stream")
     }
 }
 
@@ -212,6 +224,9 @@ private enum EHBPReplayPolicy {
             do {
                 sent = try await sendOnce(prepared)
             } catch let error as EHBPError where error.code == .keyConfigMismatch {
+                // The enclave doesn't hold the key, so its verification is
+                // discarded first, even if the refresh then fails.
+                await verifiedState.discard(prepared.endpoint)
                 try await refresh(
                     verifiedState,
                     afterRejectedGeneration: prepared.rejectedGeneration,

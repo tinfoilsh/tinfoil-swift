@@ -12,7 +12,7 @@ public struct Policy: Sendable, Equatable {
     /// Register values that the enclave measurement must also match. An empty
     /// register keeps its default check. Pins for one platform reject every
     /// enclave on the other.
-    public var pinnedRegisters: Verification.Measurement?
+    public var pinnedRegisters: VerifiedFacts.Measurement?
     /// The oldest freshness witness accepted, in seconds. Zero selects the
     /// seven-day default; a negative age is refused, and a positive age must
     /// be at least one nanosecond once rounded to whole nanoseconds.
@@ -22,7 +22,7 @@ public struct Policy: Sendable, Equatable {
     public var artifacts: ArtifactTrust
 
     public init(
-        pinnedRegisters: Verification.Measurement? = nil,
+        pinnedRegisters: VerifiedFacts.Measurement? = nil,
         freshnessMaxAge: TimeInterval = 0,
         artifacts: ArtifactTrust = .endorsed()
     ) {
@@ -227,10 +227,10 @@ struct VerifierOptions: Sendable {
 
 /// Decides whether a deployment's config is authorized, in place of verifying
 /// its endorsement. Throw to reject it: the document then fails verification
-/// with `TinfoilError.attestationError` at the provenance layer, carrying the
-/// error's description. Return to authorize it; the runtime, platform and
-/// hardware are still verified, but approving a config authenticates no
-/// registry, name or approval time.
+/// with `TinfoilError.attestationError`, whose `verificationError` names the
+/// provenance layer and carries the error's description. Return to authorize
+/// it; the runtime, platform and hardware are still verified, but approving a
+/// config authenticates no registry, name or approval time.
 ///
 /// It runs synchronously during verification, possibly on several threads at
 /// once, so it must be thread-safe and fast.

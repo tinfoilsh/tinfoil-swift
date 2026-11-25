@@ -48,7 +48,7 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         return URL(string: url)!
     }
 
-    func verify(document: Data, nonce: Data, pin: Pin) throws -> Verification {
+    func verify(document: Data, nonce: Data, pin: Pin) throws -> VerificationReport {
         lock.lock()
         _pins.append(pin)
         lock.unlock()
@@ -65,7 +65,7 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
         case "config":
             throw TinfoilError.configuration("bad repo")
         default:
-            throw TinfoilError.attestation("rejected")
+            throw VerificationReport.rejection(layer: .policy, message: "policy: rejected")
         }
     }
 }
@@ -104,18 +104,67 @@ final class FakeNetwork: @unchecked Sendable {
     }
 }
 
-extension Verification {
+extension VerificationReport {
     /// A 32-byte key, so a stub verification can configure EHBP.
     static let stubHPKEKey = String(repeating: "42", count: 32)
 
-    /// A verification against repo, which records the repository without its
-    /// tag or digest pins, as the verifier does.
+    /// The report of a verification against repo, which records the
+    /// repository without its tag or digest pins, as the verifier does.
     static func stub(
         repo: String = TinfoilConstants.defaultGithubRepo,
         expiresAt: Date = Date().addingTimeInterval(3600),
         hpkePublicKey: String = stubHPKEKey
-    ) -> Verification {
-        Verification(
+    ) -> VerificationReport {
+        VerificationReport(
+            steps: ["envelope", "provenance", "quote", "policy"].map {
+                Step(layer: VerificationLayer(rawValue: $0), status: .passed, message: "")
+            },
+            verifiedFacts: .stub(repo: repo, expiresAt: expiresAt, hpkePublicKey: hpkePublicKey),
+            partialFacts: nil,
+            metadata: VerificationMetadata(
+                verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion),
+                verifiedAt: Date()
+            )
+        )
+    }
+
+    /// The error that the verifier's rejection at layer becomes: an
+    /// attestation error whose verification error carries a report in which
+    /// the step of layer failed, the earlier steps passed and the later ones
+    /// did not run.
+    static func rejection(layer: VerificationLayer, message: String) -> TinfoilError {
+        let layers = ["envelope", "provenance", "quote", "policy"].map { VerificationLayer(rawValue: $0) }
+        let failed = layers.firstIndex(of: layer) ?? layers.count
+        let report = VerificationReport(
+            steps: layers.enumerated().map { index, step in
+                Step(
+                    layer: step,
+                    status: index < failed ? .passed : index == failed ? .failed : .notRun,
+                    message: index == failed ? "verification error: \(message)" : ""
+                )
+            },
+            verifiedFacts: nil,
+            partialFacts: PartialFacts(
+                expected: nil,
+                measured: failed > 0 ? MeasuredFacts(cpu: nil, tlsPublicKeyFingerprint: "deadbeef", hpkePublicKeyFingerprint: "") : nil
+            ),
+            metadata: VerificationMetadata(
+                verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion),
+                verifiedAt: Date()
+            )
+        )
+        return .attestation(message, verificationError: VerificationError(layer: layer, message: message, report: report))
+    }
+}
+
+extension VerifiedFacts {
+    /// Verified facts against repo, as `VerificationReport.stub` holds them
+    static func stub(
+        repo: String = TinfoilConstants.defaultGithubRepo,
+        expiresAt: Date = Date().addingTimeInterval(3600),
+        hpkePublicKey: String = VerificationReport.stubHPKEKey
+    ) -> VerifiedFacts {
+        VerifiedFacts(
             configRepo: String(repo.prefix { $0 != "@" }),
             codeDigest: "abc123",
             codeTag: "",
@@ -129,12 +178,30 @@ extension Verification {
             cryptoMaterial: [
                 .init(id: "tls", format: "https://tinfoil.sh/key/spki-fp-sha256/v1", data: "deadbeef"),
             ] + (hpkePublicKey.isEmpty ? [] : [.init(id: "hpke", format: "https://tinfoil.sh/key/x25519-hpke/v1", data: hpkePublicKey)]),
-            freshnessExpiresAt: expiresAt,
-            metadata: VerificationMetadata(
-                verifier: SoftwareIdentity(name: TinfoilConstants.sdkName, version: TinfoilConstants.sdkVersion),
-                verifiedAt: Date()
-            )
+            freshnessExpiresAt: expiresAt
         )
+    }
+}
+
+extension Result where Success == VerificationReport, Failure == TinfoilError {
+    /// The report of an attempt that passed, or nil
+    var report: VerificationReport? {
+        try? get()
+    }
+
+    /// The error of an attempt that failed, or nil
+    var error: TinfoilError? {
+        guard case .failure(let error) = self else { return nil }
+        return error
+    }
+}
+
+extension TinfoilError {
+    /// The verifier's error that this error carries, when the verifier
+    /// rejected the document
+    var verificationError: VerificationError? {
+        guard case .attestationError(let failure) = self else { return nil }
+        return failure.verificationError
     }
 }
 
@@ -147,7 +214,7 @@ extension TinfoilError {
     /// Whether this is the error an `verificationCheck` callback's `Refusal`
     /// becomes, rather than any other attestation failure
     var isRefusal: Bool {
-        guard case .attestationError(let failure) = self, failure.layer == nil else { return false }
+        guard case .attestationError(let failure) = self, failure.verificationError == nil else { return false }
         return failure.message.contains("verification check rejected") && failure.message.contains(Refusal().description)
     }
 }
@@ -170,6 +237,22 @@ final class Recorder<Value: Sendable>: @unchecked Sendable {
         defer { lock.unlock() }
         _values.append(value)
         return _values.count
+    }
+}
+
+/// A value that a test changes while the code under test reads it, as a
+/// verdict that a fake network serves
+final class Verdict: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: String
+
+    init(_ value: String) {
+        _value = value
+    }
+
+    var value: String {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
     }
 }
 

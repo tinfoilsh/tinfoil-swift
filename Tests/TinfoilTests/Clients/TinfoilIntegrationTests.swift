@@ -8,16 +8,16 @@ final class TinfoilIntegrationTests: XCTestCase {
         try requireLiveIntegration()
         // Attestation does not use the API key, so a placeholder is enough to
         // exercise discovery and verification end to end.
-        let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
+        let captured = Box<Result<VerificationReport, TinfoilError>?>(value: nil)
 
         _ = try await OpenAIClient(
             httpClient: RouterHTTPClient(
-                options: .init(userCacheSecret: "test-secret", onVerificationResult: { result in captured.value = result })
+                options: .init(userCacheSecret: "test-secret", onVerificationAttempt: { _, result in captured.value = result })
             ),
             apiKey: "test-key"
         )
 
-        guard case .success(let verification) = captured.value else {
+        guard case .success = captured.value else {
             return XCTFail("A successful verification should be reported, got \(String(describing: captured.value))")
         }
     }
@@ -51,7 +51,10 @@ final class TinfoilIntegrationTests: XCTestCase {
         do {
             _ = try await OpenAIClient(
                 httpClient: RouterHTTPClient(
-                    options: .init(attestationRelay: "127.0.0.1:9", userCacheSecret: "test-secret")
+                    options: .init(
+                        userCacheSecret: "test-secret",
+                        fetchAttestation: .relay(URL(string: "http://127.0.0.1:9")!)
+                    )
                 ),
                 apiKey: "test-key"
             )

@@ -36,9 +36,17 @@ public enum TinfoilError: Error, Equatable {
     /// Details of an attestation error
     public struct Attestation: Equatable, Sendable {
         public let message: String
-        /// The layer of the verifier that rejected the attestation document,
-        /// when it did
-        public let layer: VerificationLayer?
+        /// The cause of the error when the verifier rejected the attestation
+        /// document with a report: the verifier's error, with the layer that
+        /// rejected the document and the report that shows the step that
+        /// failed and the facts that the steps before it established. It is
+        /// nil for every other attestation error, whose message alone says
+        /// what failed: expired verified facts, a rejection by a
+        /// `verificationCheck`, a channel-binding failure, or a rejection
+        /// that the verifier reported without a report, whose message leads
+        /// with the layer, as in "quote: <detail>". It is diagnostic: choose
+        /// what to do from the category, not from the report.
+        public let verificationError: VerificationError?
     }
 
     /// The error's message, whatever its category
@@ -56,7 +64,7 @@ public enum TinfoilError: Error, Equatable {
 
 /// Shorthand the SDK throws with, each building its case's details: for
 /// example, `.attestation("rejected")` is
-/// `.attestationError(Attestation(message: "rejected", layer: nil))`.
+/// `.attestationError(Attestation(message: "rejected", verificationError: nil))`.
 extension TinfoilError {
     static func configuration(_ message: String) -> TinfoilError {
         .configurationError(Configuration(message: message))
@@ -66,14 +74,32 @@ extension TinfoilError {
         .networkError(Network(message: message, urlError: urlError, status: status))
     }
 
-    static func attestation(_ message: String, layer: VerificationLayer? = nil) -> TinfoilError {
-        .attestationError(Attestation(message: message, layer: layer))
+    static func attestation(
+        _ message: String,
+        verificationError: VerificationError? = nil
+    ) -> TinfoilError {
+        .attestationError(Attestation(message: message, verificationError: verificationError))
     }
 }
 
-/// The layer of the verifier that rejected an attestation document. More
+extension TinfoilError {
+    /// The same error, with host on the report that its `verificationError`
+    /// carries, if it carries one
+    func withReportHost(_ host: String) -> TinfoilError {
+        guard case .attestationError(let failure) = self, let rejected = failure.verificationError else {
+            return self
+        }
+        return .attestation(
+            failure.message,
+            verificationError: VerificationError(layer: rejected.layer, message: rejected.message, report: rejected.report.withHost(host))
+        )
+    }
+}
+
+/// A layer of the verifier: one step of a `VerificationReport`, and the layer
+/// that a `VerificationError` names as having rejected the document. More
 /// layers may be added, so match the ones you handle and tolerate any other.
-public struct VerificationLayer: RawRepresentable, Hashable, Sendable, CustomStringConvertible {
+public struct VerificationLayer: RawRepresentable, Hashable, Sendable, Codable, CustomStringConvertible {
     /// A document that can't be parsed or isn't bound to the request
     public static let envelope = VerificationLayer(rawValue: "envelope")
     /// Reference values that fail to authenticate

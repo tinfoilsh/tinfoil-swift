@@ -250,16 +250,16 @@ final class ClientTests: XCTestCase {
     func testCompleteVerificationFlow() async throws {
         try skipIfNoAPIKey()
 
-        let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
+        let captured = Box<Result<VerificationReport, TinfoilError>?>(value: nil)
 
         let client = try await OpenAIClient(
             httpClient: RouterHTTPClient(
-                options: .init(userCacheSecret: Self.testUserCacheSecret, onVerificationResult: { result in captured.value = result })
+                options: .init(userCacheSecret: Self.testUserCacheSecret, onVerificationAttempt: { _, result in captured.value = result })
             ),
             apiKey: try getAPIKey()
         )
 
-        guard case .success(let verification) = captured.value else {
+        guard case .success(let report) = captured.value, let verification = report.verifiedFacts else {
             return XCTFail("A successful verification should be reported, got \(String(describing: captured.value))")
         }
         XCTAssertEqual(verification.hpkePublicKey.count, 64, "EHBP needs the enclave's HPKE key")
@@ -277,14 +277,14 @@ final class ClientTests: XCTestCase {
     }
 
     func testVerificationFailureIsReported() async throws {
-        let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
+        let captured = Box<Result<VerificationReport, TinfoilError>?>(value: nil)
 
         do {
             _ = try await OpenAIClient(
                 httpClient: EnclaveHTTPClient(
                     enclave: "127.0.0.1:9",
                     trust: .repo(TinfoilConstants.defaultGithubRepo),
-                    options: .init(transport: .ehbp(), onVerificationResult: { result in captured.value = result })
+                    options: .init(transport: .ehbp(), onVerificationAttempt: { _, result in captured.value = result })
                 ),
                 apiKey: "test-key"
             )
@@ -300,7 +300,8 @@ final class ClientTests: XCTestCase {
         try requireLiveIntegration()
         let client = try await RouterHTTPClient(options: .init(userCacheSecret: Self.testUserCacheSecret))
 
-        let verification = try await client.reverify()
+        let report = try await client.reverify()
+        let verification = try XCTUnwrap(report.verifiedFacts)
 
         XCTAssertFalse(client.enclave.isEmpty)
         XCTAssertEqual(verification.configRepo, TinfoilConstants.defaultGithubRepo)
@@ -308,8 +309,8 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(verification.tlsPublicKeyFingerprint.count, 64)
         XCTAssertNotNil(verification.codeMeasurement)
         XCTAssertNotNil(verification.enclaveMeasurement)
-        let latest = await client.current
-        XCTAssertEqual(latest, verification)
+        let latest = await client.lastVerificationAttempt
+        XCTAssertEqual(latest?.report, report)
     }
 
 }

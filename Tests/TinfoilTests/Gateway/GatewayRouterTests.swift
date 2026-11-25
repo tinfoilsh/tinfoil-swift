@@ -14,7 +14,10 @@ final class GatewayRouterTests: XCTestCase {
         let replica: GatewayRouter.Replica
         private let lock = NSLock()
         private var _sent: [URLRequest] = []
-        private var _verified: Verification?
+        private var _last: Result<VerificationReport, TinfoilError>?
+        /// The verification in use: the last that passed, until an
+        /// attestation failure discards it
+        private var _current: VerificationReport?
         private var _closed = false
         let fails: Bool
         let respond: @Sendable (URLRequest) -> (Int, [String: String])
@@ -37,13 +40,31 @@ final class GatewayRouterTests: XCTestCase {
         var sent: [URLRequest] { lock.withLock { _sent } }
         var closed: Bool { lock.withLock { _closed } }
 
-        func usableVerification() async throws -> Verification {
+        func usableVerification() async throws -> VerificationReport {
             if fails {
-                throw TinfoilError.attestation("\(replica.host) failed verification")
+                let error = TinfoilError.attestation("\(replica.host) failed verification")
+                lock.withLock {
+                    _last = .failure(error)
+                    _current = nil
+                }
+                throw error
             }
-            let verification = Verification.stub(repo: replica.reference)
-            lock.withLock { _verified = verification }
+            let verification = VerificationReport.stub(repo: replica.reference)
+            lock.withLock {
+                _last = .success(verification)
+                _current = verification
+            }
             return verification
+        }
+
+        func reverify() async throws -> VerificationReport {
+            try await usableVerification()
+        }
+
+        var currentVerification: VerificationReport? {
+            get async {
+                lock.withLock { _current.flatMap { Date() < $0.freshnessExpiresAt ? $0 : nil } }
+            }
         }
 
         func open(_ request: URLRequest) async throws -> RecoverableResponse {
@@ -57,8 +78,8 @@ final class GatewayRouterTests: XCTestCase {
             )
         }
 
-        var current: Verification? {
-            get async { lock.withLock { _verified } }
+        var lastVerificationAttempt: Result<VerificationReport, TinfoilError>? {
+            get async { lock.withLock { _last } }
         }
 
         func close() async {
@@ -85,14 +106,19 @@ final class GatewayRouterTests: XCTestCase {
         /// Hosts that a request was sealed to, in the order of the sends
         var sealedTo: [String] { lock.withLock { _sealedTo } }
 
+        /// Pins for the two models that the default catalog lists
+        static let pins: [String: (repo: String, attestor: Attestor?)] = [
+            "m": ("tinfoilsh/model-repo", nil),
+            "other": ("tinfoilsh/other-repo", nil),
+        ]
+
         func router(
-            pins: [String: (repo: String, attestor: Attestor?)] = [:],
-            pinnedOnly: Bool = false,
+            pins: [String: (repo: String, attestor: Attestor?)] = Harness.pins,
             attestor: Attestor = Attestor(verifier: FakeVerifier())
         ) throws -> GatewayRouter {
             try GatewayRouter(
                 baseURL: GatewayRouterTests.base,
-                policy: GatewayPolicy(pins: pins, pinnedOnly: pinnedOnly, attestor: attestor),
+                policy: GatewayPolicy(pins: pins, attestor: attestor),
                 catalog: {
                     self.lock.withLock { self._catalogReads += 1 }
                     return self.catalog
@@ -158,13 +184,13 @@ final class GatewayRouterTests: XCTestCase {
 
         XCTAssertEqual(response.response.statusCode, 200)
         let replica = try XCTUnwrap(harness.replicas.first)
-        XCTAssertEqual(replica.replica, GatewayRouter.Replica(host: "d.example", reference: "tinfoilsh/model-repo", pinnedModel: ""))
+        XCTAssertEqual(replica.replica, GatewayRouter.Replica(host: "d.example", reference: "tinfoilsh/model-repo", pinnedModel: "m"))
         let sent = try XCTUnwrap(replica.sent.first)
         XCTAssertEqual(sent.value(forHTTPHeaderField: GatewayRequest.sealHeader), "d.example")
         XCTAssertEqual(sent.value(forHTTPHeaderField: GatewayRequest.modelHeader), "m")
         XCTAssertEqual(sent.url?.absoluteString, "https://gw.example/v1/chat/completions")
 
-        let current = await router.current
+        let current = await router.replicaVerifications
         XCTAssertEqual(current.map(\.host), ["d.example"])
         XCTAssertEqual(current.first?.models, ["m"])
         XCTAssertEqual(current.first?.reference, "tinfoilsh/model-repo")
@@ -176,6 +202,17 @@ final class GatewayRouterTests: XCTestCase {
         let router = try harness.router()
         _ = try await router.open(chat(prefix: "m"))
         XCTAssertEqual(harness.sealedTo, ["c.example"], "Nothing is sealed to a replica that failed verification.")
+
+        // Each replica tried keeps its own last attempt, failed ones included.
+        let attempts = await router.replicaVerifications
+        XCTAssertEqual(attempts.map(\.host), ["b.example", "c.example", "d.example"])
+        for entry in attempts {
+            if entry.host == "c.example" {
+                XCTAssertNotNil(entry.lastAttempt.report, "c.example verified.")
+            } else {
+                XCTAssertEqual(entry.lastAttempt.error?.message, "\(entry.host) failed verification")
+            }
+        }
     }
 
     func testWhenNoReplicaVerifiesTheLastFailureIsThrown() async throws {
@@ -269,7 +306,7 @@ final class GatewayRouterTests: XCTestCase {
         harness.failing = ["d.example"]
         let router = try harness.router()
         let verification = try await router.ensureVerified(model: "m")
-        XCTAssertEqual(verification.configRepo, "tinfoilsh/model-repo")
+        XCTAssertEqual(verification.verifiedFacts?.configRepo, "tinfoilsh/model-repo")
         XCTAssertEqual(harness.replicas.map(\.replica.host), ["d.example", "b.example"])
         XCTAssertTrue(harness.sealedTo.isEmpty, "Verifying sends nothing.")
     }
@@ -283,8 +320,8 @@ final class GatewayRouterTests: XCTestCase {
         harness.catalog["empty"] = CatalogEntry(repo: "tinfoilsh/x", hosts: [])
         harness.catalog["malformed"] = CatalogEntry(repo: "tinfoilsh/", hosts: ["x.example"])
         let all = try await harness.router().models()
-        XCTAssertEqual(all, ["m", "other"])
-        let pinned = try await harness.router(pins: ["m": ("tinfoilsh/model-repo@v1", nil)], pinnedOnly: true).models()
+        XCTAssertEqual(all, ["m", "other"], "Only usable entries that have pins are listed.")
+        let pinned = try await harness.router(pins: ["m": ("tinfoilsh/model-repo@v1", nil)]).models()
         XCTAssertEqual(pinned, ["m"])
     }
 
@@ -293,7 +330,7 @@ final class GatewayRouterTests: XCTestCase {
         let router = try harness.router(pins: ["m": ("tinfoilsh/model-repo@v2", nil)])
         _ = try await router.open(chat(prefix: "m"))
         XCTAssertEqual(harness.replicas.first?.replica, GatewayRouter.Replica(host: "d.example", reference: "tinfoilsh/model-repo@v2", pinnedModel: "m"))
-        let current = await router.current
+        let current = await router.replicaVerifications
         XCTAssertEqual(current.first?.pinnedModel, "m")
     }
 
@@ -311,11 +348,35 @@ final class GatewayRouterTests: XCTestCase {
 
     func testRequestsForUnservedModelsAreRefused() async throws {
         let harness = Harness()
-        let pinnedOnly = try harness.router(pins: ["other": ("tinfoilsh/other-repo", nil)], pinnedOnly: true)
-        await assertError({ $0.message == #"model "m" is not pinned"# }) { try await pinnedOnly.open(self.chat()) }
+        let router = try harness.router(pins: ["other": ("tinfoilsh/other-repo", nil), "missing": ("tinfoilsh/missing", nil)])
+        let unpinned = { (error: TinfoilError) -> Bool in
+            if case .configurationError = error {
+                return error.message == #"model "m" is not pinned"#
+            }
+            return false
+        }
+        await assertError(unpinned) { try await router.open(self.chat()) }
+        await assertError(unpinned) { try await router.ensureVerified(model: "m") }
         await assertError({
             $0.message == #"model "missing" has no valid bare tinfoilsh/ repository with replicas in the gateway catalog"#
-        }) { try await harness.router().open(self.chat("missing")) }
+        }) { try await router.open(self.chat("missing")) }
+        XCTAssertTrue(harness.replicas.isEmpty, "No replica is contacted for a model that is not served.")
+    }
+
+    func testAModelThatTheCatalogAddsLaterIsNotServed() async throws {
+        let harness = Harness()
+        let router = try harness.router()
+        harness.catalog["added"] = CatalogEntry(repo: "tinfoilsh/added", hosts: ["n.example"])
+        let models = try await router.models()
+        XCTAssertEqual(models, ["m", "other"])
+        let unpinned = { (error: TinfoilError) -> Bool in
+            if case .configurationError = error {
+                return error.message == #"model "added" is not pinned"#
+            }
+            return false
+        }
+        await assertError(unpinned) { try await router.open(self.chat("added")) }
+        await assertError(unpinned) { try await router.ensureVerified(model: "added") }
         XCTAssertTrue(harness.replicas.isEmpty)
     }
 
@@ -331,13 +392,13 @@ final class GatewayRouterTests: XCTestCase {
             }
         }
         let refusing = Attestor(verifier: FakeVerifier(refusedRepo: "tinfoilsh/bad"))
-        XCTAssertEqual(message { try GatewayPolicy(pins: [:], pinnedOnly: true, attestor: refusing) },
-                       "pinned-only mode requires at least one model pin")
-        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("someone/x", nil)], pinnedOnly: false, attestor: refusing) },
+        XCTAssertEqual(message { try GatewayPolicy(pins: [:], attestor: refusing) },
+                       "a gateway client requires at least one model pin")
+        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("someone/x", nil)], attestor: refusing) },
                        #"model pin "m" repository "someone/x" must belong to tinfoilsh/"#)
-        XCTAssertEqual(message { try GatewayPolicy(pins: [" ": ("tinfoilsh/x", nil)], pinnedOnly: false, attestor: refusing) },
+        XCTAssertEqual(message { try GatewayPolicy(pins: [" ": ("tinfoilsh/x", nil)], attestor: refusing) },
                        #"model pin " " repository "tinfoilsh/x" must belong to tinfoilsh/"#)
-        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("tinfoilsh/bad", nil)], pinnedOnly: false, attestor: refusing) },
+        XCTAssertEqual(message { try GatewayPolicy(pins: ["m": ("tinfoilsh/bad", nil)], attestor: refusing) },
                        #"model "m": repo tinfoilsh/bad cannot be verified"#)
     }
 

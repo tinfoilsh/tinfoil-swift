@@ -14,28 +14,30 @@ import FoundationNetworking
 public final class RouterHTTPClient: Sendable {
     let connection: EnclaveConnection
 
-    /// Picks the first of Tinfoil's routers that verifies, and otherwise the
-    /// fallback router, and verifies it. Routers are tried for at most 30
-    /// seconds before falling back, and each call discovers again. With an
-    /// attestation relay, the relay is asked for the fallback router instead.
-    /// The configuration is checked before any network I/O. Without a
-    /// non-empty `userCacheSecret`, the client uses the secret that is
-    /// generated once per process; when it can't be generated, this throws
-    /// `SecureRandomError`, before any network I/O.
+    /// Picks the first router of the list, in a random order, that verifies,
+    /// and otherwise the fallback router, and verifies it. Routers are tried
+    /// for at most 30 seconds before falling back, and each call discovers
+    /// again, whatever the options. The configuration is checked before any
+    /// network I/O. Without a non-empty `userCacheSecret`, the client uses
+    /// the secret that is generated once per process; when it can't be
+    /// generated, this throws `SecureRandomError`, before any network I/O.
     ///
     /// - Parameter options: The client's options; each one's default applies
     ///   when it is not set
     public convenience init(options: RouterOptions = RouterOptions()) async throws {
+        try options.fetchAttestation?.relayURL.map { try EnclaveConnection.validateRelayURL($0) }
+        try options.fetchRouterList?.relayURL.map { try EnclaveConnection.validateRelayURL($0) }
         try await self.init(verifying: EnclaveConnection.router(
             attestor: Attestor(
                 verifier: try GoAttestationVerifier(trust: nil, policy: options.policy),
-                verificationCheck: options.verificationCheck
+                verificationCheck: options.verificationCheck,
+                fetchAttestation: options.fetchAttestation,
+                fetchRouterList: options.fetchRouterList
             ),
             transportMode: options.transport.mode,
             baseURL: options.transport.proxyURL,
-            attestationRelay: options.attestationRelay,
             userCacheSecret: options.userCacheSecret,
-            onVerificationResult: options.onVerificationResult
+            onVerificationAttempt: options.onVerificationAttempt
         ))
     }
 
@@ -66,24 +68,72 @@ public final class RouterHTTPClient: Sendable {
     /// when requests go through a proxy.
     public var enclave: String { connection.enclave }
 
-    /// The last successful verification, without checking it. It may have
-    /// expired or been rejected; use `ensureVerified()` for one that is valid.
-    public var current: Verification? {
-        get async { await connection.current }
+    /// The report of the verification that the client's requests are bound
+    /// to now, the chosen router's, without I/O: the latest successful
+    /// verification while it is fresh, before its verified facts'
+    /// `freshnessExpiresAt`, and has not been discarded. It is nil before
+    /// the first successful verification, after a failure discarded the
+    /// verification, such as a `reverify()` that failed with
+    /// `TinfoilError.attestationError` or the router's rejection of the
+    /// verified key, and once the verification has expired, until a later
+    /// verification succeeds. A `reverify()` that
+    /// fails in any other way, such as with a `TinfoilError.networkError`,
+    /// leaves it unchanged while it is fresh, though `lastVerificationAttempt`
+    /// then returns the failure.
+    ///
+    /// The client doesn't verify again in the background, so after expiry it
+    /// is nil until the next request or `ensureVerified()` verifies again.
+    /// It holds at the time of the call: the verification can expire right
+    /// after. Use `ensureVerified()` to check that requests can be sent,
+    /// verifying when needed.
+    public var currentVerification: VerificationReport? {
+        get async { await connection.currentVerification }
     }
 
-    /// Returns a verification that is valid now, verifying first only if the
-    /// cached one has expired. A returned verification means requests can be
-    /// sent.
+    /// The outcome of the client's most recent attempt to verify the router
+    /// that it chose, without I/O, or nil before the first: the attempt's
+    /// report if it passed, and otherwise the error that the client reported
+    /// for it.
+    /// When the verifier rejected the document, the error is
+    /// `TinfoilError.attestationError`, whose `verificationError` carries the
+    /// report that shows the step that failed; an attempt that failed before
+    /// the verifier ran, such as a failed fetch, or that the
+    /// `verificationCheck` rejected, has none. Every attempt counts: the first
+    /// verification, retries, and every verification again, so a failure
+    /// replaces an earlier success.
+    ///
+    /// It doesn't check freshness, so a report that it returns may have
+    /// expired or been discarded since; `currentVerification` is the
+    /// verification that requests are bound to now.
+    public var lastVerificationAttempt: Result<VerificationReport, TinfoilError>? {
+        get async { await connection.lastVerificationAttempt }
+    }
+
+    /// Returns the report of a verification that is valid now, verifying
+    /// first only if the cached one has expired. A returned report means
+    /// requests can be sent.
     @discardableResult
-    public func ensureVerified() async throws -> Verification {
+    public func ensureVerified() async throws -> VerificationReport {
         try await connection.ensureVerified()
     }
 
     /// Verifies the router again, even if the cached verification is still
     /// valid. It stays with the router chosen at creation.
+    ///
+    /// If the new verification fails with `TinfoilError.attestationError`,
+    /// this throws it and the client discards its cached verification, even
+    /// one that is still valid: no later request is sent under it,
+    /// `currentVerification` is nil, and the next request verifies again,
+    /// failing while the problem persists. Other failures, such as a
+    /// `TinfoilError.networkError` or a cancellation, keep a cached
+    /// verification that is still valid, which `currentVerification` still
+    /// returns. Requests already in flight finish. Either way, the failed
+    /// attempt becomes `lastVerificationAttempt`. It returns the new report.
+    /// Cancelling the call ends only its own wait: the verification that it
+    /// started or joined still finishes, and its outcome becomes
+    /// `lastVerificationAttempt`.
     @discardableResult
-    public func reverify() async throws -> Verification {
+    public func reverify() async throws -> VerificationReport {
         try await connection.reverify()
     }
 

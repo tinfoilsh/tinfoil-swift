@@ -83,7 +83,7 @@ final class UserCacheSecretTests: XCTestCase {
 
     func testARouterWhoseSecretCantBeGeneratedFailsBeforeDiscovery() async throws {
         let process = UserCacheSecret.ProcessSecret(random: failingOnce(status: errSecAllocate))
-        // Without a relay, discovery would fetch the router list first.
+        // Discovery fetches the router list first.
         let fetches = Calls()
         let attestor = Attestor(verifier: FakeVerifier(), fetch: { _ in
             _ = fetches.record()
@@ -94,43 +94,55 @@ final class UserCacheSecretTests: XCTestCase {
                 attestor: attestor,
                 transportMode: .ehbp,
                 baseURL: nil,
-                attestationRelay: nil,
                 userCacheSecret: nil,
                 processSecret: process,
-                onVerificationResult: nil
+                onVerificationAttempt: nil
             )
             XCTFail("expected SecureRandomError")
         } catch {
             XCTAssertEqual(error as? SecureRandomError, SecureRandomError(status: errSecAllocate))
         }
         XCTAssertEqual(fetches.made, 0, "Discovery did not start.")
-        // A relay skips discovery's network I/O; the route is still Tinfoil's router.
+        // Discovery finds no router, so the fallback, Tinfoil's router, is used.
         let connection = try await EnclaveConnection.router(
             attestor: attestor,
             transportMode: .ehbp,
             baseURL: nil,
-            attestationRelay: "relay.example",
             userCacheSecret: nil,
             processSecret: process,
-            onVerificationResult: nil
+            onVerificationAttempt: nil
         )
+        XCTAssertGreaterThan(fetches.made, 0, "Discovery ran once the secret was generated.")
         XCTAssertEqual(connection.userCacheSecret, try process.value())
     }
 
-    func testAGatewayWhoseSecretCantBeGeneratedFailsBeforeReadingTheCatalog() async throws {
+    func testAGatewayWhoseSecretCantBeGeneratedFailsBeforeAnyNetworkIO() async throws {
         let process = UserCacheSecret.ProcessSecret(random: failingOnce(status: errSecAllocate))
-        let reads = Calls()
-        let options = GatewayOptions(url: URL(string: "https://gateway.example/v1/")!, catalog: {
-            _ = reads.record()
-            return [:]
-        })
+        let gets = Calls()
+        let options = GatewayOptions(
+            modelPins: ["pinned": ModelPin(repo: "tinfoilsh/pinned")],
+            url: URL(string: "https://gateway.example/")!
+        )
+        let get: @Sendable (URL) async throws -> Data = { _ in
+            _ = gets.record()
+            throw TinfoilError.network("no network in this test")
+        }
         do {
-            _ = try await GatewayHTTPClient(options: options, processSecret: process)
+            _ = try await GatewayHTTPClient(options: options, get: get, verifier: { _ in FakeVerifier() }, processSecret: process)
             XCTFail("expected SecureRandomError")
         } catch {
             XCTAssertEqual(error as? SecureRandomError, SecureRandomError(status: errSecAllocate))
         }
-        XCTAssertEqual(reads.made, 0, "The catalog is not read.")
+        XCTAssertEqual(gets.made, 0, "Neither the catalog nor an attestation document is fetched.")
+        // A later client generates the secret, and then reads the catalog.
+        do {
+            _ = try await GatewayHTTPClient(options: options, get: get, verifier: { _ in FakeVerifier() }, processSecret: process)
+            XCTFail("expected the catalog fetch to fail")
+        } catch let error as TinfoilError {
+            guard case .networkError = error else { return XCTFail("expected a network error, got \(error)") }
+        }
+        XCTAssertGreaterThan(gets.made, 0, "The catalog is fetched once the secret was generated.")
+        assertIsGeneratedSecret(try process.value())
     }
 
     func testAnEnclaveTheCallerNamesGetsNoSecret() throws {
@@ -139,9 +151,8 @@ final class UserCacheSecretTests: XCTestCase {
             pin: Pin(repo: "org/repo"),
             transportMode: .tls,
             baseURL: nil,
-            attestationRelay: nil,
             attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
-            onVerificationResult: nil
+            onVerificationAttempt: nil
         )
         XCTAssertEqual(connection.userCacheSecret, "", "Only Tinfoil's routers read the secret, so none is added for another enclave.")
         // With no client secret, an eligible body is sent as written, an
@@ -156,14 +167,13 @@ final class UserCacheSecretTests: XCTestCase {
     }
 
     func testDiscoveringARouterUsesTheProcessSecret() async throws {
-        // A relay skips discovery's network I/O; the route is still Tinfoil's router.
+        // Discovery finds no router, so the fallback, Tinfoil's router, is used.
         let connection = try await EnclaveConnection.router(
             attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
             transportMode: .ehbp,
             baseURL: nil,
-            attestationRelay: "relay.example",
             userCacheSecret: nil,
-            onVerificationResult: nil
+            onVerificationAttempt: nil
         )
         XCTAssertEqual(connection.userCacheSecret, try UserCacheSecret.processSecret.value())
     }

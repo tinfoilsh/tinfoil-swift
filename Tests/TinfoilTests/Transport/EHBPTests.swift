@@ -611,6 +611,75 @@ final class EHBPTests: XCTestCase {
         XCTAssertEqual(enclaveRoutes(), ["https://old-router.example", "https://new-router.example"])
     }
 
+    /// A handle verifying the enclave from an attestation source that serves
+    /// verdict, failing as a network error does while it is "offline", and
+    /// the EHBP channel over it that sends to the test server, verified
+    private func verifiedChannel(_ verdict: Verdict) async throws -> (EnclaveHandle, EHBPChannel, VerificationReport) {
+        let network = FakeNetwork { url, _ in
+            if verdict.value == "offline" {
+                throw TinfoilError.network("attestation source unreachable")
+            }
+            return FakeNetwork.document(verdict.value, for: url)
+        }
+        let handle = EnclaveHandle(
+            enclave: "enclave.example",
+            pin: Pin(repo: "org/repo"),
+            attestationRelay: nil,
+            attestor: Attestor(verifier: FakeVerifier(), fetch: { try network.fetch($0) }, retryDelay: 0)
+        )
+        let channel = EHBPChannel(
+            origin: server.baseURL,
+            enclaveURL: "https://enclave.example",
+            handle: handle,
+            initial: nil,
+            userCacheSecret: ""
+        )
+        let first = try await handle.ensureVerified()
+        return (handle, channel, first)
+    }
+
+    func testAKeyRejectionThenAnUnreachableAttestationSourceLeavesNoCurrentVerification() async throws {
+        server.queuedResponses = [
+            .init(statusCode: 422, contentType: "application/problem+json", body: Self.keyConfigProblemBody, includeNonce: false),
+        ]
+        let verdict = Verdict("ok")
+        let (handle, channel, first) = try await verifiedChannel(verdict)
+
+        verdict.value = "offline"
+        do {
+            _ = try await channel.session.data(for: chatRequest(), delegate: nil)
+            XCTFail("the request must fail while the enclave can't be verified again")
+        } catch TinfoilError.networkError {
+        }
+        let current = await handle.currentVerification
+        XCTAssertNil(current, "The rejected verification \(first) is no longer in use.")
+
+        do {
+            _ = try await channel.session.data(for: chatRequest(), delegate: nil)
+            XCTFail("no request may be sealed to the rejected key")
+        } catch TinfoilError.networkError {
+        }
+        XCTAssertEqual(server.requestStore.requests.count, 1, "Only the rejected request was sent.")
+    }
+
+    func testAKeyRejectionThenASuccessfulReverificationReportsTheNewVerification() async throws {
+        server.queuedResponses = [
+            .init(statusCode: 422, contentType: "application/problem+json", body: Self.keyConfigProblemBody, includeNonce: false),
+            .init(statusCode: 401, contentType: "text/plain", body: Data("unauthorized".utf8), includeNonce: false),
+        ]
+        let (handle, channel, first) = try await verifiedChannel(Verdict("ok"))
+
+        let (_, response) = try await channel.session.data(for: chatRequest(), delegate: nil)
+
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 401, "The replay's response is returned.")
+        XCTAssertEqual(server.requestStore.requests.count, 2, "The request was replayed once.")
+        let current = await handle.currentVerification
+        let last = await handle.lastVerificationAttempt?.report
+        XCTAssertNotNil(current)
+        XCTAssertNotEqual(current, first)
+        XCTAssertEqual(current, last, "The new verification is the one in use.")
+    }
+
     func testCancellingDuringTheRefreshPreventsTheReplay() async throws {
         server.responseStatusCode = 422
         server.responseContentType = "application/problem+json"
@@ -1045,6 +1114,27 @@ final class EHBPTests: XCTestCase {
             }
         }
         XCTAssertTrue(server.requestStore.requests.isEmpty, "Nothing unsealed may leave the client.")
+    }
+
+    func testRefusesAStreamedBody() async {
+        let state = EHBPVerifiedState(
+            endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey, expiresAt: .distantFuture),
+            refresh: nil
+        )
+        let session = EHBPURLSession(baseURL: server.baseURL, verifiedState: state)
+        var request = URLRequest(url: URL(string: "\(server.baseURL)/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.httpBodyStream = InputStream(data: Data(#"{"model":"m"}"#.utf8))
+
+        do {
+            _ = try await session.data(for: request, delegate: nil)
+            XCTFail("a streamed body must be refused")
+        } catch TinfoilError.configurationError(let failure) {
+            XCTAssertTrue(failure.message.contains("not a stream"), failure.message)
+        } catch {
+            XCTFail("expected a configuration error, got \(error)")
+        }
+        XCTAssertTrue(server.requestStore.requests.isEmpty, "A request must not be sent without its body.")
     }
 
     func testExpiredAttestationIsRefreshedBeforeTheRequestIsSent() async throws {

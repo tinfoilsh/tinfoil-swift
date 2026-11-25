@@ -35,17 +35,17 @@ let client = try await OpenAIClient(apiKey: key)
 | `TINFOIL_API_KEY` when `apiKey` is nil | no longer read: pass the key |
 | `githubRepo` with no enclave (Tinfoil's router) | `OpenAIClient(apiKey:)`, or `OpenAIClient(httpClient:apiKey:)` over a `RouterHTTPClient`; the router's trust is fixed |
 | `githubRepo` with an enclave you name | `OpenAIClient(httpClient:apiKey:)` over `EnclaveHTTPClient(enclave:trust:)` with `trust: .repo("org/repo")` |
-| `baseURL` (a proxy) and `attestationBundleURL` | the HTTP client's `options: .init(transport: .ehbp(proxyURL:), attestationRelay:)`; see below |
+| `baseURL` (a proxy) and `attestationBundleURL` | the HTTP client's `options: .init(transport: .ehbp(proxyURL:), fetchAttestation: .relay(_:))`; see below |
 | `parsingOptions`, `customHeaders`, `tinfoilEvents` | the same, on `OpenAIClient` |
 | `userCacheSecret` | the `userCacheSecret` option of `RouterHTTPClient` and `GatewayHTTPClient`; see "Prompt cache" |
-| `onVerification: (VerificationDocument?) -> Void` | `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, which observes, and `verificationCheck: (Verification) throws -> Void`, which can reject an enclave |
+| `onVerification: (VerificationDocument?) -> Void` | `onVerificationAttempt: (String, Result<VerificationReport, TinfoilError>) -> Void`, which observes each attempt, and `verificationCheck: (VerifiedFacts) throws -> Void`, which can reject an enclave |
 
 ### Proxies and attestation
 
 0.8.x fetched an attestation bundle from `attestationBundleURL` (by default
 `https://atc.tinfoil.sh/attestation`). Now each client fetches the enclave's
-attestation from the enclave itself, or through the host that you pass as
-`attestationRelay`, which forwards attestation requests to it.
+attestation from the enclave itself, or through a relay that you pass as
+`fetchAttestation: .relay(url)`, which forwards attestation requests to it.
 
 To send requests through a proxy, pass `transport: .ehbp(proxyURL:)`: request
 bodies are sealed to the enclave's attested key, and requests carry
@@ -59,8 +59,8 @@ let proxied = try await EnclaveHTTPClient(
     enclave: "enclave.example.com",
     trust: .repo("org/repo"),
     options: .init(
-        transport: .ehbp(proxyURL: URL(string: "https://proxy.example.com/")!),
-        attestationRelay: "proxy.example.com"
+        transport: .ehbp(proxyURL: URL(string: "https://app.example/tinfoil/proxy")!),
+        fetchAttestation: .relay(URL(string: "https://app.example/tinfoil")!)
     )
 )
 let client = try OpenAIClient(httpClient: proxied, apiKey: key)
@@ -82,41 +82,52 @@ initializer returns, so there is no separate `verify()`.
 | 0.8.x | now |
 |---|---|
 | `SecureClient(githubRepo:enclaveURL:)` | `try await EnclaveHTTPClient(enclave:trust:)` (the enclave is a host, not a URL) |
-| `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `try await EnclaveHTTPClient(enclave:trust:options: .init(attestationRelay:))` |
+| `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `try await EnclaveHTTPClient(enclave:trust:options: .init(fetchAttestation: .relay(_:)))` |
 | `verify()` | `ensureVerified()` (valid now, verifying only if needed) or `reverify()` |
-| `verificationDocument`, `verifiedGroundTruth` | `current`, a `Verification` |
+| `verificationDocument`, `verifiedGroundTruth` | `currentVerification`, the `VerificationReport?` of the verification that requests use now, or `lastVerificationAttempt`, the most recent attempt as a `Result<VerificationReport, TinfoilError>?` |
 | `verifiedEnclaveURL` | `enclave` and `baseURL` |
 | `get(url:headers:)`, `post(url:headers:body:)` → `SecureResponse` | `data(from:)`, `data(for:)` → `(Data, HTTPURLResponse)` |
 
 ### Verification results
 
 `VerificationDocument`, `GroundTruth`, `AttestationResponse`, `Measurement`,
-`HardwareMeasurement` and the step states are replaced by one `Verification`:
+`HardwareMeasurement` and the step states are replaced by a
+`VerificationReport`: its `steps`, one for each layer of the verifier, and the
+`VerifiedFacts` of a verification that passed:
 
-| 0.8.x | `Verification` |
+| 0.8.x | `VerifiedFacts` |
 |---|---|
 | `configRepo` | `configRepo` |
 | `releaseDigest`, `digest` | `codeDigest` |
 | `releaseTag` | `codeTag` (`""` when there is none) |
-| `codeMeasurement`, `enclaveMeasurement` | `codeMeasurement`, `enclaveMeasurement` (`Verification.Measurement`) |
+| `codeMeasurement`, `enclaveMeasurement` | `codeMeasurement`, `enclaveMeasurement` (`VerifiedFacts.Measurement`) |
 | `tlsPublicKey` | `tlsPublicKeyFingerprint` |
 | `hpkePublicKey` | `hpkePublicKey` (`""` for a TLS-only enclave) |
-| `verifier`, `verifiedAt` | `metadata.verifier`, `metadata.verifiedAt` (a `Date`) |
-| `securityVerified`, `steps` | gone: a `Verification` exists only when every check passed |
+| `verifier`, `verifiedAt` | `metadata.verifier`, `metadata.verifiedAt` (a `Date`), on the report |
+| `securityVerified`, `steps` | the report's `steps`; `verifiedFacts` are set only when every step passed |
 | — | `freshnessExpiresAt`, `cryptoMaterial`, and `config`, `runtime` and `platform` for a deployment verified from its config |
 
 ### Errors
 
 Failures of configuration, of fetching attestation and of verification are a
 `TinfoilError`, with one of three cases: `.configurationError`,
-`.networkError` and `.attestationError`. An attestation error carries the
-verifier's `layer` (envelope, provenance, quote or policy). `message` is the
+`.networkError` and `.attestationError`. When the verifier rejected the
+document with a report, an attestation error's `verificationError` names the
+layer that rejected it (envelope, provenance, quote or policy) and carries
+the report. Otherwise `verificationError` is nil and the message alone says
+what failed; a rejection that the verifier reported without a report still
+leads its message with the layer, as in `quote: <detail>`. `message` is the
 text alone, and `category` names the case.
 
 Sending a request can also throw other errors: `URLError` for a transport
 failure over pinned TLS, `EHBPError` from the EHBP layer (for example a key
 that the enclave still rejects after a refresh), `CancellationError` when the
 task is cancelled, and the OpenAI SDK's own errors for an API failure.
+
+A router or gateway client's initializer, and `OpenAIClient(apiKey:)`, throw
+`SecureRandomError`, outside `TinfoilError`'s cases, when the system random
+number generator fails while it generates the process's prompt-cache secret;
+see "Prompt cache".
 
 | 0.8.x | now |
 |---|---|
@@ -128,7 +139,9 @@ task is cancelled, and the OpenAI SDK's own errors for an API failure.
 ### Low-level types
 
 `EHBPURLSession`, `EHBPURLSessionFactory`, `TinfoilConstants`, `SecureResponse`
-and `VerificationCallback` are no longer public. Send requests of your own with
+and the 0.8.x `VerificationCallback` are no longer public; the
+`VerificationCallback` of this release is the type of the
+`onVerificationAttempt` option. Send requests of your own with
 an HTTP client's `data(for:)`, or with `recoverableBytes(for:)` for a streamed
 EHBP response and its session recovery token.
 
@@ -139,8 +152,8 @@ EHBP response and its session recovery token.
 | `policy: VerificationPolicy(pinnedRegisters:freshnessMaxAge:)` | `options: .init(policy: Policy(pinnedRegisters:freshnessMaxAge:))` |
 | `onEnclaveVerified`, `EnclaveVerifiedCallback` | `verificationCheck`, `VerificationCheck`; a rejection reads "verification check rejected <host>: <cause>" |
 | `RouterHTTPClient`, `RouterOpenAIClient`, `EnclaveOpenAIClient` sealed with EHBP | pinned TLS by default; pass `transport: .ehbp()` to keep sealing, as a proxy requires |
-| `Verification.codeTag: String?`, `hpkePublicKey: String?` | `String`, `""` when absent |
-| `Verification.verifiedAt`, `verifier` | `metadata.verifiedAt`, `metadata.verifier` |
+| `Verification.codeTag: String?`, `hpkePublicKey: String?` | `VerifiedFacts.codeTag`, `hpkePublicKey`: `String`, `""` when absent |
+| `Verification.verifiedAt`, `verifier` | `VerificationReport.metadata.verifiedAt`, `metadata.verifier` |
 | `TINFOIL_API_KEY` read when no key is given | not read: pass `apiKey` or `apiKeyProvider` |
 | `localizedDescription` of a `TinfoilError` | now led by the category, as in "configuration error: …"; `message` is the text alone |
 | a base URL with `?` or `#` | refused |
@@ -157,8 +170,8 @@ The clients take a trust argument, on the enclave client only, and their
 optional settings as one options value. Settings that only make sense
 together are one value, such as a proxy URL inside `.ehbp(proxyURL:)`, so
 the combinations that used to be refused at run time can no longer be
-written. Single values, and the gateway's pinned-only mode, which needs a
-model pin, are still checked before any network I/O.
+written. Single values, and the gateway's model pins, of which it needs at
+least one, are still checked before any network I/O.
 
 | 0.9.0-rc.6 | now |
 |---|---|
@@ -173,7 +186,9 @@ model pin, are still checked before any network I/O.
 | `Verifier(freshnessSigningKeys: k)` | `Policy(artifacts: .endorsed(freshnessKeys: k))` |
 | `Verifier(embeddedReferences: .init(runtime: r, platform: p))` | `Policy(artifacts: .embedded(runtime: r, platform: p))` |
 | `ModelPin(repo: r, verifier: v)` | `ModelPin(repo: r, policy: p)` |
-| `GatewayHTTPClient(baseURL: u)`, `GatewayHTTPClient.defaultBaseURL` | `GatewayHTTPClient(options: .init(url: u))`, `GatewayHTTPClient.defaultURL` |
+| `GatewayHTTPClient(baseURL: u)`, `GatewayHTTPClient.defaultBaseURL` | `GatewayHTTPClient(options: .init(url: u))`, `GatewayHTTPClient.defaultURL`. The URL is the gateway's origin, or the URL that it is mounted under, without the API path: `https://inference-gateway.tinfoil.sh/v1/` becomes `https://inference-gateway.tinfoil.sh/`, and the OpenAI client adds the API path under it |
+| the gateway's catalog and attestation relay at the URL's origin | under the URL's path: `{url}/catalog` and `{url}/.well-known/tinfoil-attestation` |
+| a gateway client's relative request URL, such as `chat/completions`, resolved under `/v1/` | resolved under the gateway's URL: write `v1/chat/completions` |
 | `transportMode: .tls` | `transport: .tls`, or unset |
 | `transportMode: .ehbp` | `transport: .ehbp()` |
 | `transportMode: .ehbp, baseURL: proxy` | `transport: .ehbp(proxyURL: proxy)`; the OpenAI client adds the API path under it, so `https://proxy.example/v1/` becomes `https://proxy.example/` |
@@ -183,11 +198,65 @@ model pin, are still checked before any network I/O.
 | `EnclaveOpenAIClient(enclave:pin:…apiKey:)` | `OpenAIClient(httpClient: try await EnclaveHTTPClient(enclave:trust:options:), apiKey:)` |
 | `RouterOpenAIClient(…)`, `GatewayOpenAIClient(…)` | `OpenAIClient(httpClient:apiKey:)` over a `RouterHTTPClient` or a `GatewayHTTPClient` |
 | `Client(apiKey:)` | `OpenAIClient(apiKey:)` |
-| the OpenAI client's base URL from the HTTP client's `baseURL` | set by the SDK: `OpenAIOptions.apiPath`, `/v1/` by default, under the proxy URL or the enclave's origin; the gateway's URL for a gateway client |
+| the OpenAI client's base URL from the HTTP client's `baseURL`, whose path was the API path, or `/v1` for a bare origin | set by the SDK: the `apiPath` argument of `OpenAIClient`, `/v1/` by default, joined under the proxy URL, the enclave's origin or the gateway's URL, whose path is where the proxy or gateway is mounted. An empty or invalid API path is a configuration error |
 | `userCacheSecret` on an enclave client | gone: the enclave client sends bodies as they are; set `user_cache_secret` per request |
+| `attestationRelay: "relay.example"`, a host that serves `/.well-known/tinfoil-attestation?nonce=…&enclave=…` | `fetchAttestation: .relay(URL(string: "https://relay.example")!)`, a URL whose path is where the relay is mounted, or `AttestationFetcher { host, nonce in … }` |
+| a router client with `attestationRelay`, which skipped discovery and asked the relay for the fallback router | discovery always runs, and fetches every router's document through `fetchAttestation`; set `fetchRouterList: .relay(url)` to fetch the list through `{url}/routers` too |
 
 `OpenAIClient.httpClient` is an `any AttestedHTTPClient`; cast it to the
 concrete client for that client's own members.
+
+### Verification reports (after 0.9.0-rc.6)
+
+Verification returns a `VerificationReport`: the steps that the verifier ran,
+the `VerifiedFacts` of a verification that passed, and, when the verifier
+rejected the document, the `PartialFacts` that the steps before the failure
+established. A rejection is still a `TinfoilError.attestationError`; its
+`verificationError` carries the verifier's error and the report. This
+release needs a TinfoilGo framework that returns the result in schema
+version 3, which carries the report in the JSON form below, and refuses any
+other version.
+
+| 0.9.0-rc.6 | now |
+|---|---|
+| `Verification` | `VerifiedFacts`, the `verifiedFacts` of a `VerificationReport`; `metadata` moved to the report |
+| `Verification.Measurement` | `VerifiedFacts.Measurement` |
+| `ensureVerified()`, `reverify()`, the gateway's `ensureVerified(model:)` returning a `Verification` | the same calls, returning a `VerificationReport` |
+| `current`, the last successful verification, kept after a later failure | `currentVerification`: the report of the verification that requests are bound to now, nil once it has expired or an attestation failure or a key rejection discarded it; and `lastVerificationAttempt`: the most recent attempt, as a `Result<VerificationReport, TinfoilError>?`, so a failure replaces an earlier success |
+| `GatewayHTTPClient.current`, with each replica's last successful `verification` | `GatewayHTTPClient.replicas`, with each replica tried, failed ones included, its `current` verification and its `lastAttempt` |
+| — | `GatewayHTTPClient.reverify(model:)`, which verifies again the replica that `ensureVerified(model:)` would return |
+| `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, called once per verification run | `onVerificationAttempt: (String, Result<VerificationReport, TinfoilError>) -> Void`, called once for every attempt, retries and each router that discovery tries included, with the host that the attempt verified |
+| `VerificationResultCallback` | `VerificationCallback` |
+| `VerificationCheck` receiving a `Verification` | `VerificationCheck` receiving the `VerifiedFacts` |
+| `Verification.Measurement`, `Verification.CryptoMaterial` conforming to `Decodable` | `VerifiedFacts.Measurement`, `VerifiedFacts.CryptoMaterial` conforming to `Encodable` only |
+
+`JSONEncoder` writes a report, and each of the facts that it holds, in the
+JSON form that every Tinfoil SDK writes: snake_case members, lowercase hex,
+RFC 3339 times in UTC, `"schema_version": 1`, and no member that is null or
+`""`. A measurement names its registers by platform, as
+`{"platform": "tdx", "rtmr1": "…", "rtmr2": "…"}`, without one that is
+unconstrained, and the TLS and HPKE keys appear only in
+`verified_facts.crypto_material`. The types are `Encodable` but not
+`Decodable`: nothing reads the form back into a report, since anyone can write
+verified facts in JSON, so the form never authorizes a channel. A report that
+a client hands out names the host that the client contacted, as
+`metadata.host` (`VerificationMetadata.host`); it is not attested.
+
+### Gateway model pins (after 0.9.0-rc.6)
+
+A gateway client serves only the models that it has pins for, and
+`models()` lists only those. A request or `ensureVerified(model:)` for any
+other model, including one that a catalog refresh adds later, fails with
+`TinfoilError.configurationError` and contacts no replica; a model that the
+catalog lists without a pin is no longer verified against the catalog's
+repository.
+
+| 0.9.0-rc.6 | now |
+|---|---|
+| `GatewayOptions(modelPins: pins, pinnedModelsOnly: true)` | `GatewayOptions(modelPins: pins)`; `pinnedModelsOnly` is gone |
+| `GatewayOptions()` with no pins, serving every model in the catalog | pin each model to serve: `GatewayOptions(modelPins: ["model": ModelPin(repo: "tinfoilsh/repo")])`; `modelPins` is required, and an empty set is refused before any network I/O |
+| `policy` for unpinned models and for pins that set none | `policy` for pins that set none; a pin's own `policy` still replaces it entirely |
+| `ReplicaVerification.pinnedModel` of `""` for an unpinned model | always the pinned model's name |
 
 ## Prompt cache
 
@@ -198,6 +267,12 @@ and shared by its clients, so cache hits are no longer shared across processes
 or with other Tinfoil SDKs on the machine. Pass `userCacheSecret` to keep a
 stable secret, and set `user_cache_secret` in a request's `extraBody` to scope
 the cache to each end user.
+
+When the system random number generator fails, the initializer that needed
+the secret throws `SecureRandomError`, which carries the `OSStatus` that
+`SecRandomCopyBytes` returned, before any network I/O, instead of stopping the
+process. The failure isn't kept, so the next client tries again. A non-empty
+`userCacheSecret` needs no generation.
 
 ## New
 

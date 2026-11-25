@@ -22,10 +22,31 @@ final class DocumentationExamplesTests: XCTestCase {
         _ = try OpenAIClient(httpClient: enclave, apiKey: "YOUR_API_KEY")
 
         let policy = Policy(
-            pinnedRegisters: Verification.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
+            pinnedRegisters: VerifiedFacts.Measurement(type: "https://tinfoil.sh/predicate/tdx-guest/v2", registers: registers),
             freshnessMaxAge: 3600
         )
         _ = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(policy: policy))
+
+        let reported = try await EnclaveHTTPClient(enclave: host, trust: trust, options: .init(
+            onVerificationAttempt: { host, result in
+                // Called once for every attempt, outside the client's actors.
+                if case .failure(.attestationError(let failure)) = result, let rejected = failure.verificationError {
+                    print(host, rejected.report.steps.map { "\($0.layer): \($0.status)" })
+                }
+            }
+        ))
+        let report = try await reported.ensureVerified()
+        let last = await reported.lastVerificationAttempt  // the most recent attempt, success or failure
+        _ = (report, last)
+        let json = try JSONEncoder().encode(report)
+        _ = json
+
+        let origin = URL(string: "https://app.example/tinfoil")!
+        _ = try await RouterHTTPClient(options: .init(
+            transport: .ehbp(proxyURL: origin.appendingPathComponent("proxy")),
+            fetchAttestation: .relay(origin),
+            fetchRouterList: .relay(origin)
+        ))
     }
 
     private func migrationExamples(key: String) async throws {
@@ -33,7 +54,10 @@ final class DocumentationExamplesTests: XCTestCase {
         let proxied = try await EnclaveHTTPClient(
             enclave: "enclave.example.com",
             trust: .repo("org/repo"),
-            options: .init(transport: .ehbp(proxyURL: URL(string: "https://proxy.example.com/")!), attestationRelay: "proxy.example.com")
+            options: .init(
+                transport: .ehbp(proxyURL: URL(string: "https://app.example/tinfoil/proxy")!),
+                fetchAttestation: .relay(URL(string: "https://app.example/tinfoil")!)
+            )
         )
         _ = try OpenAIClient(httpClient: proxied, apiKey: key)
         let http = try await EnclaveHTTPClient(enclave: "enclave.example.com", trust: .repo("org/repo"))

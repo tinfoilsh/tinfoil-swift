@@ -75,7 +75,25 @@ final class GoAttestationVerifierTests: XCTestCase {
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("unexpected error \(error)")
             }
-            XCTAssertEqual(failure.layer, .envelope, "A malformed document is rejected by the envelope layer.")
+            // The framework's result carries the report, which becomes the
+            // cause of the attestation error.
+            guard let rejected = failure.verificationError else {
+                return XCTFail("the verifier's error and report must be the cause")
+            }
+            XCTAssertEqual(rejected.layer, .envelope, "A malformed document is rejected by the envelope layer.")
+            XCTAssertEqual(rejected.message, failure.message)
+            XCTAssertEqual(rejected.report.steps.map(\.layer), [.envelope, .provenance, .quote, .policy])
+            XCTAssertEqual(rejected.report.steps.first?.status, .failed)
+            XCTAssertTrue(
+                rejected.report.steps.dropFirst().allSatisfy { $0.status == .notRun },
+                "Verification stopped at the envelope: \(rejected.report.steps)"
+            )
+            XCTAssertNil(rejected.report.verifiedFacts)
+            XCTAssertEqual(
+                rejected.report.partialFacts,
+                PartialFacts(expected: nil, measured: nil),
+                "Nothing is established before the envelope passes."
+            )
         }
         assertCategory(isConfiguration) {
             try verifier.verify(document: document, nonce: nonce.dropFirst(), pin: TinfoilConstants.routerPin)
@@ -92,12 +110,15 @@ final class GoAttestationVerifierTests: XCTestCase {
     func testLiveAttestation() async throws {
         try requireLiveIntegration()
         let attestor = Attestor(verifier: try GoAttestationVerifier())
-        let verification = try await attestor.attest(
+        let report = try await attestor.attest(
             host: TinfoilConstants.fallbackEnclave,
             relay: nil,
             pin: TinfoilConstants.routerPin
         )
 
+        XCTAssertTrue(report.steps.allSatisfy { $0.status == .passed || $0.status == .skipped }, "\(report.steps)")
+        XCTAssertNil(report.partialFacts)
+        let verification = try XCTUnwrap(report.verifiedFacts)
         XCTAssertEqual(verification.configRepo, Self.routerRepo)
         XCTAssertEqual(verification.hpkePublicKey.count, 64)
         XCTAssertEqual(verification.tlsPublicKeyFingerprint.count, 64)

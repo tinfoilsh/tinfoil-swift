@@ -153,12 +153,11 @@ final class PolicyTests: XCTestCase {
                 pin: Pin(project: "org/repo"),
                 transportMode: .ehbp,
                 baseURL: nil,
-                attestationRelay: nil,
                 attestor: Attestor(verifier: authorized, fetch: { url in
                     XCTFail("fetched \(url) despite a pin the verifier refuses")
                     throw TinfoilError.network("unreachable")
                 }),
-                onVerificationResult: nil
+                onVerificationAttempt: nil
             ),
             containing: "config authorizer cannot authenticate"
         )
@@ -177,7 +176,7 @@ final class PolicyTests: XCTestCase {
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("expected an attestation error, got \(error)")
             }
-            XCTAssertEqual(failure.layer, .provenance)
+            XCTAssertEqual(failure.verificationError?.layer, .provenance)
             XCTAssertTrue(failure.message.contains("config is not on the allow list"), failure.message)
         }
         XCTAssertEqual(seen.endorsements, [
@@ -197,7 +196,7 @@ final class PolicyTests: XCTestCase {
             guard case TinfoilError.attestationError(let failure) = error else {
                 return XCTFail("expected an attestation error, got \(error)")
             }
-            XCTAssertEqual(failure.layer, .quote, "Approving a config never bypasses the hardware check.")
+            XCTAssertEqual(failure.verificationError?.layer, .quote, "Approving a config never bypasses the hardware check.")
         }
         XCTAssertEqual(seen.endorsements.map(\.config), [fixture.config])
     }
