@@ -16,7 +16,7 @@ import FoundationNetworking
 /// removed in a later release.
 public final class GatewayHTTPClient: Sendable {
     /// Tinfoil's gateway
-    public static let defaultBaseURL = URL(string: "https://inference-gateway.tinfoil.sh/v1/")!
+    public static let defaultURL = URL(string: "https://inference-gateway.tinfoil.sh/v1/")!
 
     let router: GatewayRouter
 
@@ -27,67 +27,29 @@ public final class GatewayHTTPClient: Sendable {
     /// check that the catalog lists the pinned models; a request for a model
     /// that the catalog doesn't list fails.
     ///
-    /// - Parameters:
-    ///   - modelPins: Pins models to repositories. With `pinnedModelsOnly`,
-    ///     only pinned models are served, which requires at least one pin.
-    ///   - pinnedModelsOnly: Serve only the pinned models
-    ///   - baseURL: The gateway's base URL; nil selects Tinfoil's gateway. It
-    ///     must be HTTPS, and is treated as a directory: a path without a
-    ///     trailing slash gets one. Request paths join under it, so a URL with
-    ///     credentials, a query or a fragment, even an empty one, is refused.
-    ///   - verifier: The trust policy for unpinned models, and pinned ones
-    ///     without their own; nil selects the defaults. A policy whose config
-    ///     the caller supplies or approves is refused: replicas are verified
-    ///     against repositories.
-    ///   - userCacheSecret: The default prompt-cache scope of the client's
-    ///     requests; nil or empty uses a random secret generated once per
-    ///     process and shared by its clients, so cache hits aren't shared
-    ///     across processes; pass one to keep it stable. A non-empty
-    ///     `user_cache_secret` string in a request's JSON body overrides it,
-    ///     so that a server can scope the cache to each end user. In a
-    ///     request with an `application/json` object body, the secret is
-    ///     replaced by a salt derived from it and the API key; any other body
-    ///     is sent as written, sealed to the verified replica. Use
-    ///     an opaque random value, not a raw user ID or API key: the gateway
-    ///     sees a cache prefix keyed on it, and could test guesses of a
-    ///     guessable secret and then of the prompt.
-    ///   - verificationCheck: Called with each replica's verification, for
-    ///     pinned and unpinned models, before its keys are used; throw to
-    ///     reject it, and the next replica of the model is tried.
-    ///   - onVerificationResult: Called with each replica verification's final
-    ///     result. It only observes.
-    ///   - catalog: Read on every request in place of the gateway's catalog.
-    ///     Nil fetches the gateway's catalog now and refreshes it every 10
-    ///     seconds while the client is used; a failed refresh keeps the last
-    ///     catalog fetched.
-    public convenience init(
-        modelPins: [String: ModelPin] = [:],
-        pinnedModelsOnly: Bool = false,
-        baseURL: URL? = nil,
-        verifier: Verifier? = nil,
-        userCacheSecret: String? = nil,
-        verificationCheck: VerificationCheck? = nil,
-        onVerificationResult: VerificationResultCallback? = nil,
-        catalog: (@Sendable () -> Catalog)? = nil
-    ) async throws {
-        let base = Self.directory(baseURL ?? Self.defaultBaseURL)
+    /// - Parameter options: The client's options; each one's default applies
+    ///   when it is not set
+    public convenience init(options: GatewayOptions = GatewayOptions()) async throws {
+        let verificationCheck = options.verificationCheck
+        let onVerificationResult = options.onVerificationResult
+        let base = Self.directory(options.url ?? Self.defaultURL)
         try EnclaveConnection.validateBaseURL(base, transportMode: .ehbp)
         guard base.scheme?.lowercased() == "https" else {
-            throw TinfoilError.configuration("invalid base URL: the gateway base URL must use HTTPS")
+            throw TinfoilError.configuration("invalid gateway URL: the gateway URL must use HTTPS")
         }
         guard let relay = Self.authority(of: base) else {
-            throw TinfoilError.configuration("invalid base URL: the gateway base URL has no host")
+            throw TinfoilError.configuration("invalid gateway URL: the gateway URL has no host")
         }
-        let attestor = { (verifier: Verifier?) throws -> Attestor in
-            Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck)
+        let attestor = { (policy: Policy) throws -> Attestor in
+            Attestor(verifier: try GoAttestationVerifier(trust: nil, policy: policy), verificationCheck: verificationCheck)
         }
         let policy = try GatewayPolicy(
-            pins: modelPins.mapValues { pin in (repo: pin.repo, attestor: try pin.verifier.map { try attestor($0) }) },
-            pinnedOnly: pinnedModelsOnly,
-            attestor: attestor(verifier)
+            pins: options.modelPins.mapValues { pin in (repo: pin.repo, attestor: try pin.policy.map { try attestor($0) }) },
+            pinnedOnly: options.pinnedModelsOnly,
+            attestor: attestor(options.policy)
         )
         let source: @Sendable () async throws -> Catalog
-        if let catalog {
+        if let catalog = options.catalog {
             source = { catalog() }
         } else {
             let cache = CatalogCache(fetch: { try await GatewayCatalog.fetch(host: relay) })
@@ -97,7 +59,7 @@ public final class GatewayHTTPClient: Sendable {
             baseURL: base,
             policy: policy,
             catalog: source,
-            secret: UserCacheSecret.resolve(explicit: userCacheSecret),
+            secret: UserCacheSecret.resolve(explicit: options.userCacheSecret),
             makeReplica: { replica, attestor in
                 let pin = GatewayCatalog.pin(replica.reference)
                 try attestor.checkPinVerifiability(pin)
@@ -151,7 +113,8 @@ public final class GatewayHTTPClient: Sendable {
         try await GatewayCatalog.fetch(host: host)
     }
 
-    /// The gateway's base URL, which requests are sent to. Relative URLs
+    /// The gateway's URL, which requests are sent to: the `url` option, with
+    /// a trailing slash on its path, or Tinfoil's gateway. Relative URLs
     /// passed to `data(for:)` resolve against it.
     public var baseURL: URL { router.baseURL }
 
@@ -170,7 +133,9 @@ public final class GatewayHTTPClient: Sendable {
     }
 
     /// The last successful verification of each replica used so far, without
-    /// checking them. They may have expired or been rejected.
+    /// checking them. They may have expired or been discarded by a
+    /// re-verification that failed attestation; a discarded replica's next
+    /// request verifies it again.
     public var current: [ReplicaVerification] {
         get async { await router.current }
     }
@@ -216,5 +181,71 @@ public final class GatewayHTTPClient: Sendable {
     func open(_ request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
         let response = try await router.open(request)
         return (response.body, response.response)
+    }
+}
+
+/// Configures a `GatewayHTTPClient`. Every option is optional, and the
+/// default value of each one selects its default.
+///
+/// Experimental: the gateway route is new, and this API may change or be
+/// removed in a later release.
+public struct GatewayOptions: Sendable {
+    /// The gateway's URL, which requests are sent to; nil selects Tinfoil's
+    /// gateway. It must be HTTPS, and is treated as a directory: a path
+    /// without a trailing slash gets one. Request paths join under it, so a
+    /// URL with credentials, a query or a fragment, even an empty one, is
+    /// refused.
+    public var url: URL?
+    /// Pins models to repositories. With `pinnedModelsOnly`, only pinned
+    /// models are served, which requires at least one pin.
+    public var modelPins: [String: ModelPin]
+    /// Serve only the pinned models
+    public var pinnedModelsOnly: Bool
+    /// The verification policy for unpinned models, and pinned ones without
+    /// their own; the default policy keeps every default
+    public var policy: Policy
+    /// The default prompt-cache scope of the client's requests; nil or empty
+    /// uses a random secret that is generated once per process and that its
+    /// clients share, so cache hits aren't shared across processes; pass one
+    /// to keep it stable. A non-empty `user_cache_secret` string in a
+    /// request's JSON body overrides it, so that a server can scope the cache
+    /// to each end user. In a request with an `application/json` object body,
+    /// the secret is replaced by a salt derived from it and the API key; any
+    /// other body is sent as written, sealed to the verified replica. Use an
+    /// opaque random value, not a raw user ID or API key: the gateway sees a
+    /// cache prefix keyed on it, and could test guesses of a guessable secret
+    /// and then of the prompt.
+    public var userCacheSecret: String?
+    /// Called with each replica's verification, for pinned and unpinned
+    /// models, before its keys are used; throw to reject it, and the next
+    /// replica of the model is tried.
+    public var verificationCheck: VerificationCheck?
+    /// Called with each replica verification's final result. It only
+    /// observes.
+    public var onVerificationResult: VerificationResultCallback?
+    /// Read on every request in place of the gateway's catalog. Nil fetches
+    /// the gateway's catalog when the client is created and refreshes it every
+    /// 10 seconds while the client is used; a failed refresh keeps the last
+    /// catalog that was fetched.
+    public var catalog: (@Sendable () -> Catalog)?
+
+    public init(
+        modelPins: [String: ModelPin] = [:],
+        pinnedModelsOnly: Bool = false,
+        url: URL? = nil,
+        policy: Policy = Policy(),
+        userCacheSecret: String? = nil,
+        verificationCheck: VerificationCheck? = nil,
+        onVerificationResult: VerificationResultCallback? = nil,
+        catalog: (@Sendable () -> Catalog)? = nil
+    ) {
+        self.url = url
+        self.modelPins = modelPins
+        self.pinnedModelsOnly = pinnedModelsOnly
+        self.policy = policy
+        self.userCacheSecret = userCacheSecret
+        self.verificationCheck = verificationCheck
+        self.onVerificationResult = onVerificationResult
+        self.catalog = catalog
     }
 }

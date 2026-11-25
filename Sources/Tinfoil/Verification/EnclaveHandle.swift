@@ -7,7 +7,9 @@ import Foundation
 ///
 /// Each `reverify()` is one run. A run fetches the enclave's attestation
 /// document and has the TinfoilGo verifier check it, retrying a failed
-/// attempt once. The run's result goes to `onVerificationResult`.
+/// attempt once. The run's result goes to `onVerificationResult`. A run
+/// that fails attestation withdraws the verification that it was replacing
+/// from `usable`, so that no later request uses it; `current` keeps it.
 actor EnclaveHandle {
     nonisolated let enclave: String
     nonisolated let pin: Pin
@@ -21,8 +23,17 @@ actor EnclaveHandle {
     private var closed = false
 
     /// The latest successful verification, or nil before the first. It may
-    /// have expired; `ensureVerified()` returns one that has not.
+    /// have expired or been discarded, and a failed run doesn't change it;
+    /// `ensureVerified()` returns one that is valid now. Requests never use
+    /// it: they take `usable`.
     private(set) var current: Verification?
+    /// The verification that requests may use: `current`, or nil before the
+    /// first and after a run that fails attestation discards it. It may have
+    /// expired; `ensureVerified()` returns one that has not.
+    private(set) var usable: Verification?
+    /// Counts the verifications that have become `usable`, so that a failed
+    /// run discards only the one that it was replacing
+    private var generation: UInt64 = 0
 
     /// - Parameter initial: A verification of `enclave` already made, as by
     ///   router discovery, kept as the current one so it isn't repeated.
@@ -40,6 +51,7 @@ actor EnclaveHandle {
         self.attestationRelay = attestationRelay
         self.attestor = attestor
         self.current = initial
+        self.usable = initial
         self.onVerificationResult = onVerificationResult
         self.now = now
     }
@@ -60,12 +72,18 @@ actor EnclaveHandle {
     /// Verifies the enclave against fresh evidence and returns the result.
     /// Calls made while a verification runs share it. Cancelling a call ends
     /// only its own wait; the shared verification still completes.
+    ///
+    /// A run that fails with `TinfoilError.attestationError` discards the
+    /// usable verification, even one that is still fresh, so that the next
+    /// `ensureVerified()` verifies again; `current` still returns it. A run
+    /// that fails in any other way, such as with a network error, keeps it.
     func reverify() async throws -> Verification {
         try checkOpen()
         let task: Task<Verification, Error>
         if let inFlight {
             task = inFlight
         } else {
+            let replacing = generation
             task = Task {
                 defer { self.inFlight = nil }
                 // Reported here, once per run, however many callers share it.
@@ -79,9 +97,19 @@ actor EnclaveHandle {
                     // not kept or used.
                     try self.checkOpen()
                     self.current = verified
+                    self.usable = verified
+                    self.generation &+= 1
                     self.onVerificationResult?(.success(verified))
                     return verified
                 } catch let error as TinfoilError {
+                    // Evidence that fails verification means the enclave may
+                    // no longer be the one verified, so its keys aren't used
+                    // again. A verification that became usable since the run
+                    // started is newer than this evidence, so it is kept, and
+                    // a run that the client's close ended changes nothing.
+                    if case .attestationError = error, self.generation == replacing, !self.closed {
+                        self.usable = nil
+                    }
                     // A run that the client's close ended isn't a failed
                     // verification, so it isn't reported as one.
                     if !self.closed {
@@ -99,8 +127,8 @@ actor EnclaveHandle {
     /// is none yet or the latest has reached its `freshnessExpiresAt`.
     func ensureVerified() async throws -> Verification {
         try checkOpen()
-        if let current, now() < current.freshnessExpiresAt {
-            return current
+        if let usable, now() < usable.freshnessExpiresAt {
+            return usable
         }
         let verified = try await reverify()
         try checkOpen()

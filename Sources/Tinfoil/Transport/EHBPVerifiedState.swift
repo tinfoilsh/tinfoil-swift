@@ -11,11 +11,15 @@ internal struct EHBPVerifiedEndpoint: Sendable {
     /// No new request may be sealed to this key at or after this instant. A
     /// key supplied by the caller rather than attested never expires.
     let expiresAt: Date
+    /// The verification that endorses the key, or nil for a key that the
+    /// caller supplied
+    let verification: Verification?
 
-    init(enclaveURL: String, publicKey: Data, expiresAt: Date = .distantFuture) {
+    init(enclaveURL: String, publicKey: Data, expiresAt: Date = .distantFuture, verification: Verification? = nil) {
         self.enclaveURL = enclaveURL
         self.publicKey = publicKey
         self.expiresAt = expiresAt
+        self.verification = verification
     }
 }
 
@@ -26,7 +30,8 @@ extension EHBPVerifiedEndpoint {
         self.init(
             enclaveURL: enclaveURL,
             publicKey: try Self.publicKey(hex: verification.hpkePublicKey),
-            expiresAt: verification.freshnessExpiresAt
+            expiresAt: verification.freshnessExpiresAt,
+            verification: verification
         )
     }
 
@@ -50,6 +55,8 @@ internal actor EHBPVerifiedState {
     /// Returns the endpoint to use instead of `stale`, the one that expired or
     /// whose key the enclave rejected.
     typealias Refresh = @Sendable (_ stale: EHBPVerifiedEndpoint) async throws -> EHBPVerifiedEndpoint
+    /// Whether an unexpired endpoint may still seal new requests
+    typealias Endorses = @Sendable (_ endpoint: EHBPVerifiedEndpoint) async -> Bool
 
     private struct RefreshOperation {
         let id: UInt64
@@ -59,18 +66,25 @@ internal actor EHBPVerifiedState {
     private var endpoint: EHBPVerifiedEndpoint
     private var generation: UInt64 = 0
     private let refreshEndpoint: Refresh?
+    private let endorses: Endorses?
     private let now: @Sendable () -> Date
     private var nextRefreshID: UInt64 = 0
     private var refreshOperation: RefreshOperation?
     private var closed = false
 
+    /// - Parameter endorses: Checks an unexpired endpoint before each new
+    ///   request; one that it no longer endorses, as when its verification
+    ///   was discarded, is refreshed first. Nil endorses every endpoint until
+    ///   it expires.
     init(
         endpoint: EHBPVerifiedEndpoint,
         refresh: Refresh? = nil,
+        endorses: Endorses? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.endpoint = endpoint
         self.refreshEndpoint = refresh
+        self.endorses = endorses
         self.now = now
     }
 
@@ -88,14 +102,22 @@ internal actor EHBPVerifiedState {
     }
 
     /// The endpoint to seal a new request to. One whose attestation has
-    /// expired is refreshed first, through the same single-flight refresh as a
-    /// rejected key, so an expired key never seals a request.
+    /// expired, or that `endorses` no longer endorses, is refreshed first,
+    /// through the same single-flight refresh as a rejected key, so neither
+    /// seals a request.
     func current() async throws -> (endpoint: EHBPVerifiedEndpoint, generation: UInt64) {
         try checkOpen()
-        if now() < endpoint.expiresAt {
-            return (endpoint, generation)
+        let (cached, cachedGeneration) = (endpoint, generation)
+        if now() < cached.expiresAt, await endorses?(cached) ?? true {
+            try checkOpen()
+            // Another request may have installed a newer endpoint while the
+            // check was suspended; seal to that one instead.
+            guard generation == cachedGeneration else {
+                return try await current()
+            }
+            return (cached, cachedGeneration)
         }
-        _ = try await refresh(afterRejectedGeneration: generation)
+        _ = try await refresh(afterRejectedGeneration: cachedGeneration)
         try checkOpen()
         guard now() < endpoint.expiresAt else {
             throw TinfoilError.attestation("refreshed attestation is already past its freshness deadline")

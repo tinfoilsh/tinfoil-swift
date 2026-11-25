@@ -10,10 +10,9 @@ final class TinfoilIntegrationTests: XCTestCase {
         // exercise discovery and verification end to end.
         let captured = Box<Result<Verification, TinfoilError>?>(value: nil)
 
-        _ = try await RouterOpenAIClient(
+        _ = try await OpenAIClient(
             httpClient: RouterHTTPClient(
-                userCacheSecret: "test-secret",
-                onVerificationResult: { result in captured.value = result }
+                options: .init(userCacheSecret: "test-secret", onVerificationResult: { result in captured.value = result })
             ),
             apiKey: "test-key"
         )
@@ -39,7 +38,7 @@ final class TinfoilIntegrationTests: XCTestCase {
             }
         }
         do {
-            _ = try await Client(apiKey: nil)
+            _ = try await OpenAIClient(apiKey: nil)
             XCTFail("Should have thrown a configuration error")
         } catch TinfoilError.configurationError(let failure) {
             XCTAssertTrue(failure.message.contains("pass apiKey or apiKeyProvider"), failure.message)
@@ -50,10 +49,12 @@ final class TinfoilIntegrationTests: XCTestCase {
 
     func testCreateFailsWhenTheAttestationRelayIsUnreachable() async {
         do {
-            _ = try await RouterOpenAIClient(
+            _ = try await OpenAIClient(
                 httpClient: RouterHTTPClient(
-                    attestationRelay: "127.0.0.1:9",
-                    userCacheSecret: "test-secret"
+                    options: .init(
+                        userCacheSecret: "test-secret",
+                        fetchAttestation: .relay(URL(string: "http://127.0.0.1:9")!)
+                    )
                 ),
                 apiKey: "test-key"
             )

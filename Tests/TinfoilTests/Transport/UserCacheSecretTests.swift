@@ -44,34 +44,33 @@ final class UserCacheSecretTests: XCTestCase {
         XCTAssertNotEqual(first, UserCacheSecret.generate())
     }
 
-    func testAnEnclaveTheCallerNamesGetsOnlyAnExplicitSecret() throws {
-        func connection(secret: String?) throws -> EnclaveConnection {
-            try EnclaveHTTPClient.connection(
-                enclave: "enclave.example",
-                pin: Pin(repo: "org/repo"),
-                transportMode: .tls,
-                baseURL: nil,
-                attestationRelay: nil,
-                userCacheSecret: secret,
-                attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
-                onVerificationResult: nil
-            )
-        }
-        XCTAssertEqual(
-            try connection(secret: nil).userCacheSecret,
-            "",
-            "Only Tinfoil's routers read the secret, so none is resolved for another enclave."
+    func testAnEnclaveTheCallerNamesGetsNoSecret() throws {
+        let connection = try EnclaveHTTPClient.connection(
+            enclave: "enclave.example",
+            pin: Pin(repo: "org/repo"),
+            transportMode: .tls,
+            baseURL: nil,
+            attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
+            onVerificationResult: nil
         )
-        XCTAssertEqual(try connection(secret: "explicit").userCacheSecret, "explicit")
+        XCTAssertEqual(connection.userCacheSecret, "", "Only Tinfoil's routers read the secret, so none is added for another enclave.")
+        // With no client secret, an eligible body is sent as written, an
+        // empty or caller-set field included.
+        for body in [#"{"model":"m","user_cache_secret":""}"#, #"{"model":"m","user_cache_secret":"caller"}"#, #"{"model":"m"}"#] {
+            var request = URLRequest(url: URL(string: "https://enclave.example/v1/chat/completions")!)
+            request.httpMethod = "POST"
+            request.httpBody = Data(body.utf8)
+            var headers: [String: String] = [:]
+            XCTAssertEqual(UserCacheSecret.provision(request: request, headers: &headers, clientSecret: connection.userCacheSecret), Data(body.utf8), body)
+        }
     }
 
     func testDiscoveringARouterUsesTheProcessSecret() async throws {
-        // A relay skips discovery's network I/O; the route is still Tinfoil's router.
+        // Discovery finds no router, so the fallback, Tinfoil's router, is used.
         let connection = try await EnclaveConnection.router(
             attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
             transportMode: .ehbp,
             baseURL: nil,
-            attestationRelay: "relay.example",
             userCacheSecret: nil,
             onVerificationResult: nil
         )
@@ -361,7 +360,7 @@ final class UserCacheSecretTests: XCTestCase {
         try server.start()
         defer { server.stop() }
 
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,

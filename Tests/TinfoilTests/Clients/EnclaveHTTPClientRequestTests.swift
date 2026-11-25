@@ -372,6 +372,103 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         XCTAssertEqual(network.urls.count, 2)
     }
 
+    /// Serves documents with verdict's current value, or fails as a network
+    /// error does while it is "offline"
+    private func scripted(_ verdict: Verdict) -> FakeNetwork {
+        FakeNetwork { url, _ in
+            if verdict.value == "offline" {
+                throw TinfoilError.network("attestation source unreachable")
+            }
+            return FakeNetwork.document(verdict.value, for: url)
+        }
+    }
+
+    func testAFailedReverifyStopsRequestsUntilTheEnclaveVerifiesAgain() async throws {
+        let verdict = Verdict("ok")
+        let network = scripted(verdict)
+        let log = SendLog()
+        let client = try client(network: network, log: log)
+        _ = try await client.data(from: URL(string: "/health")!)
+        let verified = await client.current
+        let first = try XCTUnwrap(verified)
+
+        verdict.value = "reject"
+        do {
+            _ = try await client.reverify()
+            XCTFail("a rejected attestation must fail the re-verification")
+        } catch TinfoilError.attestationError {
+        }
+        let last = await client.current
+        XCTAssertEqual(last, first, "current still returns the last successful verification.")
+        let fetched = network.urls.count
+        do {
+            _ = try await client.data(from: URL(string: "/health")!)
+            XCTFail("a request must not go out under the discarded verification")
+        } catch TinfoilError.attestationError {
+        }
+        XCTAssertGreaterThan(network.urls.count, fetched, "The request verified the enclave again.")
+        XCTAssertEqual(log.sent.count, 1, "Nothing is sent while the enclave fails verification.")
+
+        verdict.value = "ok"
+        _ = try await client.data(from: URL(string: "/health")!)
+        XCTAssertEqual(log.sent.count, 2, "Once the enclave verifies again, requests go through.")
+        let recovered = await client.current
+        XCTAssertNotNil(recovered)
+        XCTAssertNotEqual(recovered, first, "The request went out under the new verification.")
+    }
+
+    func testAReverifyThatCannotReachTheAttestationSourceKeepsTheVerification() async throws {
+        let verdict = Verdict("ok")
+        let network = scripted(verdict)
+        let log = SendLog()
+        let client = try client(network: network, log: log)
+        let first = try await client.ensureVerified()
+
+        verdict.value = "offline"
+        do {
+            _ = try await client.reverify()
+            XCTFail("an unreachable attestation source must fail the re-verification")
+        } catch TinfoilError.networkError {
+        }
+        let fetched = network.urls.count
+        _ = try await client.data(from: URL(string: "/health")!)
+
+        XCTAssertEqual(log.sent.count, 1, "The still-valid verification carries the request.")
+        XCTAssertEqual(network.urls.count, fetched, "No new verification was needed.")
+        let current = await client.current
+        XCTAssertEqual(current, first)
+    }
+
+    func testAFailedRecoveryFromARejectedKeyStopsRequests() async throws {
+        let verdict = Verdict("ok")
+        let network = scripted(verdict)
+        let log = SendLog { previous in
+            if previous == 0 { throw self.rejection }
+        }
+        let client = try client(network: network, log: log)
+        let first = try await client.ensureVerified()
+
+        // The enclave presents another key, and its new evidence fails.
+        verdict.value = "reject"
+        do {
+            _ = try await client.data(from: URL(string: "/health")!)
+            XCTFail("a key that no verification endorses must not be used")
+        } catch TinfoilError.attestationError {
+        }
+        let last = await client.current
+        XCTAssertEqual(last, first, "current still returns the last successful verification.")
+        do {
+            _ = try await client.data(from: URL(string: "/health")!)
+            XCTFail("a request must not go out under the discarded verification")
+        } catch TinfoilError.attestationError {
+        }
+        XCTAssertEqual(log.sent.count, 1, "Only the rejected attempt was sent.")
+
+        verdict.value = "ok"
+        _ = try await client.data(from: URL(string: "/health")!)
+        XCTAssertEqual(log.sent.count, 2)
+    }
+
     func testARejectionAfterTheRequestMayHaveBeenSentIsNotRetried() async throws {
         let network = approving()
         let afterRedirect = PinnedTLS.Rejection(
@@ -439,7 +536,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
 
     func testLivePinnedRequest() async throws {
         try requireLiveIntegration()
-        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, pin: TinfoilConstants.routerPin)
+        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, trust: .either(repo: TinfoilConstants.defaultGithubRepo, project: TinfoilConstants.defaultGithubRepo))
 
         let (data, response) = try await client.data(from: URL(string: "/health")!)
 
@@ -450,7 +547,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
     /// A streamed response comes over a connection pinned to the attested key.
     func testLivePinnedStream() async throws {
         try requireLiveIntegration()
-        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, pin: TinfoilConstants.routerPin)
+        let client = try await EnclaveHTTPClient(enclave: TinfoilConstants.fallbackEnclave, trust: .either(repo: TinfoilConstants.defaultGithubRepo, project: TinfoilConstants.defaultGithubRepo))
         let verification = try await client.ensureVerified()
         let request = URLRequest(url: URL(string: "https://\(TinfoilConstants.fallbackEnclave)/health")!)
 

@@ -1010,7 +1010,7 @@ final class EHBPTests: XCTestCase {
     }
 
     func testSessionsKeepTheSecretTheyAreGiven() {
-        // Client resolves the secret once, and leaves it empty for an
+        // SealedClient resolves the secret once, and leaves it empty for an
         // enclave the handle names; the sessions must not resolve it again.
         let state = EHBPVerifiedState(
             endpoint: EHBPVerifiedEndpoint(enclaveURL: server.baseURL, publicKey: testPublicKey, expiresAt: .distantFuture),
@@ -1551,11 +1551,11 @@ final class EHBPTests: XCTestCase {
         )
     }
 
-    // MARK: - Client End-to-End Tests
+    // MARK: - SealedClient End-to-End Tests
 
-    /// Verifies that Client.chats() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.chats() uses EHBP encryption end-to-end
     func testClientChatsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1576,35 +1576,35 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.chats()")
+            XCTFail("No request was captured from SealedClient.chats()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "Client.chats() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "SealedClient.chats() should use POST")
 
         // Most important assertion: EHBP header MUST be present
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.chats() request MUST have EHBP encapsulated key header - this proves EHBP is being used")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.chats() request MUST have EHBP encapsulated key header - this proves EHBP is being used")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from Client.chats()")
+            XCTFail("No request body was captured from SealedClient.chats()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Hello from Client"), "Client.chats() body MUST be encrypted - found plaintext message")
-            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "Client.chats() body MUST be encrypted - found plaintext model")
-            XCTAssertFalse(bodyString.contains("messages"), "Client.chats() body MUST be encrypted - found plaintext 'messages'")
+            XCTAssertFalse(bodyString.contains("Hello from Client"), "SealedClient.chats() body MUST be encrypted - found plaintext message")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "SealedClient.chats() body MUST be encrypted - found plaintext model")
+            XCTAssertFalse(bodyString.contains("messages"), "SealedClient.chats() body MUST be encrypted - found plaintext 'messages'")
         }
 
-        XCTAssertNotNil(capturedRequest.headers["Authorization"], "Client.chats() should include Authorization header")
+        XCTAssertNotNil(capturedRequest.headers["Authorization"], "SealedClient.chats() should include Authorization header")
     }
 
     /// Verifies that per-request headers reach the wire alongside the client's
     /// customHeaders, and override them on collision, through the EHBP transport.
     func testClientChatsForwardsPerRequestHeaders() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1629,7 +1629,7 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.chats(query:headers:)")
+            XCTFail("No request was captured from SealedClient.chats(query:headers:)")
             return
         }
         XCTAssertEqual(capturedRequest.headers["X-Configured"], "config")
@@ -1639,7 +1639,7 @@ final class EHBPTests: XCTestCase {
     }
 
     func testClientChatsStreamForwardsPerRequestHeaders() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1668,7 +1668,7 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.chatsStream(query:headers:)")
+            XCTFail("No request was captured from SealedClient.chatsStream(query:headers:)")
             return
         }
         XCTAssertEqual(capturedRequest.headers["X-Configured"], "config")
@@ -1677,9 +1677,9 @@ final class EHBPTests: XCTestCase {
         XCTAssertNotNil(capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader])
     }
 
-    /// Verifies that Client.chatsStream() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.chatsStream() uses EHBP encryption end-to-end
     func testClientChatsStreamUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1705,29 +1705,29 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.chatsStream()")
+            XCTFail("No request was captured from SealedClient.chatsStream()")
             return
         }
 
         // Most important assertion: EHBP header MUST be present
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.chatsStream() request MUST have EHBP encapsulated key header - this proves EHBP is being used")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.chatsStream() request MUST have EHBP encapsulated key header - this proves EHBP is being used")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from Client.chatsStream()")
+            XCTFail("No request body was captured from SealedClient.chatsStream()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Hello streaming from Client"), "Client.chatsStream() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "Client.chatsStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Hello streaming from Client"), "SealedClient.chatsStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "SealedClient.chatsStream() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.embeddings() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.embeddings() uses EHBP encryption end-to-end
     func testClientEmbeddingsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1748,30 +1748,30 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.embeddings()")
+            XCTFail("No request was captured from SealedClient.embeddings()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "Client.embeddings() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "SealedClient.embeddings() should use POST")
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.embeddings() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.embeddings() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from Client.embeddings()")
+            XCTFail("No request body was captured from SealedClient.embeddings()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("quick brown fox"), "Client.embeddings() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("text-embedding"), "Client.embeddings() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("quick brown fox"), "SealedClient.embeddings() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("text-embedding"), "SealedClient.embeddings() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.images() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.images() uses EHBP encryption end-to-end
     func testClientImagesUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1792,30 +1792,30 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.images()")
+            XCTFail("No request was captured from SealedClient.images()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "Client.images() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "SealedClient.images() should use POST")
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.images() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.images() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from Client.images()")
+            XCTFail("No request body was captured from SealedClient.images()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("beautiful sunset"), "Client.images() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("dall-e"), "Client.images() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("beautiful sunset"), "SealedClient.images() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("dall-e"), "SealedClient.images() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.createResponse() (Responses API) uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.createResponse() (Responses API) uses EHBP encryption end-to-end
     func testClientCreateResponseUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1836,30 +1836,30 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.createResponse()")
+            XCTFail("No request was captured from SealedClient.createResponse()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "Client.createResponse() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "SealedClient.createResponse() should use POST")
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.createResponse() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.createResponse() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from Client.createResponse()")
+            XCTFail("No request body was captured from SealedClient.createResponse()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Responses API test"), "Client.createResponse() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "Client.createResponse() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Responses API test"), "SealedClient.createResponse() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "SealedClient.createResponse() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.createResponseStream() (Responses API streaming) uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.createResponseStream() (Responses API streaming) uses EHBP encryption end-to-end
     func testClientCreateResponseStreamUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1885,28 +1885,28 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.createResponseStream()")
+            XCTFail("No request was captured from SealedClient.createResponseStream()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.createResponseStream() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.createResponseStream() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from Client.createResponseStream()")
+            XCTFail("No request body was captured from SealedClient.createResponseStream()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("streaming from Responses API"), "Client.createResponseStream() body MUST be encrypted")
-            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "Client.createResponseStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("streaming from Responses API"), "SealedClient.createResponseStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("gpt-oss-120b"), "SealedClient.createResponseStream() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.moderations() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.moderations() uses EHBP encryption end-to-end
     func testClientModerationsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1924,29 +1924,29 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.moderations()")
+            XCTFail("No request was captured from SealedClient.moderations()")
             return
         }
 
-        XCTAssertEqual(capturedRequest.method, "POST", "Client.moderations() should use POST")
+        XCTAssertEqual(capturedRequest.method, "POST", "SealedClient.moderations() should use POST")
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.moderations() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.moderations() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
-            XCTFail("No request body was captured from Client.moderations()")
+            XCTFail("No request body was captured from SealedClient.moderations()")
             return
         }
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("content moderation"), "Client.moderations() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("content moderation"), "SealedClient.moderations() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.imageEdits() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.imageEdits() uses EHBP encryption end-to-end
     func testClientImageEditsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1967,17 +1967,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.imageEdits()")
+            XCTFail("No request was captured from SealedClient.imageEdits()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.imageEdits() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.imageEdits() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that Client.imageVariations() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.imageVariations() uses EHBP encryption end-to-end
     func testClientImageVariationsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -1995,17 +1995,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.imageVariations()")
+            XCTFail("No request was captured from SealedClient.imageVariations()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.imageVariations() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.imageVariations() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that Client.audioCreateSpeech() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.audioCreateSpeech() uses EHBP encryption end-to-end
     func testClientAudioCreateSpeechUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2027,12 +2027,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.audioCreateSpeech()")
+            XCTFail("No request was captured from SealedClient.audioCreateSpeech()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioCreateSpeech() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.audioCreateSpeech() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2041,13 +2041,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("text to speech"), "Client.audioCreateSpeech() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("text to speech"), "SealedClient.audioCreateSpeech() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.audioTranscriptions() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.audioTranscriptions() uses EHBP encryption end-to-end
     func testClientAudioTranscriptionsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2069,17 +2069,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.audioTranscriptions()")
+            XCTFail("No request was captured from SealedClient.audioTranscriptions()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioTranscriptions() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.audioTranscriptions() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that Client.audioTranslations() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.audioTranslations() uses EHBP encryption end-to-end
     func testClientAudioTranslationsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2101,17 +2101,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.audioTranslations()")
+            XCTFail("No request was captured from SealedClient.audioTranslations()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioTranslations() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.audioTranslations() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that Client.assistantCreate() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.assistantCreate() uses EHBP encryption end-to-end
     func testClientAssistantCreateUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2135,12 +2135,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.assistantCreate()")
+            XCTFail("No request was captured from SealedClient.assistantCreate()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.assistantCreate() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.assistantCreate() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2149,13 +2149,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("helpful test assistant"), "Client.assistantCreate() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("helpful test assistant"), "SealedClient.assistantCreate() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.threads() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.threads() uses EHBP encryption end-to-end
     func testClientThreadsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2176,17 +2176,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.threads()")
+            XCTFail("No request was captured from SealedClient.threads()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.threads() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.threads() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that Client.threadRun() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.threadRun() uses EHBP encryption end-to-end
     func testClientThreadRunUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2210,12 +2210,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.threadRun()")
+            XCTFail("No request was captured from SealedClient.threadRun()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.threadRun() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.threadRun() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2224,13 +2224,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("thread run test"), "Client.threadRun() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("thread run test"), "SealedClient.threadRun() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.runs() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.runs() uses EHBP encryption end-to-end
     func testClientRunsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2248,17 +2248,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.runs()")
+            XCTFail("No request was captured from SealedClient.runs()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.runs() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.runs() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that Client.threadsAddMessage() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.threadsAddMessage() uses EHBP encryption end-to-end
     func testClientThreadsAddMessageUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2276,12 +2276,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.threadsAddMessage()")
+            XCTFail("No request was captured from SealedClient.threadsAddMessage()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.threadsAddMessage() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.threadsAddMessage() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2290,13 +2290,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Secret message"), "Client.threadsAddMessage() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Secret message"), "SealedClient.threadsAddMessage() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.files() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.files() uses EHBP encryption end-to-end
     func testClientFilesUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2319,12 +2319,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.files()")
+            XCTFail("No request was captured from SealedClient.files()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.files() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.files() request MUST have EHBP encapsulated key header")
     }
 
     // MARK: - Architectural Guarantee Tests
@@ -2333,7 +2333,7 @@ final class EHBPTests: XCTestCase {
     /// This ensures EHBP is mandatory - there's no way to bypass it
     func testClientRequiresHPKEKey() {
         XCTAssertThrowsError(
-            try Client(
+            try SealedClient(
                 apiKey: "test-api-key",
                 baseURL: "https://example.com",
                 enclaveURL: "https://example.com",
@@ -2356,7 +2356,7 @@ final class EHBPTests: XCTestCase {
     /// Verifies that Client CANNOT be created with an empty HPKE public key
     func testClientRejectsEmptyHPKEKey() {
         XCTAssertThrowsError(
-            try Client(
+            try SealedClient(
                 apiKey: "test-api-key",
                 baseURL: "https://example.com",
                 enclaveURL: "https://example.com",
@@ -2381,7 +2381,7 @@ final class EHBPTests: XCTestCase {
     /// `if let body = body, !body.isEmpty { ... }`
     /// An empty body would bypass EHBP encryption entirely.
     func testAllPOSTRequestsHaveNonEmptyBodies() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2598,10 +2598,10 @@ final class EHBPTests: XCTestCase {
         )
     }
 
-    /// Verifies that Client.audioCreateSpeechStream() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.audioCreateSpeechStream() uses EHBP encryption end-to-end
     func testClientAudioCreateSpeechStreamUsesEHBPEncryption() async throws {
         server.responseContentType = "audio/mpeg"
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2626,12 +2626,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.audioCreateSpeechStream()")
+            XCTFail("No request was captured from SealedClient.audioCreateSpeechStream()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioCreateSpeechStream() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.audioCreateSpeechStream() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2640,13 +2640,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Secret streaming speech input"), "Client.audioCreateSpeechStream() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Secret streaming speech input"), "SealedClient.audioCreateSpeechStream() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.audioTranscriptionsVerbose() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.audioTranscriptionsVerbose() uses EHBP encryption end-to-end
     func testClientAudioTranscriptionsVerboseUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2669,17 +2669,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.audioTranscriptionsVerbose()")
+            XCTFail("No request was captured from SealedClient.audioTranscriptionsVerbose()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioTranscriptionsVerbose() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.audioTranscriptionsVerbose() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that Client.audioTranscriptionStream() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.audioTranscriptionStream() uses EHBP encryption end-to-end
     func testClientAudioTranscriptionStreamUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2700,17 +2700,17 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.audioTranscriptionStream()")
+            XCTFail("No request was captured from SealedClient.audioTranscriptionStream()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.audioTranscriptionStream() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.audioTranscriptionStream() request MUST have EHBP encapsulated key header")
     }
 
-    /// Verifies that Client.assistantModify() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.assistantModify() uses EHBP encryption end-to-end
     func testClientAssistantModifyUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2734,12 +2734,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.assistantModify()")
+            XCTFail("No request was captured from SealedClient.assistantModify()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.assistantModify() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.assistantModify() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2748,13 +2748,13 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Updated secret instructions"), "Client.assistantModify() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Updated secret instructions"), "SealedClient.assistantModify() body MUST be encrypted")
         }
     }
 
-    /// Verifies that Client.runSubmitToolOutputs() uses EHBP encryption end-to-end
+    /// Verifies that SealedClient.runSubmitToolOutputs() uses EHBP encryption end-to-end
     func testClientRunSubmitToolOutputsUsesEHBPEncryption() async throws {
-        let client = try Client(
+        let client = try SealedClient(
             apiKey: "test-api-key",
             baseURL: server.baseURL,
             enclaveURL: server.baseURL,
@@ -2776,12 +2776,12 @@ final class EHBPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
 
         guard let capturedRequest = server.requestStore.lastRequest else {
-            XCTFail("No request was captured from Client.runSubmitToolOutputs()")
+            XCTFail("No request was captured from SealedClient.runSubmitToolOutputs()")
             return
         }
 
         let encapsulatedKeyHeader = capturedRequest.headers[EHBPProtocol.encapsulatedKeyHeader]
-        XCTAssertNotNil(encapsulatedKeyHeader, "Client.runSubmitToolOutputs() request MUST have EHBP encapsulated key header")
+        XCTAssertNotNil(encapsulatedKeyHeader, "SealedClient.runSubmitToolOutputs() request MUST have EHBP encapsulated key header")
 
         guard let capturedBody = capturedRequest.body else {
             XCTFail("No request body was captured")
@@ -2790,7 +2790,7 @@ final class EHBPTests: XCTestCase {
 
         let bodyString = String(data: capturedBody, encoding: .utf8)
         if let bodyString = bodyString {
-            XCTAssertFalse(bodyString.contains("Secret tool output result"), "Client.runSubmitToolOutputs() body MUST be encrypted")
+            XCTAssertFalse(bodyString.contains("Secret tool output result"), "SealedClient.runSubmitToolOutputs() body MUST be encrypted")
         }
     }
 }

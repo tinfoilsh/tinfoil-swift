@@ -7,6 +7,8 @@ final class AttestorTests: XCTestCase {
 
     /// - Parameter hanging: Hosts whose fetches are recorded and then never
     ///   answer, until they are cancelled.
+    /// - Parameter shuffle: Orders the router list; the list's own order
+    ///   unless a test is about the order.
     private func attestor(
         _ verifier: FakeVerifier,
         _ network: FakeNetwork,
@@ -14,7 +16,10 @@ final class AttestorTests: XCTestCase {
         hanging: Set<String> = [],
         discoveryTimeout: TimeInterval = 30,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
-        verificationCheck: VerificationCheck? = nil
+        verificationCheck: VerificationCheck? = nil,
+        fetchAttestation: AttestationFetcher? = nil,
+        fetchRouterList: RouterListFetcher? = nil,
+        shuffle: @escaping @Sendable ([String]) -> [String] = { $0 }
     ) -> Attestor {
         Attestor(
             verifier: verifier,
@@ -28,7 +33,10 @@ final class AttestorTests: XCTestCase {
             retryDelay: retryDelay,
             discoveryTimeout: discoveryTimeout,
             now: now,
-            verificationCheck: verificationCheck
+            verificationCheck: verificationCheck,
+            fetchAttestation: fetchAttestation,
+            fetchRouterList: fetchRouterList,
+            shuffle: shuffle
         )
     }
 

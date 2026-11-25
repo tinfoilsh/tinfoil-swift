@@ -220,8 +220,8 @@ private final class EncryptedSpeechFixture {
         try server.start()
     }
 
-    func makeClient() throws -> Client {
-        try Client(
+    func makeClient() throws -> SealedClient {
+        try SealedClient(
             apiKey: "test-speech-key", baseURL: server.baseURL, enclaveURL: Self.enclaveURL,
             hpkePublicKeyHex: privateKey.publicKey.rawRepresentation.hexString,
             userCacheSecret: "test-speech-cache-secret"

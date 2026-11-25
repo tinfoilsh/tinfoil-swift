@@ -5,8 +5,8 @@ import Foundation
 final class AttestationFetcherTests: XCTestCase {
     private let documentURL = URL(string: "https://enclave.example/.well-known/tinfoil-attestation?nonce=00")!
 
-    private func fetcher(timeout: TimeInterval = 30, maximumBodyBytes: Int = 32 << 20) -> AttestationFetcher {
-        AttestationFetcher(timeout: timeout, maximumBodyBytes: maximumBodyBytes) {
+    private func fetcher(timeout: TimeInterval = 30, maximumBodyBytes: Int = 32 << 20) -> DocumentFetcher {
+        DocumentFetcher(timeout: timeout, maximumBodyBytes: maximumBodyBytes) {
             let configuration = URLSessionConfiguration.ephemeral
             configuration.protocolClasses = [StubURLProtocol.self]
             return configuration
@@ -88,9 +88,9 @@ final class AttestationFetcherTests: XCTestCase {
 
         await assertFetchError(
             { try await self.fetcher().fetch(self.documentURL) },
-            containing: "stopped after \(AttestationFetcher.maximumRedirects) redirects"
+            containing: "stopped after \(DocumentFetcher.maximumRedirects) redirects"
         )
-        XCTAssertEqual(StubURLProtocol.requests.count, AttestationFetcher.maximumRedirects + 1)
+        XCTAssertEqual(StubURLProtocol.requests.count, DocumentFetcher.maximumRedirects + 1)
     }
 
     func testRejectsUnsuccessfulStatus() async {

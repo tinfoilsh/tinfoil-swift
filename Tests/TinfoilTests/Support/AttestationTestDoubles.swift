@@ -10,17 +10,14 @@ final class FakeVerifier: AttestationVerifier, @unchecked Sendable {
     private var _pins: [Pin] = []
     /// The clock a verification's hour of freshness is counted from
     private let now: @Sendable () -> Date
-    let callerAuthorizesConfig: Bool
     /// A repo that checkPinVerifiability refuses
     private let refusedRepo: String?
 
     init(
         now: @escaping @Sendable () -> Date = { Date() },
-        callerAuthorizesConfig: Bool = false,
         refusedRepo: String? = nil
     ) {
         self.now = now
-        self.callerAuthorizesConfig = callerAuthorizesConfig
         self.refusedRepo = refusedRepo
     }
 
@@ -173,6 +170,22 @@ final class Recorder<Value: Sendable>: @unchecked Sendable {
         defer { lock.unlock() }
         _values.append(value)
         return _values.count
+    }
+}
+
+/// A value that a test changes while the code under test reads it, as a
+/// verdict that a fake network serves
+final class Verdict: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: String
+
+    init(_ value: String) {
+        _value = value
+    }
+
+    var value: String {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
     }
 }
 

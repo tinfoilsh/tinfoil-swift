@@ -6,11 +6,11 @@ import FoundationNetworking
 
 /// Fetches attestation material with the app's own networking, so system
 /// proxies and task cancellation apply. Its limits are those the other Tinfoil
-/// SDKs use: HTTPS only, every redirect included; a 30 second timeout; a
-/// 32 MiB cap on the body; and a session of its own for every fetch, because a
+/// SDKs use: HTTPS only, or HTTP to a loopback relay, and no redirect to a
+/// URL that isn't HTTPS; a 30 second timeout; a 32 MiB cap on the body; and a session of its own for every fetch, because a
 /// pooled connection may still reach a replica that is draining after a
 /// cutover.
-struct AttestationFetcher: Sendable {
+struct DocumentFetcher: Sendable {
     static let sdkNameHeader = "Tinfoil-SDK"
     static let sdkVersionHeader = "Tinfoil-SDK-Version"
     static let maximumRedirects = 10
@@ -31,9 +31,12 @@ struct AttestationFetcher: Sendable {
         self.makeConfiguration = makeConfiguration
     }
 
-    /// Returns the body of a GET of url, which must be HTTPS.
-    func fetch(_ url: URL) async throws -> Data {
-        guard url.scheme?.lowercased() == "https" else {
+    /// Returns the body of a GET of url, which must be HTTPS, or, with
+    /// `allowingLoopbackHTTP`, HTTP to a host that is `localhost` or a
+    /// loopback IP address as written, as a relay on the device may be.
+    func fetch(_ url: URL, allowingLoopbackHTTP: Bool = false) async throws -> Data {
+        let loopbackHTTP = allowingLoopbackHTTP && url.scheme?.lowercased() == "http" && URLHelpers.hasLoopbackHost(url)
+        guard url.scheme?.lowercased() == "https" || loopbackHTTP else {
             throw TinfoilError.configuration("attestation must be fetched over HTTPS, not \(url.absoluteString)")
         }
         var request = URLRequest(url: url)

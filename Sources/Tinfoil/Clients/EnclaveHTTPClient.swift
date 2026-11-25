@@ -4,15 +4,46 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// How a client protects its traffic to an enclave
-public enum TransportMode: Sendable, Equatable {
+/// How a client protects its traffic to an enclave: `.tls`, the default, or
+/// `.ehbp(proxyURL:)`.
+public struct Transport: Sendable, Equatable {
+    let mode: TransportMode
+
+    /// Where an EHBP client sends requests, or nil when it connects directly
+    /// to the enclave. It is always nil for TLS.
+    public let proxyURL: URL?
+
     /// Pins each connection to the attested TLS key. It protects the whole
-    /// request and response, and needs a direct connection to the enclave.
-    case tls
-    /// Seals request and response bodies to the attested HPKE key, so they
-    /// stay private through a proxy. The method, URL and headers aren't
+    /// request and response, and needs a direct connection to the enclave, so
+    /// it takes no URL: requests go to the enclave's own HTTPS origin.
+    public static let tls = Transport(mode: .tls, proxyURL: nil)
+
+    /// Seals request and response bodies to the attested HPKE key, so that
+    /// they stay private through a proxy. The method, URL and headers aren't
     /// sealed, and neither is a request without a body or its response.
     /// Protocol upgrades, such as WebSockets, and CONNECT tunnels are refused.
+    ///
+    /// - Parameter proxyURL: A proxy that forwards requests to the enclave,
+    ///   which requests are sent to; nil sends them directly to the enclave.
+    ///   Its path, if any, is where the proxy is mounted, not the API path.
+    ///   Requests to it carry `X-Tinfoil-Enclave-Url` so that it can forward
+    ///   them. It must be HTTPS, since EHBP doesn't seal headers such as the
+    ///   API key; `http` is accepted only when its host is `localhost` or a
+    ///   loopback IP address, as for a local development proxy or a sidecar.
+    ///   Request paths join under it, so a URL with credentials, a query or a
+    ///   fragment, even an empty one, is refused. An enclave client also
+    ///   refuses a proxy on the enclave's own origin, which is no proxy; leave
+    ///   it nil to connect directly.
+    public static func ehbp(proxyURL: URL? = nil) -> Transport {
+        Transport(mode: .ehbp, proxyURL: proxyURL)
+    }
+}
+
+/// The transport's protection, apart from where requests go
+enum TransportMode: Sendable, Equatable {
+    /// Pinned TLS
+    case tls
+    /// Bodies sealed with EHBP
     case ehbp
 }
 
@@ -20,8 +51,17 @@ public enum TransportMode: Sendable, Equatable {
 /// It is verified before its initializer returns, and verifies again by
 /// itself before a request once the verification expires or the enclave
 /// rejects its key.
+///
+/// It sends request bodies as they are: it never adds or changes a
+/// `user_cache_secret` member, so a caller that points it at Tinfoil's
+/// router and wants a scoped prompt cache sets that member in each request
+/// body.
 public final class EnclaveHTTPClient: Sendable {
     let connection: EnclaveConnection
+
+    /// The trust that the enclave is verified under. It is a copy: the client
+    /// keeps its own.
+    public let trust: Trust
 
     /// Creates a client for the enclave at `enclave` and verifies it. The
     /// configuration is checked before any network I/O, so a misconfigured
@@ -30,100 +70,70 @@ public final class EnclaveHTTPClient: Sendable {
     ///
     /// - Parameters:
     ///   - enclave: Host of the enclave, such as "inference.tinfoil.sh"
-    ///   - pin: What the enclave must run. `Pin(repo:)` names a GitHub
-    ///     repository, owner/name[@tag][@sha256:digest], whose signed release
-    ///     the enclave must prove; `Pin(project:)` names a config registry
-    ///     project, org/project[@revision][@sha256:digest], that the enclave's
-    ///     config must come from; `Pin(repo:project:)` accepts either.
-    ///     `Pin.none` accepts any config that the verifier's trust
-    ///     authorizes: with `configSigningKeys`, any config those keys
-    ///     approve; with a `configAuthorizer`, which requires `Pin.none`, any
-    ///     config it approves. The default verifier refuses `Pin.none`, which
-    ///     would accept any deployment in Tinfoil's public registry. An empty
-    ///     string is refused, so that a missing value can't widen the trust
-    ///     by accident.
-    ///   - transportMode: How requests are protected; pinned TLS by default
-    ///   - baseURL: Where requests are sent: a path on the enclave's own
-    ///     origin, or a proxy on another origin, which requires `.ehbp`.
-    ///     Requests to a proxy carry `X-Tinfoil-Enclave-Url` so it can
-    ///     forward them to the enclave. It must be HTTPS, since EHBP doesn't
-    ///     seal headers such as the API key; under `.ehbp`, `http` is also
-    ///     accepted when the host is `localhost` or a loopback IP address,
-    ///     as for a local development proxy or a sidecar.
-    ///   - attestationRelay: Host, with an optional port, that forwards
-    ///     attestation requests to the enclave
-    ///   - verifier: The trust policy; nil selects the defaults
-    ///   - userCacheSecret: Scopes the prompt cache of the client's requests.
-    ///     Only Tinfoil's router reads it, so it is sent only when set. A
-    ///     non-empty `user_cache_secret` string in a request's JSON body
-    ///     overrides it. Use an opaque random value, not a raw user ID or API
-    ///     key.
-    ///   - verificationCheck: Called each time the enclave's evidence
-    ///     verifies, before its keys are used; throw to reject it.
-    ///   - onVerificationResult: Called with each verification's final result.
-    ///     It only observes.
+    ///   - trust: Who vouches for the config that the enclave runs, such as
+    ///     `.repo("owner/name@v1.2.3")` for a GitHub repository's signed
+    ///     release or `.project("org/project")` for a config registry
+    ///     project. `Trust` describes each kind.
+    ///   - options: The client's options; each one's default applies when it
+    ///     is not set
     public convenience init(
         enclave: String,
-        pin: Pin,
-        transportMode: TransportMode = .tls,
-        baseURL: URL? = nil,
-        attestationRelay: String? = nil,
-        verifier: Verifier? = nil,
-        userCacheSecret: String? = nil,
-        verificationCheck: VerificationCheck? = nil,
-        onVerificationResult: VerificationResultCallback? = nil
+        trust: Trust,
+        options: EnclaveOptions = EnclaveOptions()
     ) async throws {
+        let pin = try trust.pin()
+        try options.fetchAttestation?.relayURL.map { try EnclaveConnection.validateRelayURL($0) }
+        let verifier = try GoAttestationVerifier(trust: trust, policy: options.policy)
         try await self.init(verifying: Self.connection(
             enclave: enclave,
             pin: pin,
-            transportMode: transportMode,
-            baseURL: baseURL,
-            attestationRelay: attestationRelay,
-            userCacheSecret: userCacheSecret,
-            attestor: Attestor(verifier: try verifier?.backend ?? GoAttestationVerifier(), verificationCheck: verificationCheck),
-            onVerificationResult: onVerificationResult
-        ))
+            transportMode: options.transport.mode,
+            baseURL: options.transport.proxyURL,
+            attestor: Attestor(
+                verifier: verifier,
+                verificationCheck: options.verificationCheck,
+                fetchAttestation: options.fetchAttestation
+            ),
+            onVerificationResult: options.onVerificationResult
+        ), trust: trust)
     }
 
-    /// The connection `init(enclave:pin:…)` verifies, built without network
-    /// I/O. Only Tinfoil's router reads the cache secret, so an unset one
-    /// stays unset.
+    /// The connection `init(enclave:trust:options:)` verifies, built without
+    /// network I/O. It sends request bodies as they are: it never adds or
+    /// changes a `user_cache_secret` member.
     static func connection(
         enclave: String,
         pin: Pin,
         transportMode: TransportMode,
         baseURL: URL?,
-        attestationRelay: String?,
-        userCacheSecret: String?,
         attestor: Attestor,
         onVerificationResult: VerificationResultCallback?
     ) throws -> EnclaveConnection {
-        // The verifier reads "" as an unset part of the pin; only Pin.none
-        // asks for no pin here.
-        if pin.repo?.isEmpty == true || pin.project?.isEmpty == true {
-            throw TinfoilError.configuration(
-                "a pin's repo and project must not be empty; pass Pin.none to accept any config that the verifier's trust authorizes"
-            )
+        if let proxyURL = baseURL {
+            try EnclaveConnection.refuseEnclaveOriginProxy(proxyURL, enclave: enclave)
         }
         try attestor.checkPinVerifiability(pin)
         return try EnclaveConnection(
             handle: EnclaveHandle(
                 enclave: enclave,
                 pin: pin,
-                attestationRelay: attestationRelay,
+                attestationRelay: nil,
                 attestor: attestor,
                 onVerificationResult: onVerificationResult
             ),
             transportMode: transportMode,
             baseURL: baseURL,
-            userCacheSecret: userCacheSecret ?? ""
+            // The client sends bodies as they are.
+            userCacheSecret: ""
         )
     }
 
-    /// Verifies connection before the client is handed out.
-    init(verifying connection: EnclaveConnection) async throws {
+    /// Verifies connection before the client is handed out. `trust` is what
+    /// the connection's pin came from; nil derives one from the pin.
+    init(verifying connection: EnclaveConnection, trust: Trust? = nil) async throws {
         try await connection.ensureUsable()
         self.connection = connection
+        self.trust = trust ?? Trust(pin: connection.pin)
     }
 
     /// Closes the client: later requests and verifications fail with
@@ -135,23 +145,21 @@ public final class EnclaveHTTPClient: Sendable {
     }
 
     /// How the client protects its requests
-    public var transportMode: TransportMode { connection.transportMode }
+    public var transport: Transport { connection.transport }
 
-    /// The URL requests are sent to: the `baseURL` the client was created
-    /// with, or the enclave's own origin. Relative URLs passed to
-    /// `data(for:)` resolve against it.
+    /// The URL that requests are sent to: the EHBP proxy URL, or the
+    /// enclave's own origin when the client connects directly. Relative URLs
+    /// passed to `data(for:)` resolve against it.
     public var baseURL: URL { connection.baseURL }
 
     /// The host of the enclave the client verifies. It stays the enclave's
-    /// host when `baseURL` is a proxy.
+    /// host when requests go through a proxy.
     public var enclave: String { connection.enclave }
 
-    /// The pin the enclave is verified against, or `Pin.none` when any config
-    /// that the verifier's trust authorizes is accepted
-    public var pin: Pin { connection.pin }
-
     /// The last successful verification, without checking it. It may have
-    /// expired or been rejected; use `ensureVerified()` for one that is valid.
+    /// expired or been discarded by a re-verification that failed
+    /// attestation, and a failed verification doesn't change it; use
+    /// `ensureVerified()` for one that is valid now.
     public var current: Verification? {
         get async { await connection.current }
     }
@@ -166,13 +174,22 @@ public final class EnclaveHTTPClient: Sendable {
 
     /// Verifies the enclave again, even if the cached verification is still
     /// valid.
+    ///
+    /// If the new verification fails with `TinfoilError.attestationError`,
+    /// this throws it and the client discards its cached verification, even
+    /// one that is still valid: no later request is sent under it, and the
+    /// next request verifies again, failing while the problem persists.
+    /// `current` still returns the discarded verification. Other
+    /// failures, such as a `TinfoilError.networkError` or a cancellation,
+    /// keep a cached verification that is still valid. Requests already in
+    /// flight finish.
     @discardableResult
     public func reverify() async throws -> Verification {
         try await connection.reverify()
     }
 
     /// Loads a request from the enclave, as `URLSession.data(for:)` does,
-    /// protected by the client's transport mode. A URL without a host resolves
+    /// protected by the client's transport. A URL without a host resolves
     /// against `baseURL`; an absolute URL must be on `baseURL`'s exact origin,
     /// and so must any redirect, so credentials never leave it. A redirect
     /// elsewhere fails with `TinfoilError.configurationError`, except that over
@@ -183,7 +200,9 @@ public final class EnclaveHTTPClient: Sendable {
     /// client verifies again and retries once when that is safe. Over TLS, a
     /// key that still doesn't match fails with `TinfoilError.attestationError`;
     /// under EHBP, a refreshed key the enclave still rejects fails with EHBP's
-    /// key-configuration error. The retry sends the same request again,
+    /// key-configuration error. If verifying again fails attestation, the
+    /// cached verification is discarded, as after a failed `reverify()`. The
+    /// retry sends the same request again,
     /// headers such as `Authorization` included. To stop it, for example when
     /// the user signs out while it is pending, cancel the task awaiting this
     /// call: a request cancelled before the retry is not sent again and fails
@@ -210,7 +229,7 @@ public final class EnclaveHTTPClient: Sendable {
     /// after an interruption, such as a chat completion. The token is this
     /// request's own, even with other requests in flight on the client.
     ///
-    /// It requires `TransportMode.ehbp`; in TLS mode it fails with
+    /// It requires the EHBP transport; over TLS it fails with
     /// `TinfoilError.configurationError`. The same retry after a key rejection
     /// applies, and cancelling the task stops it in the same way. The
     /// request's `timeoutInterval` also limits each wait for the body's next

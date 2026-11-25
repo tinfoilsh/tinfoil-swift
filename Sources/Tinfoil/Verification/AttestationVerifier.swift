@@ -20,11 +20,6 @@ protocol AttestationVerifier: Sendable {
     /// deadline.
     func verify(document: Data, nonce: Data, pin: Pin) throws -> Verification
 
-    /// Whether the caller supplies or approves the config, with an embedded
-    /// config or a config authorizer, rather than a pin authenticating
-    /// it. Such a verifier needs an explicit enclave.
-    var callerAuthorizesConfig: Bool { get }
-
     /// Throws the configuration error that `verify` would throw for pin
     /// whatever the document, so a client can refuse it before any I/O.
     func checkPinVerifiability(_ pin: Pin) throws

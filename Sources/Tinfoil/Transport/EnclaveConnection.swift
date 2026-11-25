@@ -11,6 +11,13 @@ import FoundationNetworking
 final class EnclaveConnection: Sendable {
     /// How the client protects its requests
     let transportMode: TransportMode
+    /// Where requests go through, when not directly to the enclave
+    let proxyURL: URL?
+
+    /// How the client protects its requests, and the proxy that it sends through
+    var transport: Transport {
+        transportMode == .ehbp ? .ehbp(proxyURL: proxyURL) : .tls
+    }
     /// The URL requests are sent to: the `baseURL` the client was created
     /// with, or the enclave's own origin. Relative URLs passed to
     /// `data(for:)` resolve against it.
@@ -33,34 +40,23 @@ final class EnclaveConnection: Sendable {
     private let send: PinnedTLS.Send
     private let stream: PinnedTLS.Stream
 
-    /// A connection to the first of Tinfoil's routers that verifies, and
+    /// A connection to the first router that discovery verifies, and
     /// otherwise to the fallback router, which is left unverified for the
-    /// caller to verify. With an attestation relay, the relay is asked for the
-    /// fallback router instead. An unset `userCacheSecret` falls back to the
-    /// process's generated secret, since this is Tinfoil's router.
+    /// caller to verify. Discovery always runs. An unset `userCacheSecret`
+    /// falls back to the process's generated secret, since this is Tinfoil's
+    /// router.
     static func router(
         attestor: Attestor,
         transportMode: TransportMode,
         baseURL: URL?,
-        attestationRelay: String?,
         userCacheSecret: String?,
         onVerificationResult: VerificationResultCallback?
     ) async throws -> EnclaveConnection {
         // Checked before discovery, so a misconfiguration costs no network I/O.
         if let baseURL {
             try validateBaseURL(baseURL, transportMode: transportMode)
-            guard transportMode == .ehbp else {
-                throw TinfoilError.configuration(
-                    "a base URL requires TransportMode.ehbp when discovering the router, because the router's origin isn't known before discovery"
-                )
-            }
         }
-        if attestor.callerAuthorizesConfig {
-            throw TinfoilError.configuration(
-                "caller-authorized config requires an explicit enclave"
-            )
-        }
-        let discovered = attestationRelay == nil ? try await attestor.discoverRouter() : nil
+        let discovered = try await attestor.discoverRouter()
         if let discovered {
             onVerificationResult?(.success(discovered.verification))
         }
@@ -68,7 +64,7 @@ final class EnclaveConnection: Sendable {
             handle: EnclaveHandle(
                 enclave: discovered?.host ?? TinfoilConstants.fallbackEnclave,
                 pin: TinfoilConstants.routerPin,
-                attestationRelay: attestationRelay,
+                attestationRelay: nil,
                 attestor: attestor,
                 initial: discovered?.verification,
                 onVerificationResult: onVerificationResult
@@ -98,13 +94,9 @@ final class EnclaveConnection: Sendable {
         let base = baseURL ?? enclaveOrigin
         try Self.validateBaseURL(base, transportMode: transportMode)
         let origin = URLHelpers.origin(from: base.absoluteString)
-        if transportMode == .tls, origin != URLHelpers.origin(from: enclaveOrigin.absoluteString) {
-            throw TinfoilError.configuration(
-                "a base URL on another origin than the enclave \(handle.enclave) requires TransportMode.ehbp, since TLS pinning needs a direct connection"
-            )
-        }
         self.handle = handle
         self.transportMode = transportMode
+        self.proxyURL = origin == URLHelpers.origin(from: enclaveOrigin.absoluteString) ? nil : base
         self.baseURL = base
         self.userCacheSecret = userCacheSecret
         self.send = send
@@ -112,6 +104,28 @@ final class EnclaveConnection: Sendable {
         self.ehbp = transportMode == .ehbp
             ? EHBPChannel(origin: origin, enclaveURL: "https://\(handle.enclave)", handle: handle, initial: initial, userCacheSecret: userCacheSecret)
             : nil
+    }
+
+    /// Refuses an EHBP proxy URL on the enclave's own origin, which would send
+    /// requests directly to the enclave under the name of a proxy.
+    static func refuseEnclaveOriginProxy(_ proxyURL: URL, enclave: String) throws {
+        let enclaveOrigin = URLHelpers.origin(from: "https://\(enclave)/")
+        guard URLHelpers.origin(from: proxyURL.absoluteString) != enclaveOrigin else {
+            throw TinfoilError.configuration(
+                "invalid proxy URL: \(enclaveOrigin) is the enclave's own origin; leave the proxy URL nil to connect directly"
+            )
+        }
+    }
+
+    /// Refuses a relay URL under the rules of an EHBP proxy URL: HTTPS, or
+    /// HTTP to a loopback host, with a host and without credentials, a query
+    /// or a fragment.
+    static func validateRelayURL(_ url: URL) throws {
+        do {
+            try validateBaseURL(url, transportMode: .ehbp)
+        } catch let error as TinfoilError {
+            throw TinfoilError.configuration("invalid relay URL: \(error.message)")
+        }
     }
 
     /// Refuses a base URL that isn't HTTPS, which would expose request
@@ -137,7 +151,7 @@ final class EnclaveConnection: Sendable {
             throw TinfoilError.configuration(
                 transportMode == .ehbp
                     ? "invalid base URL \(url.absoluteString): HTTPS is required to protect request headers; HTTP is allowed only for localhost or a loopback IP address"
-                    : "invalid base URL \(url.absoluteString): TransportMode.tls requires HTTPS"
+                    : "invalid base URL \(url.absoluteString): the TLS transport requires HTTPS"
             )
         }
     }
@@ -153,7 +167,9 @@ final class EnclaveConnection: Sendable {
     }
 
     /// The last successful verification, without checking it. It may have
-    /// expired or been rejected; use `ensureVerified()` for one that is valid.
+    /// expired or been discarded by a re-verification that failed
+    /// attestation, and a failed verification doesn't change it; use
+    /// `ensureVerified()` for one that is valid now.
     var current: Verification? {
         get async { await handle.current }
     }
@@ -168,6 +184,15 @@ final class EnclaveConnection: Sendable {
 
     /// Verifies the enclave again, even if the cached verification is still
     /// valid.
+    ///
+    /// If the new verification fails with `TinfoilError.attestationError`,
+    /// this throws it and the client discards its cached verification, even
+    /// one that is still valid: no later request is sent under it, and the
+    /// next request verifies again, failing while the problem persists.
+    /// `current` still returns the discarded verification. Other
+    /// failures, such as a `TinfoilError.networkError` or a cancellation,
+    /// keep a cached verification that is still valid. Requests already in
+    /// flight finish.
     @discardableResult
     func reverify() async throws -> Verification {
         try await handle.reverify()
@@ -251,7 +276,7 @@ final class EnclaveConnection: Sendable {
     func recoverableBytes(for request: URLRequest) async throws -> RecoverableResponse {
         guard let ehbp else {
             throw TinfoilError.configuration(
-                "session recovery tokens need TransportMode.ehbp; pinned TLS has none"
+                "session recovery tokens need the EHBP transport; pinned TLS has none"
             )
         }
         var resolved = request
@@ -336,18 +361,32 @@ struct EHBPChannel: Sendable {
         // request takes its key from the handle.
         let endpoint = initial.flatMap { try? EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: $0) }
             ?? EHBPVerifiedEndpoint(enclaveURL: enclaveURL, publicKey: Data(), expiresAt: .distantPast)
-        state = EHBPVerifiedState(endpoint: endpoint, refresh: { stale in
-            // A newer verification than the stale endpoint's, as one made by
-            // ensureVerified() before the first request, is used as is. The
-            // stale endpoint's own verification being current means the
-            // enclave rejected its key, so verify again.
-            let verified = try await handle.ensureVerified()
-            if verified.freshnessExpiresAt == stale.expiresAt {
-                let fresh = try await handle.reverify()
-                return try EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: fresh)
+        state = EHBPVerifiedState(
+            endpoint: endpoint,
+            refresh: { stale in
+                // The stale endpoint's own verification still being usable
+                // means that the enclave rejected its key or that it expired,
+                // so verify again. Otherwise the handle has a newer one, as
+                // one made by ensureVerified() before the first request, or
+                // discarded it, and ensureVerified() returns a valid one.
+                let verified: Verification
+                if let source = stale.verification, await handle.usable == source {
+                    verified = try await handle.reverify()
+                } else {
+                    verified = try await handle.ensureVerified()
+                }
+                return try EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: verified)
+            },
+            // A key stops sealing new requests once its verification is no
+            // longer the handle's usable one, as when a failed
+            // re-verification discards it.
+            endorses: { endpoint in
+                guard let source = endpoint.verification else {
+                    return true
+                }
+                return await handle.usable == source
             }
-            return try EHBPVerifiedEndpoint(enclaveURL: enclaveURL, verification: verified)
-        })
+        )
         session = EHBPURLSession(baseURL: origin, verifiedState: state, userCacheSecret: userCacheSecret)
         streamingFactory = EHBPURLSessionFactory(baseURL: origin, verifiedState: state, userCacheSecret: userCacheSecret)
     }
