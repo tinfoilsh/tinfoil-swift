@@ -11,7 +11,8 @@ import Foundation
 /// `lastVerificationAttempt` as soon as its outcome is decided, and is
 /// reported to `onVerificationAttempt` once the run is done, outside the
 /// actor. A run that fails attestation withdraws the verification that it was
-/// replacing from `usable`, so that no later request uses it.
+/// replacing from `usable`, so that no later request uses it, and so does a
+/// key rejection, through `discard(_:)`.
 actor EnclaveHandle {
     nonisolated let enclave: String
     nonisolated let pin: Pin
@@ -37,7 +38,8 @@ actor EnclaveHandle {
     /// now.
     private(set) var lastVerificationAttempt: Result<VerificationReport, TinfoilError>?
     /// The verification that requests may use: the last that passed, or nil
-    /// before the first and after a run that fails attestation discards it.
+    /// before the first, after a run that fails attestation discards it, and
+    /// after the enclave rejects its key.
     /// It may have expired; `ensureVerified()` returns one that has not.
     private(set) var usable: VerificationReport?
 
@@ -137,6 +139,17 @@ actor EnclaveHandle {
             inFlight = task
         }
         return try await waitForSharedTask(task)
+    }
+
+    /// Discards `rejected`, a verification whose key the enclave refused, so
+    /// that no later request uses it and `currentVerification` is nil until a
+    /// new verification succeeds. A verification that has replaced it since
+    /// the request was sent is kept, so that a late rejection can't discard
+    /// one that is newer than the key that it refused.
+    func discard(_ rejected: VerificationReport) {
+        if usable == rejected {
+            usable = nil
+        }
     }
 
     /// Records a failed attempt that the run in progress retries.

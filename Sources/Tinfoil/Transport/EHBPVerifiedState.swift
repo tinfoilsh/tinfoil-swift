@@ -59,6 +59,9 @@ internal actor EHBPVerifiedState {
     typealias Refresh = @Sendable (_ stale: EHBPVerifiedEndpoint) async throws -> EHBPVerifiedEndpoint
     /// Whether an unexpired endpoint may still seal new requests
     typealias Endorses = @Sendable (_ endpoint: EHBPVerifiedEndpoint) async -> Bool
+    /// Discards the verification of `rejected`, an endpoint whose key the
+    /// enclave rejected, so that `Endorses` no longer endorses it
+    typealias Discard = @Sendable (_ rejected: EHBPVerifiedEndpoint) async -> Void
 
     private struct RefreshOperation {
         let id: UInt64
@@ -69,6 +72,7 @@ internal actor EHBPVerifiedState {
     private var generation: UInt64 = 0
     private let refreshEndpoint: Refresh?
     private let endorses: Endorses?
+    private let discardEndpoint: Discard?
     private let now: @Sendable () -> Date
     private var nextRefreshID: UInt64 = 0
     private var refreshOperation: RefreshOperation?
@@ -78,16 +82,27 @@ internal actor EHBPVerifiedState {
     ///   request; one that it no longer endorses, as when its verification
     ///   was discarded, is refreshed first. Nil endorses every endpoint until
     ///   it expires.
+    /// - Parameter discard: Discards the verification of an endpoint whose
+    ///   key the enclave rejected. Nil discards nothing.
     init(
         endpoint: EHBPVerifiedEndpoint,
+        discard: Discard? = nil,
         refresh: Refresh? = nil,
         endorses: Endorses? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.endpoint = endpoint
+        self.discardEndpoint = discard
         self.refreshEndpoint = refresh
         self.endorses = endorses
         self.now = now
+    }
+
+    /// Discards the verification of `rejected`, an endpoint whose key the
+    /// enclave rejected, before any refresh, so that no new request is
+    /// sealed to it even if the refresh fails.
+    func discard(_ rejected: EHBPVerifiedEndpoint) async {
+        await discardEndpoint?(rejected)
     }
 
     /// Refuses every later request, including the replay of one whose key

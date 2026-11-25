@@ -221,11 +221,12 @@ final class EnclaveConnection: Sendable {
     /// origin is HTTPS unless an EHBP base URL is HTTP on a loopback host.
     /// The request uses a valid verification, verifying first if needed.
     ///
-    /// In TLS mode, if the enclave presents a key the attestation does not
-    /// endorse before the request was sent, the client verifies again and
-    /// retries once; otherwise, or if it happens again, it fails with
-    /// `TinfoilError.attestationError`. Under EHBP, a rejected key is
-    /// refreshed and the request replayed in the same way. Either way the
+    /// In TLS mode, if the enclave presents a key that the attestation does
+    /// not endorse, the client discards that verification; if the request
+    /// hadn't been sent, it verifies again and retries once, and otherwise,
+    /// or if it happens again, it fails with `TinfoilError.attestationError`.
+    /// Under EHBP, a rejected key's verification is discarded, and the
+    /// request replayed under a refreshed key in the same way. Either way the
     /// same request goes out again, headers included; cancelling the task
     /// before the resend prevents it.
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -289,14 +290,17 @@ final class EnclaveConnection: Sendable {
     }
 
     /// Sends request over connections pinned to the verified TLS key, with
-    /// `transmit`. A key the enclave presents before the request left is
-    /// verified again and the request retried once.
+    /// `transmit`. A key that the enclave presents in place of the verified
+    /// one discards that verification; if the request hadn't left, the
+    /// enclave is verified again and the request retried once.
     private func pinned<Result>(
         _ request: URLRequest,
         transmit: (URLRequest, String) async throws -> Result
     ) async throws -> Result {
         var attempt = 0
         while true {
+            // After a rejection, the verification is discarded, so this
+            // verifies again, unless a concurrent request already has.
             let verification = try await handle.ensureVerified()
             // A caller that cancelled before a retry, as on signing out, must
             // not have its request, credentials included, sent again.
@@ -304,6 +308,10 @@ final class EnclaveConnection: Sendable {
             do {
                 return try await transmit(request, verification.passedFacts().tlsPublicKeyFingerprint)
             } catch let rejection as PinnedTLS.Rejection {
+                // The enclave doesn't hold the verified key, perhaps because
+                // it rotated the key, so no request may use that verification
+                // again, even if verifying again fails for another reason.
+                await handle.discard(verification)
                 attempt += 1
                 // Replaying is safe only if the request never left: a rejection
                 // on a later connection, as after a redirect, may follow one
@@ -311,8 +319,6 @@ final class EnclaveConnection: Sendable {
                 guard attempt < 2, !rejection.requestMayHaveBeenSent else {
                     throw TinfoilError.attestation(rejection.description)
                 }
-                // The enclave may have rotated its key since it was verified.
-                _ = try await handle.reverify()
             }
         }
     }
@@ -367,12 +373,21 @@ struct EHBPChannel: Sendable {
             ?? EHBPVerifiedEndpoint(enclaveURL: enclaveURL, publicKey: Data(), expiresAt: .distantPast)
         state = EHBPVerifiedState(
             endpoint: endpoint,
+            // A key that the enclave rejected discards its verification, so
+            // that no request is sealed to it again, even if verifying again
+            // fails for another reason.
+            discard: { rejected in
+                if let source = rejected.verification {
+                    await handle.discard(source)
+                }
+            },
             refresh: { stale in
                 // The stale endpoint's own verification still being usable
-                // means that the enclave rejected its key or that it expired,
-                // so verify again. Otherwise the handle has a newer one, as
-                // one made by ensureVerified() before the first request, or
-                // discarded it, and ensureVerified() returns a valid one.
+                // means that it expired, so verify again. Otherwise the handle
+                // has a newer one, as one made by ensureVerified() before the
+                // first request, or discarded it, as after a key rejection,
+                // and ensureVerified() returns a valid one, verifying again
+                // if it has none.
                 let verified: VerificationReport
                 if let source = stale.verification, await handle.usable == source {
                     verified = try await handle.reverify()

@@ -217,7 +217,7 @@ other version.
 | `Verification` | `VerifiedFacts`, the `verifiedFacts` of a `VerificationReport`; `metadata` moved to the report |
 | `Verification.Measurement` | `VerifiedFacts.Measurement` |
 | `ensureVerified()`, `reverify()`, the gateway's `ensureVerified(model:)` returning a `Verification` | the same calls, returning a `VerificationReport` |
-| `current`, the last successful verification, kept after a later failure | `currentVerification`: the report of the verification that requests are bound to now, nil once it has expired or an attestation failure discarded it; and `lastVerificationAttempt`: the most recent attempt, as a `Result<VerificationReport, TinfoilError>?`, so a failure replaces an earlier success |
+| `current`, the last successful verification, kept after a later failure | `currentVerification`: the report of the verification that requests are bound to now, nil once it has expired or an attestation failure or a key rejection discarded it; and `lastVerificationAttempt`: the most recent attempt, as a `Result<VerificationReport, TinfoilError>?`, so a failure replaces an earlier success |
 | `GatewayHTTPClient.current`, with each replica's last successful `verification` | `GatewayHTTPClient.replicas`, with each replica tried, failed ones included, its `current` verification and its `lastAttempt` |
 | — | `GatewayHTTPClient.reverify(model:)`, which verifies again the replica that `ensureVerified(model:)` would return |
 | `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, called once per verification run | `onVerificationAttempt: (String, Result<VerificationReport, TinfoilError>) -> Void`, called once for every attempt, retries and each router that discovery tries included, with the host that the attempt verified |

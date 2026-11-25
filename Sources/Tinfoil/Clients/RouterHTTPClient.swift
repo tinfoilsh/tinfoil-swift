@@ -72,8 +72,9 @@ public final class RouterHTTPClient: Sendable {
     /// `freshnessExpiresAt`, and has not been discarded. It is nil before
     /// the first successful verification, after a failure discarded the
     /// verification, such as a `reverify()` that failed with
-    /// `TinfoilError.attestationError`, and once the verification has
-    /// expired, until a later verification succeeds. A `reverify()` that
+    /// `TinfoilError.attestationError` or the router's rejection of the
+    /// verified key, and once the verification has expired, until a later
+    /// verification succeeds. A `reverify()` that
     /// fails in any other way, such as with a `TinfoilError.networkError`,
     /// leaves it unchanged while it is fresh, though `lastVerificationAttempt`
     /// then returns the failure.

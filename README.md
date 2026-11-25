@@ -109,11 +109,11 @@ The clients split the verification in use from the attempts that produced it:
 |---|---|---|
 | `ensureVerified()` | Only if needed | The report of a verification that is valid now, verifying first if the cached one has expired or been discarded |
 | `reverify()` | Always | The report of a new verification, or its error |
-| `currentVerification` | None | The report of the verification that requests are bound to now: fresh and not discarded. Nil before the first success, after a `TinfoilError.attestationError` discarded it, and once it has expired |
+| `currentVerification` | None | The report of the verification that requests are bound to now: fresh and not discarded. Nil before the first success, after a `TinfoilError.attestationError` or the enclave's rejection of the verified key discarded it, and once it has expired |
 | `lastVerificationAttempt` | None | The most recent attempt: its report if it passed, its error if it failed |
 | `onVerificationAttempt` option | Push | Each attempt as it is decided, failed attempts included |
 
-The two getters differ after a `reverify()` that fails for a reason other than attestation, such as a `TinfoilError.networkError`: `lastVerificationAttempt` returns the error, while `currentVerification` still returns the cached report, under which requests still go through until it expires. A `reverify()` that fails with `TinfoilError.attestationError` discards the cached verification, so `currentVerification` is nil and the next request verifies again.
+The two getters differ after a `reverify()` that fails for a reason other than attestation, such as a `TinfoilError.networkError`: `lastVerificationAttempt` returns the error, while `currentVerification` still returns the cached report, under which requests still go through until it expires. A `reverify()` that fails with `TinfoilError.attestationError` discards the cached verification, so `currentVerification` is nil and the next request verifies again. So does a request whose verified key the enclave rejects: the client discards the verification before it verifies again, so `currentVerification` is nil until that verification succeeds, even if it fails with a `TinfoilError.networkError`.
 
 - Health and readiness checks call `ensureVerified()`. It returns at once while the cached verification is valid, and verifies when it isn't. Clients don't verify again in the background, so `currentVerification` is nil between the expiry of a verification and the next request; don't treat that as a failure.
 - Status displays show `currentVerification` for the verification in use, and `lastVerificationAttempt` for the outcome of the latest attempt, which may be a failure.

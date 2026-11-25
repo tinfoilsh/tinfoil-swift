@@ -162,8 +162,9 @@ public final class EnclaveHTTPClient: Sendable {
     /// fresh, before its verified facts' `freshnessExpiresAt`, and has not
     /// been discarded. It is nil before the first successful verification,
     /// after a failure discarded the verification, such as a `reverify()`
-    /// that failed with `TinfoilError.attestationError`, and once the
-    /// verification has expired, until a later verification succeeds. A
+    /// that failed with `TinfoilError.attestationError` or the enclave's
+    /// rejection of the verified key, and once the verification has expired,
+    /// until a later verification succeeds. A
     /// `reverify()` that fails in any other way, such as with a
     /// `TinfoilError.networkError`, leaves it unchanged while it is fresh,
     /// though `lastVerificationAttempt` then returns the failure.
@@ -235,10 +236,11 @@ public final class EnclaveHTTPClient: Sendable {
     /// client verifies again and retries once when that is safe. Over TLS, a
     /// key that still doesn't match fails with `TinfoilError.attestationError`;
     /// under EHBP, a refreshed key the enclave still rejects fails with EHBP's
-    /// key-configuration error. If verifying again fails attestation, the
-    /// cached verification is discarded, as after a failed `reverify()`. The
-    /// retry sends the same request again,
-    /// headers such as `Authorization` included. To stop it, for example when
+    /// key-configuration error. The rejection discards the cached
+    /// verification first, so that `currentVerification` is nil and no
+    /// request uses the rejected key, even if verifying again then fails, as
+    /// with a `TinfoilError.networkError`. The retry sends the same request
+    /// again, headers such as `Authorization` included. To stop it, for example when
     /// the user signs out while it is pending, cancel the task awaiting this
     /// call: a request cancelled before the retry is not sent again and fails
     /// with `CancellationError`.

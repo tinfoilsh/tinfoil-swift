@@ -471,6 +471,62 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         XCTAssertEqual(log.sent.count, 2)
     }
 
+    /// A key rejection discards the verification before verifying again, so
+    /// a re-verification that can't reach the attestation source leaves no
+    /// current verification, and no request goes out under the rejected key.
+    func testAKeyRejectionThenAnUnreachableAttestationSourceLeavesNoCurrentVerification() async throws {
+        let verdict = Verdict("ok")
+        let network = scripted(verdict)
+        let log = SendLog { previous in
+            if previous == 0 { throw self.rejection }
+        }
+        let client = try client(network: network, log: log)
+        let first = try await client.ensureVerified()
+
+        verdict.value = "offline"
+        do {
+            _ = try await client.data(from: URL(string: "/health")!)
+            XCTFail("the request must fail while the enclave can't be verified again")
+        } catch TinfoilError.networkError {
+        }
+        let current = await client.currentVerification
+        XCTAssertNil(current, "The rejected verification \(first) is no longer in use.")
+        let usable = await client.handle.usable
+        XCTAssertNil(usable)
+
+        do {
+            _ = try await client.data(from: URL(string: "/health")!)
+            XCTFail("a request must not go out under the rejected key")
+        } catch TinfoilError.networkError {
+        }
+        XCTAssertEqual(log.sent.count, 1, "Only the rejected attempt was sent.")
+
+        verdict.value = "ok"
+        _ = try await client.data(from: URL(string: "/health")!)
+        XCTAssertEqual(log.sent.count, 2)
+        let recovered = await client.currentVerification
+        XCTAssertNotNil(recovered)
+        XCTAssertNotEqual(recovered, first)
+    }
+
+    func testAKeyRejectionThenASuccessfulReverificationReportsTheNewVerification() async throws {
+        let network = approving()
+        let log = SendLog { previous in
+            if previous == 0 { throw self.rejection }
+        }
+        let client = try client(network: network, log: log)
+        let first = try await client.ensureVerified()
+
+        _ = try await client.data(from: URL(string: "/health")!)
+
+        XCTAssertEqual(log.sent.count, 2, "The request was replayed once.")
+        let current = await client.currentVerification
+        let last = await client.lastVerificationAttempt?.report
+        XCTAssertNotNil(current)
+        XCTAssertNotEqual(current, first)
+        XCTAssertEqual(current, last, "The new verification is the one in use.")
+    }
+
     func testARejectionAfterTheRequestMayHaveBeenSentIsNotRetried() async throws {
         let network = approving()
         let afterRedirect = PinnedTLS.Rejection(
