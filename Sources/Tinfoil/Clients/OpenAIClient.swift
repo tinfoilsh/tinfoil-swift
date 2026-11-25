@@ -141,8 +141,10 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
 
     /// Creates a client on Tinfoil's recommended route: a `RouterHTTPClient`
     /// with the default options, verified before it returns, and an
-    /// `OpenAIClient` over it. The API path and the API key are checked
-    /// before any network I/O. See `init(httpClient:apiPath:…)` for the
+    /// `OpenAIClient` over it. The API path and the API key are checked, and
+    /// the process's prompt-cache secret is generated, before any network
+    /// I/O; when the secret can't be generated, this throws
+    /// `SecureRandomError`. See `init(httpClient:apiPath:…)` for the
     /// parameters.
     ///
     /// Servers that hold many end users' conversations should set the

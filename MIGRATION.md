@@ -124,6 +124,11 @@ failure over pinned TLS, `EHBPError` from the EHBP layer (for example a key
 that the enclave still rejects after a refresh), `CancellationError` when the
 task is cancelled, and the OpenAI SDK's own errors for an API failure.
 
+A router or gateway client's initializer, and `OpenAIClient(apiKey:)`, throw
+`SecureRandomError`, outside `TinfoilError`'s cases, when the system random
+number generator fails while it generates the process's prompt-cache secret;
+see "Prompt cache".
+
 | 0.8.x | now |
 |---|---|
 | `TinfoilError.missingAPIKey` | `.configurationError` |
@@ -262,6 +267,12 @@ and shared by its clients, so cache hits are no longer shared across processes
 or with other Tinfoil SDKs on the machine. Pass `userCacheSecret` to keep a
 stable secret, and set `user_cache_secret` in a request's `extraBody` to scope
 the cache to each end user.
+
+When the system random number generator fails, the initializer that needed
+the secret throws `SecureRandomError`, which carries the `OSStatus` that
+`SecRandomCopyBytes` returned, before any network I/O, instead of stopping the
+process. The failure isn't kept, so the next client tries again. A non-empty
+`userCacheSecret` needs no generation.
 
 ## New
 

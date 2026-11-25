@@ -18,7 +18,9 @@ public final class RouterHTTPClient: Sendable {
     /// and otherwise the fallback router, and verifies it. Routers are tried
     /// for at most 30 seconds before falling back, and each call discovers
     /// again, whatever the options. The configuration is checked before any
-    /// network I/O.
+    /// network I/O. Without a non-empty `userCacheSecret`, the client uses
+    /// the secret that is generated once per process; when it can't be
+    /// generated, this throws `SecureRandomError`, before any network I/O.
     ///
     /// - Parameter options: The client's options; each one's default applies
     ///   when it is not set

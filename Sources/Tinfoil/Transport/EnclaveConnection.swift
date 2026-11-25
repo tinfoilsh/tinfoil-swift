@@ -44,18 +44,21 @@ final class EnclaveConnection: Sendable {
     /// otherwise to the fallback router, which is left unverified for the
     /// caller to verify. Discovery always runs. An unset `userCacheSecret`
     /// falls back to the process's generated secret, since this is Tinfoil's
-    /// router.
+    /// router; when that secret can't be generated, this throws
+    /// `SecureRandomError` before any network I/O.
     static func router(
         attestor: Attestor,
         transportMode: TransportMode,
         baseURL: URL?,
         userCacheSecret: String?,
+        processSecret: UserCacheSecret.ProcessSecret = UserCacheSecret.processSecret,
         onVerificationAttempt: VerificationCallback?
     ) async throws -> EnclaveConnection {
         // Checked before discovery, so a misconfiguration costs no network I/O.
         if let baseURL {
             try validateBaseURL(baseURL, transportMode: transportMode)
         }
+        let secret = try UserCacheSecret.resolve(explicit: userCacheSecret, process: processSecret)
         // Discovery reports each router that it tries, the chosen one
         // included.
         let discovered = try await attestor.discoverRouter(onVerificationAttempt: onVerificationAttempt)
@@ -72,7 +75,7 @@ final class EnclaveConnection: Sendable {
             initial: discovered?.report,
             transportMode: transportMode,
             baseURL: baseURL,
-            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret)
+            userCacheSecret: secret
         )
     }
 

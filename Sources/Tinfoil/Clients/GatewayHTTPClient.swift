@@ -26,7 +26,10 @@ public final class GatewayHTTPClient: Sendable {
     /// configuration is checked before any network I/O. A model's replicas
     /// are verified on its first request, so creating the client doesn't
     /// check that the catalog lists the pinned models; a request for a model
-    /// that the catalog doesn't list fails.
+    /// that the catalog doesn't list fails. Without a non-empty
+    /// `userCacheSecret`, the client uses the secret that is generated once
+    /// per process; when it can't be generated, this throws
+    /// `SecureRandomError`, before any network I/O.
     ///
     /// - Parameter options: The client's options; each one's default applies
     ///   when it is not set
@@ -38,10 +41,13 @@ public final class GatewayHTTPClient: Sendable {
     ///   - get: Fetches the catalog and the replicas' attestation documents;
     ///     nil fetches them over the network
     ///   - verifier: The verifier for a policy
+    ///   - processSecret: The process's secret, which is used when
+    ///     `userCacheSecret` is unset or empty
     convenience init(
         options: GatewayOptions,
         get: (@Sendable (URL) async throws -> Data)?,
-        verifier: @escaping (Policy) throws -> any AttestationVerifier
+        verifier: @escaping (Policy) throws -> any AttestationVerifier,
+        processSecret: UserCacheSecret.ProcessSecret = UserCacheSecret.processSecret
     ) async throws {
         let verificationCheck = options.verificationCheck
         let onVerificationAttempt = options.onVerificationAttempt
@@ -53,6 +59,7 @@ public final class GatewayHTTPClient: Sendable {
         guard let catalogURL = URL(string: joined(base, path: "catalog")) else {
             throw TinfoilError.configuration("invalid gateway URL: cannot form the catalog URL under \(base.absoluteString)")
         }
+        let secret = try UserCacheSecret.resolve(explicit: options.userCacheSecret, process: processSecret)
         // Attestation documents are relayed through the gateway, under the
         // URL that it is mounted at.
         let relay = AttestationFetcher.relay(base, get: get ?? { try await DocumentFetcher().fetch($0) })
@@ -79,7 +86,7 @@ public final class GatewayHTTPClient: Sendable {
             baseURL: base,
             policy: policy,
             catalog: source,
-            secret: UserCacheSecret.resolve(explicit: options.userCacheSecret),
+            secret: secret,
             makeReplica: { replica, attestor in
                 let pin = GatewayCatalog.pin(replica.reference)
                 try attestor.checkPinVerifiability(pin)

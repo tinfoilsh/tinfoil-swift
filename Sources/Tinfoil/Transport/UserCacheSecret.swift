@@ -47,28 +47,66 @@ internal enum UserCacheSecret {
     // MARK: - Resolution
 
     /// Resolves the client-level secret: the explicit `userCacheSecret`
-    /// parameter when it is non-empty, and otherwise the process's secret.
-    static func resolve(explicit: String?) -> String {
+    /// parameter when it is non-empty, and otherwise the process's secret,
+    /// which `process` generates on first use. Throws `SecureRandomError`
+    /// when the secret has to be generated and the system generator fails.
+    static func resolve(explicit: String?, process: ProcessSecret = processSecret) throws -> String {
         if let explicit, !explicit.isEmpty {
             return explicit
         }
-        return processSecret
+        return try process.value()
     }
 
     /// The 256-bit random secret, hex-encoded, that every client in the
     /// process shares when none is given. Generated on first use and never
     /// persisted.
-    static let processSecret = generate()
+    static let processSecret = ProcessSecret()
+
+    /// Fills its argument with random bytes, returning `errSecSuccess` or
+    /// the status of the failure, as `SecRandomCopyBytes` does.
+    typealias RandomSource = @Sendable (inout [UInt8]) -> OSStatus
+
+    /// The system's secure random number generator
+    static let systemRandom: RandomSource = { bytes in
+        SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    }
 
     /// Returns a fresh 256-bit random secret, hex-encoded. Never falls back
-    /// to a weak generator: if the system generator fails, the process stops
-    /// rather than share a predictable cache namespace.
-    static func generate() -> String {
+    /// to a weak generator: if the generator fails, it throws
+    /// `SecureRandomError` with the generator's status rather than return a
+    /// predictable value.
+    static func generate(using random: RandomSource = systemRandom) throws -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            fatalError("tinfoil: the system random number generator failed")
+        let status = random(&bytes)
+        guard status == errSecSuccess else {
+            throw SecureRandomError(status: status)
         }
         return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A secret that is generated on first use and then kept. A generation
+    /// that fails stores nothing, so that the next use tries again.
+    final class ProcessSecret: @unchecked Sendable {
+        private let lock = NSLock()
+        private let random: RandomSource
+        private var secret: String?
+
+        init(random: @escaping RandomSource = UserCacheSecret.systemRandom) {
+            self.random = random
+        }
+
+        /// The secret, generating it when no earlier call has; throws
+        /// `SecureRandomError` when that generation fails.
+        func value() throws -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            if let secret {
+                return secret
+            }
+            let generated = try UserCacheSecret.generate(using: random)
+            secret = generated
+            return generated
+        }
     }
 
     // MARK: - Injection

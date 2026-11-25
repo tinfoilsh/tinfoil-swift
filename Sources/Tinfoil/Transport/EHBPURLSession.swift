@@ -294,7 +294,7 @@ final class EHBPURLSessionFactory: URLSessionFactory, @unchecked Sendable {
                 publicKey: publicKey,
                 session: session ?? .shared
             ),
-            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
+            userCacheSecret: try UserCacheSecret.resolve(explicit: userCacheSecret),
             session: session
         )
     }
@@ -388,7 +388,7 @@ final class EHBPURLSession: URLSessionProtocol, @unchecked Sendable {
                 publicKey: publicKey,
                 session: session ?? .shared
             ),
-            userCacheSecret: UserCacheSecret.resolve(explicit: userCacheSecret),
+            userCacheSecret: try UserCacheSecret.resolve(explicit: userCacheSecret),
             session: session
         )
     }
