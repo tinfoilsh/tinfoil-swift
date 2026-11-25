@@ -347,14 +347,17 @@ final class VerificationReportTests: XCTestCase {
         let client = try await EnclaveHTTPClient(verifying: connection(serving("ok")))
         let report = try await client.ensureVerified()
 
-        // A report is a value with immutable fields, so a caller can only
-        // change a copy that it builds, here by editing its JSON form.
+        // A report is a value with immutable fields, and nothing public
+        // builds one or reads one from JSON, so a caller can't change the
+        // client's. Changing what the caller's copy encodes to changes nothing.
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(report)) as? [String: Any])
-        var facts = try XCTUnwrap(object["verifiedFacts"] as? [String: Any])
-        facts["tlsPublicKeyFingerprint"] = "00"
-        object["verifiedFacts"] = facts
-        let altered = try JSONDecoder().decode(VerificationReport.self, from: JSONSerialization.data(withJSONObject: object))
-        XCTAssertNotEqual(altered, report)
+        var facts = try XCTUnwrap(object["verified_facts"] as? [String: Any])
+        facts["crypto_material"] = [["id": "tls", "format": "https://tinfoil.sh/key/spki-fp-sha256/v1", "data": "00"]]
+        object["verified_facts"] = facts
+        XCTAssertNotEqual(
+            try JSONSerialization.data(withJSONObject: object, options: .sortedKeys),
+            try JSONSerialization.data(withJSONObject: JSONSerialization.jsonObject(with: JSONEncoder().encode(report)), options: .sortedKeys)
+        )
 
         let last = await client.lastVerification
         XCTAssertEqual(last?.report, report)

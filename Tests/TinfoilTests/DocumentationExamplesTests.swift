@@ -38,6 +38,8 @@ final class DocumentationExamplesTests: XCTestCase {
         let report = try await reported.ensureVerified()
         let last = await reported.lastVerification  // the most recent attempt, success or failure
         _ = (report, last)
+        let json = try JSONEncoder().encode(report)
+        _ = json
 
         let origin = URL(string: "https://app.example/tinfoil")!
         _ = try await RouterHTTPClient(options: .init(

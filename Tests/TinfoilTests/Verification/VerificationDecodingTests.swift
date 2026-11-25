@@ -2,8 +2,9 @@ import XCTest
 import Foundation
 @testable import Tinfoil
 
-/// Pins the Swift side of the verifier result contract. The other side is
-/// resultJSON in the TinfoilGo framework's mobile/verification.go.
+/// Pins the Swift side of the verifier result contract, bridge schema 3: the
+/// report's JSON form in a wrapper. The other side is resultJSON in the
+/// TinfoilGo framework's mobile/verification.go.
 final class VerificationDecodingTests: XCTestCase {
     private static let host = "router.inference.tinfoil.sh"
 
@@ -17,10 +18,8 @@ final class VerificationDecodingTests: XCTestCase {
             "config_repo": "tinfoilsh/confidential-model-router",
             "code_digest": "abc123",
             "code_tag": "v1.2.3",
-            "code_measurement": ["type": "https://tinfoil.sh/predicate/tdx-guest/v2", "registers": ["", "", "bb", "cc", ""]],
-            "enclave_measurement": ["type": "https://tinfoil.sh/predicate/tdx-guest/v2", "registers": ["dd", "ee"]],
-            "tls_public_key_fp": "deadbeef",
-            "hpke_public_key": "cafebabe",
+            "code_measurement": ["platform": "tdx", "rtmr1": "bb", "rtmr2": "cc"],
+            "enclave_measurement": ["platform": "tdx", "mrtd": "dd", "rtmr0": "ee", "rtmr1": "bb", "rtmr2": "cc", "rtmr3": "ff"],
             "crypto_material": [
                 ["id": "tls", "format": "https://tinfoil.sh/key/spki-fp-sha256/v1", "data": "deadbeef"],
                 ["id": "hpke", "format": "https://tinfoil.sh/key/x25519-hpke/v1", "data": "cafebabe"],
@@ -31,8 +30,9 @@ final class VerificationDecodingTests: XCTestCase {
             facts[key] = value
         }
         return try json([
-            "schema_version": 2,
+            "schema_version": 3,
             "report": [
+                "schema_version": 1,
                 "steps": Self.passedSteps,
                 "verified_facts": facts,
                 "metadata": ["verified_at": "2026-09-26T12:00:00Z"],
@@ -49,8 +49,9 @@ final class VerificationDecodingTests: XCTestCase {
         let layers = ["envelope", "provenance", "quote", "policy"]
         let failed = layers.firstIndex(of: layer) ?? layers.count
         let result: [String: Any] = [
-            "schema_version": 2,
+            "schema_version": 3,
             "report": [
+                "schema_version": 1,
                 "steps": layers.enumerated().map { index, step -> [String: Any] in
                     index < failed ? ["layer": step, "status": "passed"]
                         : index == failed ? ["layer": step, "status": "failed", "message": message]
@@ -100,9 +101,12 @@ final class VerificationDecodingTests: XCTestCase {
         XCTAssertEqual(verification.codeDigest, "abc123")
         XCTAssertEqual(verification.codeTag, "v1.2.3")
         XCTAssertEqual(verification.codeMeasurement?.registers, ["", "", "bb", "cc", ""])
-        XCTAssertEqual(verification.enclaveMeasurement?.type, "https://tinfoil.sh/predicate/tdx-guest/v2")
-        XCTAssertEqual(verification.tlsPublicKeyFingerprint, "deadbeef")
-        XCTAssertEqual(verification.hpkePublicKey, "cafebabe")
+        XCTAssertEqual(verification.enclaveMeasurement, VerifiedFacts.Measurement(
+            type: "https://tinfoil.sh/predicate/tdx-guest/v2",
+            registers: ["dd", "ee", "bb", "cc", "ff"]
+        ))
+        XCTAssertEqual(verification.tlsPublicKeyFingerprint, "deadbeef", "The TLS key is lifted from crypto_material.")
+        XCTAssertEqual(verification.hpkePublicKey, "cafebabe", "The HPKE key is lifted from crypto_material.")
         XCTAssertEqual(verification.cryptoMaterial.map(\.id), ["tls", "hpke"])
         XCTAssertEqual(verification.freshnessExpiresAt, Date(timeIntervalSince1970: 1_791_028_800.5))
         XCTAssertEqual(report.steps.map(\.layer), [.envelope, .provenance, .quote, .policy])
@@ -122,7 +126,9 @@ final class VerificationDecodingTests: XCTestCase {
                 "code_tag": nil,
                 "code_measurement": nil,
                 "enclave_measurement": nil,
-                "hpke_public_key": nil,
+                "crypto_material": [
+                    ["id": "tls", "format": "https://tinfoil.sh/key/spki-fp-sha256/v1", "data": "deadbeef"],
+                ],
             ])
         )
         XCTAssertEqual(verification.codeTag, "")
@@ -209,17 +215,63 @@ final class VerificationDecodingTests: XCTestCase {
         }
     }
 
+    func testFindsTheChannelKeysByIDAndFormat() throws {
+        let verification = try facts(payload([
+            "crypto_material": [
+                ["id": "tls", "format": "https://tinfoil.sh/key/other/v1", "data": "00"],
+                ["id": "hpke", "format": "https://tinfoil.sh/key/spki-fp-sha256/v1", "data": "11"],
+                ["id": "extra", "format": "https://tinfoil.sh/key/x25519-hpke/v1", "data": "22"],
+            ],
+        ]))
+        XCTAssertEqual(verification.tlsPublicKeyFingerprint, "", "A tls item in another format is not the TLS key.")
+        XCTAssertEqual(verification.hpkePublicKey, "", "Only the hpke item in the HPKE format is the HPKE key.")
+        XCTAssertEqual(verification.cryptoMaterial.map(\.data), ["00", "11", "22"], "Every item is kept, in order.")
+    }
+
+    func testRejectsAMeasurementOfAnUnknownPlatform() throws {
+        assertAttestationError(
+            try decode(payload(["enclave_measurement": ["platform": "cca", "rim": "aa"]])),
+            containing: "unknown verified_facts.enclave_measurement platform: cca"
+        )
+    }
+
+    func testIgnoresMeasurementMembersThatItDoesNotKnow() throws {
+        let verification = try facts(payload(["code_measurement": ["platform": "sev-snp", "launch": "aa", "rtmr1": "bb", "note": 1]]))
+        XCTAssertEqual(
+            verification.codeMeasurement,
+            VerifiedFacts.Measurement(type: "https://tinfoil.sh/predicate/sev-snp-guest/v2", registers: ["aa"])
+        )
+    }
+
+    func testRejectsANullRegister() throws {
+        assertAttestationError(
+            try decode(payload(["code_measurement": ["platform": "tdx", "rtmr1": NSNull(), "rtmr2": "cc"]])),
+            containing: "unreadable verification result"
+        )
+    }
+
+    func testRejectsAnotherReportSchemaVersion() throws {
+        var result = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payload().utf8)) as? [String: Any])
+        var report = try XCTUnwrap(result["report"] as? [String: Any])
+        report["schema_version"] = 2
+        result["report"] = report
+        assertAttestationError(try decode(json(result)), containing: "unsupported verification report schema version 2")
+        report["schema_version"] = nil
+        result["report"] = report
+        assertAttestationError(try decode(json(result)), containing: "unsupported verification report schema version none")
+    }
+
     func testRejectsAnotherSchemaVersion() throws {
-        for version in [1, 3] {
+        for version in [1, 2, 4] {
             assertAttestationError(
                 try decode(#"{"schema_version":\#(version)}"#),
                 containing: "unsupported verification schema version \(version)"
             )
         }
-        // A version 1 payload was the verified facts alone.
+        // A version 2 payload had the same wrapper around another report.
         var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payload().utf8)) as? [String: Any])
-        legacy["schema_version"] = 1
-        assertAttestationError(try decode(json(legacy)), containing: "unsupported verification schema version 1")
+        legacy["schema_version"] = 2
+        assertAttestationError(try decode(json(legacy)), containing: "unsupported verification schema version 2")
     }
 
     func testRejectsMissingField() throws {
@@ -241,7 +293,7 @@ final class VerificationDecodingTests: XCTestCase {
             "expected": [
                 "config_repo": "tinfoilsh/confidential-model-router",
                 "artifact": ["source": "endorsement", "repo": "tinfoilsh/confidential-model-router", "tag": "v1.2.3", "digest": "abc123"],
-                "code_measurement": ["type": "https://tinfoil.sh/predicate/tdx-guest/v2", "registers": ["", "", "bb", "cc", ""]],
+                "code_measurement": ["platform": "tdx", "rtmr1": "bb", "rtmr2": "cc"],
             ],
             "measured": ["tls_public_key_fp": "deadbeef", "hpke_public_key_fp": "f00d"],
         ]
@@ -277,14 +329,13 @@ final class VerificationDecodingTests: XCTestCase {
     }
 
     func testDecodesAPolicyFailureSideBySide() throws {
-        let tdx = "https://tinfoil.sh/predicate/tdx-guest/v2"
         let partial: [String: Any] = [
             "expected": [
                 "config_repo": "org/repo",
                 "artifact": ["source": "endorsement", "digest": "abc123"],
-                "measurement": ["type": tdx, "registers": ["aa", "bb", "cc", "dd", "ee"]],
+                "measurement": ["platform": "tdx", "mrtd": "aa", "rtmr0": "bb", "rtmr1": "cc", "rtmr2": "dd", "rtmr3": "ee"],
             ],
-            "measured": ["cpu_measurement": ["type": tdx, "registers": ["aa", "bb", "cc", "dd", "ff"]]],
+            "measured": ["cpu_measurement": ["platform": "tdx", "mrtd": "aa", "rtmr0": "bb", "rtmr1": "cc", "rtmr2": "dd", "rtmr3": "ff"]],
         ]
         let result = try rejection(partialFacts: partial, failing: "policy", message: "verification error: policy: RTMR3 mismatch")
         XCTAssertThrowsError(try decode(result)) { error in
@@ -321,23 +372,26 @@ final class VerificationDecodingTests: XCTestCase {
         var accepted = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payload().utf8)) as? [String: Any])
         accepted["error"] = ["layer": "policy", "message": "verification error: policy: rejected"]
         assertAttestationError(try decode(json(accepted)), containing: "carries verified facts")
+
+        // An error without partial facts.
+        var rejected = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(rejection().utf8)) as? [String: Any])
+        var rejectedReport = try XCTUnwrap(rejected["report"] as? [String: Any])
+        rejectedReport["partial_facts"] = nil
+        rejected["report"] = rejectedReport
+        assertAttestationError(try decode(json(rejected)), containing: "no partial facts")
     }
 
-    func testAReportRoundTripsThroughCodable() throws {
-        let accepted = try decode(payload([
+    func testADecodedReportEncodesItsJSONForm() throws {
+        let report = try decode(payload([
             "config": ["source": "endorsement", "digest": "c0", "approval_time": "2026-09-20T08:00:00Z"],
         ]))
-        XCTAssertEqual(try JSONDecoder().decode(VerificationReport.self, from: JSONEncoder().encode(accepted)), accepted)
-        let steps = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(accepted.steps)) as? [[String: Any]])
-        XCTAssertEqual(steps.first?["layer"] as? String, "envelope", "A layer encodes as its raw string.")
-        XCTAssertEqual(steps.first?["status"] as? String, "passed")
-
-        XCTAssertThrowsError(try decode(rejection(partialFacts: ["measured": ["tls_public_key_fp": "deadbeef"]]))) { error in
-            guard let report = (error as? TinfoilError)?.verificationError?.report else {
-                return XCTFail("expected a report, got \(error)")
-            }
-            XCTAssertEqual(try? JSONDecoder().decode(VerificationReport.self, from: JSONEncoder().encode(report)), report)
-        }
+        let encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(report)) as? [String: Any])
+        let facts = try XCTUnwrap(encoded["verified_facts"] as? [String: Any])
+        XCTAssertEqual(facts["code_measurement"] as? [String: String], ["platform": "tdx", "rtmr1": "bb", "rtmr2": "cc"])
+        XCTAssertEqual(facts["config"] as? [String: String], ["source": "endorsement", "digest": "c0", "approval_time": "2026-09-20T08:00:00Z"])
+        XCTAssertEqual(facts["freshness_expires_at"] as? String, "2026-10-03T12:00:00.5Z")
+        XCTAssertNil(facts["tls_public_key_fp"], "The channel keys are only in crypto_material.")
+        XCTAssertNil(facts["hpke_public_key"])
     }
 
     func testClassifiesVerifierErrorsByPrefix() {

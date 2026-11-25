@@ -22,7 +22,7 @@ public typealias VerificationCallback = @Sendable (_ host: String, _ result: Res
 public typealias VerificationCheck = @Sendable (VerifiedFacts) throws -> Void
 
 /// Identifies the software that performed verification
-public struct SoftwareIdentity: Sendable, Equatable, Codable {
+public struct SoftwareIdentity: Sendable, Equatable, Encodable {
     /// The SDK's name, such as "tinfoil-swift"
     public let name: String
     /// The SDK's version, such as "0.9.0"
@@ -31,7 +31,7 @@ public struct SoftwareIdentity: Sendable, Equatable, Codable {
 
 /// How a verification was performed. The verifier fills it in from its own
 /// state; none of it is attested by or checked against the document.
-public struct VerificationMetadata: Sendable, Equatable, Codable {
+public struct VerificationMetadata: Sendable, Equatable {
     /// The SDK that performed the verification
     public let verifier: SoftwareIdentity
     /// When the document was appraised. It is not a freshness guarantee.
@@ -40,7 +40,7 @@ public struct VerificationMetadata: Sendable, Equatable, Codable {
 
 /// Why a verification accepted a component's reference values. More sources
 /// may be added, so match the ones that you handle and tolerate any other.
-public struct ReferenceSource: RawRepresentable, Hashable, Sendable, Codable, CustomStringConvertible {
+public struct ReferenceSource: RawRepresentable, Hashable, Sendable, CustomStringConvertible {
     /// An endorsement in the document, verified against the trust policy
     public static let endorsement = ReferenceSource(rawValue: "endorsement")
     /// A value from the verifier's `EmbeddedReferences`
@@ -59,7 +59,7 @@ public struct ReferenceSource: RawRepresentable, Hashable, Sendable, Codable, Cu
 
 /// The config bound to the hardware. Only an endorsed config has a reference,
 /// signing key hint, registry ID and times; the others are empty or nil.
-public struct ConfigVerification: Sendable, Equatable, Codable {
+public struct ConfigVerification: Sendable, Equatable {
     /// Why the config was accepted
     public let source: ReferenceSource
     /// The config's `/org/project/revision` identity, or empty
@@ -87,7 +87,7 @@ public struct ConfigVerification: Sendable, Equatable, Codable {
 /// A code release, or a runtime or platform artifact that a config-based
 /// verification accepted. An embedded artifact has no name, commit or
 /// approval time, and an embedded platform has only a digest.
-public struct ArtifactVerification: Sendable, Equatable, Codable {
+public struct ArtifactVerification: Sendable, Equatable {
     /// Why the artifact was accepted
     public let source: ReferenceSource
     /// The `owner/name` repository that the artifact was released from
@@ -111,10 +111,19 @@ public struct ArtifactVerification: Sendable, Equatable, Codable {
 /// records where it was fetched. The verifier's metadata is on the report.
 ///
 /// Verified facts are the only source of channel keys: a client binds TLS or
-/// EHBP only to the keys here, never to anything in `PartialFacts`.
-public struct VerifiedFacts: Sendable, Equatable, Codable {
-    /// A measurement: its predicate type and register values
-    public struct Measurement: Sendable, Equatable, Codable {
+/// EHBP only to the keys here, never to anything in `PartialFacts`, and never
+/// to a key that was read from the facts' JSON form. Only verification creates
+/// them: they are `Encodable` but not `Decodable`.
+public struct VerifiedFacts: Sendable, Equatable {
+    /// A measurement: its predicate type and register values, in the
+    /// platform's order, with an empty register for one that is
+    /// unconstrained. The JSON form names the registers instead: SEV-SNP
+    /// (`https://tinfoil.sh/predicate/sev-snp-guest/v2`) as
+    /// `{"platform": "sev-snp", "launch"}`, and TDX
+    /// (`https://tinfoil.sh/predicate/tdx-guest/v2`) as
+    /// `{"platform": "tdx", "mrtd", "rtmr0", ..., "rtmr3"}`, without an
+    /// empty register.
+    public struct Measurement: Sendable, Equatable {
         public let type: String
         public let registers: [String]
 
@@ -125,7 +134,7 @@ public struct VerifiedFacts: Sendable, Equatable, Codable {
     }
 
     /// A key that the enclave endorses, bound into its hardware evidence
-    public struct CryptoMaterial: Sendable, Equatable, Codable {
+    public struct CryptoMaterial: Sendable, Equatable, Encodable {
         /// The item's name in the document, such as "tls" or "hpke"
         public let id: String
         /// A URI naming what the item is and how `data` encodes it, such as
@@ -135,6 +144,12 @@ public struct VerifiedFacts: Sendable, Equatable, Codable {
         public let format: String
         /// The item, encoded as `format` says
         public let data: String
+
+        /// The format of the TLS key's fingerprint, which the item with id
+        /// "tls" has
+        static let tlsFormat = "https://tinfoil.sh/key/spki-fp-sha256/v1"
+        /// The format of the HPKE key, which the item with id "hpke" has
+        static let hpkeFormat = "https://tinfoil.sh/key/x25519-hpke/v1"
     }
 
     /// Repository that the code provenance was authenticated against, without
@@ -157,12 +172,19 @@ public struct VerifiedFacts: Sendable, Equatable, Codable {
     public let runtime: ArtifactVerification?
     /// The platform endorsements that a config-based verification accepted
     public let platform: ArtifactVerification?
-    /// SHA-256 of the enclave TLS certificate's public key, lowercase hex
+    /// SHA-256 of the enclave TLS certificate's public key, lowercase hex:
+    /// the `cryptoMaterial` item with id "tls" in the
+    /// `https://tinfoil.sh/key/spki-fp-sha256/v1` format, or empty if the
+    /// document endorses none. The JSON form has it only in `crypto_material`.
     public let tlsPublicKeyFingerprint: String
-    /// X25519 key that request bodies are encrypted to, lowercase hex. Empty
-    /// for an enclave that endorses only a TLS key.
+    /// X25519 key that request bodies are encrypted to, lowercase hex: the
+    /// `cryptoMaterial` item with id "hpke" in the
+    /// `https://tinfoil.sh/key/x25519-hpke/v1` format. Empty for an enclave
+    /// that endorses only a TLS key. The JSON form has it only in
+    /// `crypto_material`.
     public let hpkePublicKey: String
-    /// Every endorsed key, including the two lifted out above
+    /// Every endorsed key, including the two that are lifted out above, in
+    /// the document's order
     public let cryptoMaterial: [CryptoMaterial]
     /// No new request may be authorized at or after this instant
     public let freshnessExpiresAt: Date
