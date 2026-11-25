@@ -78,7 +78,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         let log = SendLog()
         let client = try client(network: approving(), log: log)
         XCTAssertEqual(client.baseURL.absoluteString, "https://enclave.example/")
-        let before = await client.lastVerification
+        let before = await client.lastVerificationAttempt
         XCTAssertNil(before, "Creating a connection does no network I/O.")
 
         let (data, response) = try await client.data(from: URL(string: "/health?verbose=1")!)
@@ -88,7 +88,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         let sent = try XCTUnwrap(log.sent.first)
         XCTAssertEqual(sent.request.url?.absoluteString, "https://enclave.example/health?verbose=1")
         XCTAssertEqual(sent.fingerprint, "deadbeef", "Pinned to the verification's TLS key")
-        let after = await client.lastVerification
+        let after = await client.lastVerificationAttempt
         XCTAssertNotNil(after?.report)
     }
 
@@ -389,7 +389,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         let log = SendLog()
         let client = try client(network: network, log: log)
         _ = try await client.data(from: URL(string: "/health")!)
-        let verified = await client.lastVerification?.report
+        let verified = await client.lastVerificationAttempt?.report
         let first = try XCTUnwrap(verified)
 
         verdict.value = "reject"
@@ -398,8 +398,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
             XCTFail("a rejected attestation must fail the re-verification")
         } catch TinfoilError.attestationError {
         }
-        let last = await client.lastVerification
-        XCTAssertNotNil(last?.error, "lastVerification returns the failure, not \(first).")
+        let last = await client.lastVerificationAttempt
+        XCTAssertNotNil(last?.error, "lastVerificationAttempt returns the failure, not \(first).")
         let fetched = network.urls.count
         do {
             _ = try await client.data(from: URL(string: "/health")!)
@@ -412,7 +412,7 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         verdict.value = "ok"
         _ = try await client.data(from: URL(string: "/health")!)
         XCTAssertEqual(log.sent.count, 2, "Once the enclave verifies again, requests go through.")
-        let recovered = await client.lastVerification?.report
+        let recovered = await client.lastVerificationAttempt?.report
         XCTAssertNotNil(recovered)
         XCTAssertNotEqual(recovered, first, "The request went out under the new verification.")
     }
@@ -437,8 +437,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         XCTAssertEqual(network.urls.count, fetched, "No new verification was needed.")
         let usable = await client.handle.usable
         XCTAssertEqual(usable, first)
-        let last = await client.lastVerification
-        XCTAssertNotNil(last?.error, "lastVerification still returns the failed attempt.")
+        let last = await client.lastVerificationAttempt
+        XCTAssertNotNil(last?.error, "lastVerificationAttempt still returns the failed attempt.")
     }
 
     func testAFailedRecoveryFromARejectedKeyStopsRequests() async throws {
@@ -457,8 +457,8 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
             XCTFail("a key that no verification endorses must not be used")
         } catch TinfoilError.attestationError {
         }
-        let last = await client.lastVerification
-        XCTAssertNotNil(last?.error, "lastVerification returns the failed recovery, not \(first).")
+        let last = await client.lastVerificationAttempt
+        XCTAssertNotNil(last?.error, "lastVerificationAttempt returns the failed recovery, not \(first).")
         do {
             _ = try await client.data(from: URL(string: "/health")!)
             XCTFail("a request must not go out under the discarded verification")
@@ -469,6 +469,62 @@ final class EnclaveHTTPClientRequestTests: XCTestCase {
         verdict.value = "ok"
         _ = try await client.data(from: URL(string: "/health")!)
         XCTAssertEqual(log.sent.count, 2)
+    }
+
+    /// A key rejection discards the verification before verifying again, so
+    /// a re-verification that can't reach the attestation source leaves no
+    /// current verification, and no request goes out under the rejected key.
+    func testAKeyRejectionThenAnUnreachableAttestationSourceLeavesNoCurrentVerification() async throws {
+        let verdict = Verdict("ok")
+        let network = scripted(verdict)
+        let log = SendLog { previous in
+            if previous == 0 { throw self.rejection }
+        }
+        let client = try client(network: network, log: log)
+        let first = try await client.ensureVerified()
+
+        verdict.value = "offline"
+        do {
+            _ = try await client.data(from: URL(string: "/health")!)
+            XCTFail("the request must fail while the enclave can't be verified again")
+        } catch TinfoilError.networkError {
+        }
+        let current = await client.currentVerification
+        XCTAssertNil(current, "The rejected verification \(first) is no longer in use.")
+        let usable = await client.handle.usable
+        XCTAssertNil(usable)
+
+        do {
+            _ = try await client.data(from: URL(string: "/health")!)
+            XCTFail("a request must not go out under the rejected key")
+        } catch TinfoilError.networkError {
+        }
+        XCTAssertEqual(log.sent.count, 1, "Only the rejected attempt was sent.")
+
+        verdict.value = "ok"
+        _ = try await client.data(from: URL(string: "/health")!)
+        XCTAssertEqual(log.sent.count, 2)
+        let recovered = await client.currentVerification
+        XCTAssertNotNil(recovered)
+        XCTAssertNotEqual(recovered, first)
+    }
+
+    func testAKeyRejectionThenASuccessfulReverificationReportsTheNewVerification() async throws {
+        let network = approving()
+        let log = SendLog { previous in
+            if previous == 0 { throw self.rejection }
+        }
+        let client = try client(network: network, log: log)
+        let first = try await client.ensureVerified()
+
+        _ = try await client.data(from: URL(string: "/health")!)
+
+        XCTAssertEqual(log.sent.count, 2, "The request was replayed once.")
+        let current = await client.currentVerification
+        let last = await client.lastVerificationAttempt?.report
+        XCTAssertNotNil(current)
+        XCTAssertNotEqual(current, first)
+        XCTAssertEqual(current, last, "The new verification is the one in use.")
     }
 
     func testARejectionAfterTheRequestMayHaveBeenSentIsNotRetried() async throws {

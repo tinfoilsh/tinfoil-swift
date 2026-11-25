@@ -74,7 +74,9 @@ final class GoAttestationVerifier: AttestationVerifier, @unchecked Sendable {
     /// The framework returns one result for a document that it accepted and
     /// for one that it rejected, since an error that crosses the boundary
     /// can't carry a report; it returns an error only when there is no
-    /// report, as for a usage error.
+    /// report, as for a usage error. The bridge verifies a document without
+    /// knowing where it came from, so the report has no `metadata.host`;
+    /// `Attestor` sets it on the reports of a client's attempts.
     func verify(document: Data, nonce: Data, pin: Pin) throws -> VerificationReport {
         var error: NSError?
         let payload = verifier.verify(

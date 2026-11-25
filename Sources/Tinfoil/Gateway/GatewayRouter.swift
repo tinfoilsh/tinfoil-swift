@@ -24,12 +24,15 @@ public struct ModelPin: Sendable {
     }
 }
 
-/// A gateway replica's last attempt at verification.
+/// A gateway replica that the client has tried to verify: its host, the
+/// models requested through it, its trusted reference and pinned model, the
+/// report of the verification that its requests are bound to now
+/// (`current`), and its last attempt at verification (`lastAttempt`).
 ///
 /// Experimental: the gateway route is new, and this API may change or be
 /// removed in a later release.
 public struct ReplicaVerification: Sendable, Equatable {
-    /// The replica that the attempt verified
+    /// The replica's host
     public let host: String
     /// The model names requests to the replica gave, sorted. They are what
     /// the caller asked for, not attested identities.
@@ -38,11 +41,19 @@ public struct ReplicaVerification: Sendable, Equatable {
     public let reference: String
     /// The model whose pin the replica was verified under
     public let pinnedModel: String
-    /// The replica's last attempt: its report if it passed, and otherwise
-    /// the error that the client reported for it, whose `verificationError`
-    /// carries the report when the verifier rejected the replica's document.
-    /// A report may have expired or been discarded since.
-    public let lastVerification: Result<VerificationReport, TinfoilError>
+    /// The report of the replica's verification that requests are bound to
+    /// now, following the rule of `EnclaveHTTPClient.currentVerification`
+    /// for this replica: set while that verification is fresh and has not
+    /// been discarded, and nil otherwise.
+    public let current: VerificationReport?
+    /// The replica's most recent attempt at verification: its report if it
+    /// passed, and otherwise the error that the client reported for it, whose
+    /// `verificationError` carries the report when the verifier rejected the
+    /// replica's document. A failed attempt replaces an earlier success here,
+    /// though `current` keeps that success while a failure other than
+    /// `TinfoilError.attestationError` leaves it valid. A report may have
+    /// expired or been discarded since.
+    public let lastAttempt: Result<VerificationReport, TinfoilError>
 }
 
 /// One replica's verification and sealed transport, as the router uses it.
@@ -50,11 +61,16 @@ public struct ReplicaVerification: Sendable, Equatable {
 protocol GatewayReplica: Sendable {
     /// A verification that is valid now, with an HPKE key to seal to
     func usableVerification() async throws -> VerificationReport
+    /// Verifies the replica again, even if its verification is still valid
+    func reverify() async throws -> VerificationReport
     /// Sends a request sealed to the replica, returning once its headers
     /// arrive
     func open(_ request: URLRequest) async throws -> RecoverableResponse
+    /// The report of the replica's verification that requests are bound to
+    /// now, if any
+    var currentVerification: VerificationReport? { get async }
     /// The outcome of the replica's last attempt at verification
-    var lastVerification: Result<VerificationReport, TinfoilError>? { get async }
+    var lastVerificationAttempt: Result<VerificationReport, TinfoilError>? { get async }
     func close() async
 }
 
@@ -219,19 +235,60 @@ actor GatewayRouter {
         throw failure ?? TinfoilError.configuration("model \"\(model)\" has no replicas")
     }
 
-    /// The last attempt of each replica that has been tried, without
-    /// verifying anything. Reports may have expired or been discarded.
-    var lastVerification: [ReplicaVerification] {
+    /// Verifies again the replica that `ensureVerified(model:)` would return.
+    /// It tries the replicas in that order, verifying each again, and stops
+    /// at the first that passes, or that fails but keeps a valid
+    /// verification, which requests for model still use; it then throws that
+    /// failure. A replica whose verification the failure discarded, or that
+    /// had none, is passed over, as `ensureVerified(model:)` passes it over.
+    func reverify(model: String) async throws -> VerificationReport {
+        let catalog = try await catalogNow()
+        let (hosts, base) = try policy.resolve(model, in: catalog)
+        var failure: Error?
+        for host in Self.rank(hosts, prefix: model, first: "") {
+            try Task.checkCancellation()
+            let replica: any GatewayReplica
+            do {
+                replica = try replicaTransport(for: base.on(host))
+            } catch {
+                try checkOpen()
+                failure = error
+                continue
+            }
+            do {
+                let report = try await replica.reverify()
+                try checkOpen()
+                return report
+            } catch {
+                try checkOpen()
+                // A failure that keeps a valid verification leaves requests
+                // for model on this replica, so it is the outcome to report.
+                if await replica.currentVerification != nil {
+                    throw error
+                }
+                failure = error
+            }
+        }
+        throw failure ?? TinfoilError.configuration("model \"\(model)\" has no replicas")
+    }
+
+    /// An entry for each replica that has been tried, failed ones included,
+    /// without verifying anything
+    var replicaVerifications: [ReplicaVerification] {
         get async {
             var results: [ReplicaVerification] = []
             for (key, entry) in replicas {
-                if let attempt = await entry.replica.lastVerification {
+                // Read current first: an attempt that completes in between
+                // then shows as the last attempt, which can only be newer.
+                let current = await entry.replica.currentVerification
+                if let attempt = await entry.replica.lastVerificationAttempt {
                     results.append(ReplicaVerification(
                         host: key.host,
                         models: entry.models.sorted(),
                         reference: key.reference,
                         pinnedModel: key.pinnedModel,
-                        lastVerification: attempt
+                        current: current,
+                        lastAttempt: attempt
                     ))
                 }
             }
@@ -306,17 +363,21 @@ actor GatewayRouter {
     /// replica's transport once it verifies, so that a caller can fall over
     /// to another replica before sealing anything to it
     private func verified(_ replica: Replica) async throws -> (transport: any GatewayReplica, verification: VerificationReport) {
-        try checkOpen()
-        let transport: any GatewayReplica
-        if let existing = replicas[replica] {
-            transport = existing.replica
-        } else {
-            transport = try makeReplica(replica, policy.attestor(for: replica))
-            replicas[replica] = (transport, [])
-        }
+        let transport = try replicaTransport(for: replica)
         let verification = try await transport.usableVerification()
         try checkOpen()
         return (transport, verification)
+    }
+
+    /// replica's transport, made on first use
+    private func replicaTransport(for replica: Replica) throws -> any GatewayReplica {
+        try checkOpen()
+        if let existing = replicas[replica] {
+            return existing.replica
+        }
+        let transport = try makeReplica(replica, policy.attestor(for: replica))
+        replicas[replica] = (transport, [])
+        return transport
     }
 
     private func remember(_ prefix: String, _ host: String) {

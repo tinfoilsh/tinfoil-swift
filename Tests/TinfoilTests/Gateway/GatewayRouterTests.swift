@@ -15,6 +15,9 @@ final class GatewayRouterTests: XCTestCase {
         private let lock = NSLock()
         private var _sent: [URLRequest] = []
         private var _last: Result<VerificationReport, TinfoilError>?
+        /// The verification in use: the last that passed, until an
+        /// attestation failure discards it
+        private var _current: VerificationReport?
         private var _closed = false
         let fails: Bool
         let respond: @Sendable (URLRequest) -> (Int, [String: String])
@@ -40,12 +43,28 @@ final class GatewayRouterTests: XCTestCase {
         func usableVerification() async throws -> VerificationReport {
             if fails {
                 let error = TinfoilError.attestation("\(replica.host) failed verification")
-                lock.withLock { _last = .failure(error) }
+                lock.withLock {
+                    _last = .failure(error)
+                    _current = nil
+                }
                 throw error
             }
             let verification = VerificationReport.stub(repo: replica.reference)
-            lock.withLock { _last = .success(verification) }
+            lock.withLock {
+                _last = .success(verification)
+                _current = verification
+            }
             return verification
+        }
+
+        func reverify() async throws -> VerificationReport {
+            try await usableVerification()
+        }
+
+        var currentVerification: VerificationReport? {
+            get async {
+                lock.withLock { _current.flatMap { Date() < $0.freshnessExpiresAt ? $0 : nil } }
+            }
         }
 
         func open(_ request: URLRequest) async throws -> RecoverableResponse {
@@ -59,7 +78,7 @@ final class GatewayRouterTests: XCTestCase {
             )
         }
 
-        var lastVerification: Result<VerificationReport, TinfoilError>? {
+        var lastVerificationAttempt: Result<VerificationReport, TinfoilError>? {
             get async { lock.withLock { _last } }
         }
 
@@ -171,7 +190,7 @@ final class GatewayRouterTests: XCTestCase {
         XCTAssertEqual(sent.value(forHTTPHeaderField: GatewayRequest.modelHeader), "m")
         XCTAssertEqual(sent.url?.absoluteString, "https://gw.example/v1/chat/completions")
 
-        let current = await router.lastVerification
+        let current = await router.replicaVerifications
         XCTAssertEqual(current.map(\.host), ["d.example"])
         XCTAssertEqual(current.first?.models, ["m"])
         XCTAssertEqual(current.first?.reference, "tinfoilsh/model-repo")
@@ -185,13 +204,13 @@ final class GatewayRouterTests: XCTestCase {
         XCTAssertEqual(harness.sealedTo, ["c.example"], "Nothing is sealed to a replica that failed verification.")
 
         // Each replica tried keeps its own last attempt, failed ones included.
-        let attempts = await router.lastVerification
+        let attempts = await router.replicaVerifications
         XCTAssertEqual(attempts.map(\.host), ["b.example", "c.example", "d.example"])
         for entry in attempts {
             if entry.host == "c.example" {
-                XCTAssertNotNil(entry.lastVerification.report, "c.example verified.")
+                XCTAssertNotNil(entry.lastAttempt.report, "c.example verified.")
             } else {
-                XCTAssertEqual(entry.lastVerification.error?.message, "\(entry.host) failed verification")
+                XCTAssertEqual(entry.lastAttempt.error?.message, "\(entry.host) failed verification")
             }
         }
     }
@@ -311,7 +330,7 @@ final class GatewayRouterTests: XCTestCase {
         let router = try harness.router(pins: ["m": ("tinfoilsh/model-repo@v2", nil)])
         _ = try await router.open(chat(prefix: "m"))
         XCTAssertEqual(harness.replicas.first?.replica, GatewayRouter.Replica(host: "d.example", reference: "tinfoilsh/model-repo@v2", pinnedModel: "m"))
-        let current = await router.lastVerification
+        let current = await router.replicaVerifications
         XCTAssertEqual(current.first?.pinnedModel, "m")
     }
 

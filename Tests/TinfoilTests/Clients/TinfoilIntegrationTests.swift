@@ -12,7 +12,7 @@ final class TinfoilIntegrationTests: XCTestCase {
 
         _ = try await OpenAIClient(
             httpClient: RouterHTTPClient(
-                options: .init(userCacheSecret: "test-secret", onVerification: { _, result in captured.value = result })
+                options: .init(userCacheSecret: "test-secret", onVerificationAttempt: { _, result in captured.value = result })
             ),
             apiKey: "test-key"
         )

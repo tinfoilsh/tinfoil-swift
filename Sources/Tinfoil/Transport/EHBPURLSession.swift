@@ -11,6 +11,8 @@ import Combine
 #endif
 
 private struct PreparedEHBPRequest {
+    /// The endpoint that the request is sealed to
+    let endpoint: EHBPVerifiedEndpoint
     let rejectedGeneration: UInt64
     let client: EHBPClient
     let method: String
@@ -54,6 +56,7 @@ private func prepareEHBPRequest(
     )
 
     return PreparedEHBPRequest(
+        endpoint: snapshot.endpoint,
         rejectedGeneration: snapshot.generation,
         client: client,
         method: request.httpMethod ?? "GET",
@@ -221,6 +224,9 @@ private enum EHBPReplayPolicy {
             do {
                 sent = try await sendOnce(prepared)
             } catch let error as EHBPError where error.code == .keyConfigMismatch {
+                // The enclave doesn't hold the key, so its verification is
+                // discarded first, even if the refresh then fails.
+                await verifiedState.discard(prepared.endpoint)
                 try await refresh(
                     verifiedState,
                     afterRejectedGeneration: prepared.rejectedGeneration,

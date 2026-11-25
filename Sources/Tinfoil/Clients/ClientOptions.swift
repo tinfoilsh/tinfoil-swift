@@ -20,20 +20,20 @@ public struct EnclaveOptions: Sendable {
     /// enclave's host and the attempt's report or error: the verification
     /// when the client is created, each retry, and every verification again.
     /// It only observes. `VerificationCallback` describes when it runs.
-    public var onVerification: VerificationCallback?
+    public var onVerificationAttempt: VerificationCallback?
 
     public init(
         transport: Transport = .tls,
         policy: Policy = Policy(),
         verificationCheck: VerificationCheck? = nil,
         fetchAttestation: AttestationFetcher? = nil,
-        onVerification: VerificationCallback? = nil
+        onVerificationAttempt: VerificationCallback? = nil
     ) {
         self.transport = transport
         self.policy = policy
         self.verificationCheck = verificationCheck
         self.fetchAttestation = fetchAttestation
-        self.onVerification = onVerification
+        self.onVerificationAttempt = onVerificationAttempt
     }
 }
 
@@ -72,7 +72,7 @@ public struct RouterOptions: Sendable {
     /// discovery tries, including the fallback, and for the chosen router
     /// whenever the client verifies it again. It only observes.
     /// `VerificationCallback` describes when it runs.
-    public var onVerification: VerificationCallback?
+    public var onVerificationAttempt: VerificationCallback?
 
     public init(
         transport: Transport = .tls,
@@ -81,7 +81,7 @@ public struct RouterOptions: Sendable {
         verificationCheck: VerificationCheck? = nil,
         fetchAttestation: AttestationFetcher? = nil,
         fetchRouterList: RouterListFetcher? = nil,
-        onVerification: VerificationCallback? = nil
+        onVerificationAttempt: VerificationCallback? = nil
     ) {
         self.transport = transport
         self.policy = policy
@@ -89,6 +89,6 @@ public struct RouterOptions: Sendable {
         self.verificationCheck = verificationCheck
         self.fetchAttestation = fetchAttestation
         self.fetchRouterList = fetchRouterList
-        self.onVerification = onVerification
+        self.onVerificationAttempt = onVerificationAttempt
     }
 }

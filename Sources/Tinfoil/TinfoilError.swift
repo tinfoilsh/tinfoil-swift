@@ -82,6 +82,20 @@ extension TinfoilError {
     }
 }
 
+extension TinfoilError {
+    /// The same error, with host on the report that its `verificationError`
+    /// carries, if it carries one
+    func withReportHost(_ host: String) -> TinfoilError {
+        guard case .attestationError(let failure) = self, let rejected = failure.verificationError else {
+            return self
+        }
+        return .attestation(
+            failure.message,
+            verificationError: VerificationError(layer: rejected.layer, message: rejected.message, report: rejected.report.withHost(host))
+        )
+    }
+}
+
 /// A layer of the verifier: one step of a `VerificationReport`, and the layer
 /// that a `VerificationError` names as having rejected the document. More
 /// layers may be added, so match the ones you handle and tolerate any other.

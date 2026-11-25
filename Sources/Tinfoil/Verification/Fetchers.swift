@@ -172,7 +172,7 @@ public struct RouterListFetcher: Sendable {
 
 /// `path` joined under `base`'s path, with the same result whether or not
 /// that path ends with "/"
-private func joined(_ base: URL, path: String) -> String {
+func joined(_ base: URL, path: String) -> String {
     var root = base.absoluteString
     while root.hasSuffix("/") {
         root.removeLast()

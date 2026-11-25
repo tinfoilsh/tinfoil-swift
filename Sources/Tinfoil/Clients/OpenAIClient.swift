@@ -48,21 +48,6 @@ extension GatewayHTTPClient: AttestedHTTPClient {
     public var attestedRoute: AttestedRoute { AttestedRoute(kind: .gateway(self)) }
 }
 
-/// Configures an `OpenAIClient`.
-public struct OpenAIOptions: Sendable, Equatable {
-    /// The path of the OpenAI API, joined under the EHBP proxy URL or, when
-    /// there is none, under the enclave's origin. Nil selects "/v1/". It must
-    /// be an absolute path, without a query, a fragment, an encoded slash, or
-    /// a "." or ".." segment, percent-encoded or not. A gateway client's URL
-    /// already carries the API path, so setting one with a gateway client is
-    /// a configuration error.
-    public var apiPath: String?
-
-    public init(apiPath: String? = nil) {
-        self.apiPath = apiPath
-    }
-}
-
 /// An OpenAI-compatible client whose requests go through an
 /// `AttestedHTTPClient`, protected as that client protects its own: over TLS
 /// pinned to the attested key, or with bodies sealed by EHBP.
@@ -83,15 +68,22 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
     /// network I/O: `httpClient` was verified when it was created, and
     /// verifies again by itself.
     ///
-    /// The client sets the OpenAI base URL itself: `options.apiPath`, "/v1/"
-    /// by default, joined under the EHBP proxy URL or, when there is none,
-    /// under the enclave's origin; for a gateway client, its URL. No other
-    /// parameter changes where requests go; set `options.apiPath` to change
-    /// the API path.
+    /// The client sets the OpenAI base URL itself: `apiPath` joined under
+    /// the EHBP proxy URL or, when there is none, under the enclave's origin;
+    /// for a gateway client, under its URL. No other parameter changes where
+    /// requests go; set `apiPath` to change the API path.
     ///
     /// - Parameters:
     ///   - httpClient: The attested client that requests go through
-    ///   - options: The client's options
+    ///   - apiPath: The path of the OpenAI API on the server, "/v1/" by
+    ///     default. It must be an RFC 3986 absolute path, which starts with
+    ///     "/" but not "//", without a query or a fragment, holding only
+    ///     path characters and well-formed percent-encodings, and without a
+    ///     "." or ".." segment, an encoded slash or an encoded backslash,
+    ///     percent-encoded or not; an empty path is refused, so leave it out
+    ///     for the default. Its percent-encodings must decode to UTF-8, which
+    ///     the OpenAI client sends. Any other path fails with
+    ///     `TinfoilError.configurationError`.
     ///   - apiKey: The API key; required unless `apiKeyProvider` is given
     ///   - apiKeyProvider: Supplies the API key for each request, as for a
     ///     rotating token
@@ -105,7 +97,7 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
     ///     values of the `X-Tinfoil-Events` header
     public init(
         httpClient: any AttestedHTTPClient,
-        options: OpenAIOptions = OpenAIOptions(),
+        apiPath: String = OpenAIClient.defaultAPIPath,
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
@@ -119,7 +111,7 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
         let baseURL: URL
         switch httpClient.attestedRoute.kind {
         case let .connection(connection):
-            baseURL = try Self.join(connection.baseURL, apiPath: options.apiPath ?? Self.defaultAPIPath)
+            baseURL = try Self.join(connection.baseURL, apiPath: apiPath)
             if let ehbp = connection.ehbp {
                 session = ehbp.session
                 streamingFactory = ehbp.streamingFactory
@@ -128,19 +120,14 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
                 streamingFactory = PinnedSessionFactory(open: connection.open)
             }
         case let .gateway(gateway):
-            guard options.apiPath == nil else {
-                throw TinfoilError.configuration(
-                    "invalid API path: a gateway client's URL already carries the API path; set GatewayOptions.url instead"
-                )
-            }
-            baseURL = gateway.baseURL
+            baseURL = try Self.join(gateway.baseURL, apiPath: apiPath)
             session = StreamingSession(delegate: nil, open: gateway.open)
             streamingFactory = PinnedSessionFactory(open: gateway.open)
         }
         self.openAI = try OpenAI.sealed(
             apiKey: staticApiKey,
             apiKeyProvider: apiKeyProvider,
-            baseURL: baseURL.absoluteString,
+            baseURL: baseURL,
             session: session,
             streamingFactory: streamingFactory,
             parsingOptions: parsingOptions,
@@ -154,14 +141,16 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
 
     /// Creates a client on Tinfoil's recommended route: a `RouterHTTPClient`
     /// with the default options, verified before it returns, and an
-    /// `OpenAIClient` over it. The API key is checked before any network
-    /// I/O. See `init(httpClient:options:…)` for the parameters.
+    /// `OpenAIClient` over it. The API path and the API key are checked
+    /// before any network I/O. See `init(httpClient:apiPath:…)` for the
+    /// parameters.
     ///
     /// Servers that hold many end users' conversations should set the
     /// `user_cache_secret` field per request (for example through
     /// `ChatQuery.extraBody`); a non-empty per-request string wins over the
     /// client's secret.
     public convenience init(
+        apiPath: String = OpenAIClient.defaultAPIPath,
         apiKey: String? = nil,
         apiKeyProvider: (@Sendable () -> String?)? = nil,
         parsingOptions: ParsingOptions = .relaxed,
@@ -169,9 +158,11 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
         timeoutInterval: TimeInterval = 60,
         tinfoilEvents: Set<TinfoilEvent> = []
     ) async throws {
+        try Self.validate(apiPath: apiPath)
         _ = try OpenAI.apiKey(apiKey, provider: apiKeyProvider)
         try self.init(
             httpClient: await RouterHTTPClient(),
+            apiPath: apiPath,
             apiKey: apiKey,
             apiKeyProvider: apiKeyProvider,
             parsingOptions: parsingOptions,
@@ -189,8 +180,8 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
         await httpClient.close()
     }
 
-    /// The API path of an `OpenAIOptions` without one
-    static let defaultAPIPath = "/v1/"
+    /// The API path when none is given
+    public static let defaultAPIPath = "/v1/"
 
     /// `apiPath` joined under `root`, a proxy URL or an origin, whether or not
     /// `root` ends with a slash. The result ends with a slash, so that request
@@ -211,27 +202,55 @@ public final class OpenAIClient: OpenAICompatibleClient, Sendable {
         return url
     }
 
-    /// Requires an absolute path without a query, a fragment, an encoded
-    /// slash, or a "." or ".." segment, percent-encoded or not, so that it can
-    /// only name a path under its root.
+    /// The characters that an RFC 3986 path segment holds as they are:
+    /// unreserved, sub-delims, ":" and "@"
+    private static let pathCharacters = Set(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!$&'()*+,;=:@".utf8
+    )
+
+    /// Requires an RFC 3986 absolute path without a query, a fragment, an
+    /// encoded slash or backslash, or a "." or ".." segment, percent-encoded
+    /// or not, so that it can only name a path under its root and is sent as
+    /// it was written. The OpenAI client takes the path decoded, so an
+    /// encoding that doesn't decode to UTF-8 is refused too.
     static func validate(apiPath: String) throws {
+        func invalid(_ reason: String) -> TinfoilError {
+            .configuration("invalid API path \"\(apiPath)\": \(reason)")
+        }
+        guard !apiPath.isEmpty else {
+            throw invalid("it is empty; leave it out for the default, \(defaultAPIPath)")
+        }
         guard apiPath.hasPrefix("/"), !apiPath.hasPrefix("//") else {
-            throw TinfoilError.configuration("invalid API path \"\(apiPath)\": it must be an absolute path, such as /v1/")
+            throw invalid("it must be an absolute path, such as /v1/")
         }
         guard !apiPath.contains(where: { $0 == "?" || $0 == "#" }) else {
-            throw TinfoilError.configuration("invalid API path \"\(apiPath)\": it must not carry a query or a fragment")
+            throw invalid("it must not carry a query or a fragment")
         }
-        guard let components = URLComponents(string: apiPath), components.percentEncodedPath == apiPath else {
-            throw TinfoilError.configuration("invalid API path \"\(apiPath)\": it does not parse as a URL path")
-        }
-        for segment in apiPath.split(separator: "/", omittingEmptySubsequences: false) {
-            guard let decoded = segment.removingPercentEncoding else {
-                throw TinfoilError.configuration("invalid API path \"\(apiPath)\": it has an invalid percent-encoding")
+        for segment in apiPath.utf8.split(separator: UInt8(ascii: "/"), omittingEmptySubsequences: false) {
+            var decoded: [UInt8] = []
+            var rest = segment[...]
+            while let byte = rest.popFirst() {
+                guard byte == UInt8(ascii: "%") else {
+                    guard pathCharacters.contains(byte) else {
+                        throw invalid("it may hold only RFC 3986 path characters; percent-encode any other")
+                    }
+                    decoded.append(byte)
+                    continue
+                }
+                let hex = rest.prefix(2)
+                guard hex.count == 2, hex.allSatisfy({ ($0 >= 0x30 && $0 <= 0x39) || ($0 | 0x20 >= 0x61 && $0 | 0x20 <= 0x66) }),
+                      let value = UInt8(String(decoding: hex, as: UTF8.self), radix: 16)
+                else {
+                    throw invalid("it has an invalid percent-encoding")
+                }
+                decoded.append(value)
+                rest = rest.dropFirst(2)
             }
-            if decoded == "." || decoded == ".." || decoded.contains("/") {
-                throw TinfoilError.configuration(
-                    "invalid API path \"\(apiPath)\": it must not contain a \".\" or \"..\" segment or an encoded slash"
-                )
+            if decoded == [0x2E] || decoded == [0x2E, 0x2E] || decoded.contains(0x2F) || decoded.contains(0x5C) {
+                throw invalid("it must not contain a \".\" or \"..\" segment, an encoded slash or an encoded backslash")
+            }
+            guard String(bytes: decoded, encoding: .utf8) != nil else {
+                throw invalid("its percent-encoding does not decode to UTF-8, which the OpenAI client requires")
             }
         }
     }

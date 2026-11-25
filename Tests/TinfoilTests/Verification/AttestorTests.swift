@@ -205,7 +205,7 @@ final class AttestorTests: XCTestCase {
             discoveryTimeout: 0.2
         )
 
-        let discovered = try await attestor.discoverRouter(onVerification: { host, _ in reported.record(host) })
+        let discovered = try await attestor.discoverRouter(onVerificationAttempt: { host, _ in reported.record(host) })
         XCTAssertNil(discovered)
         await gate.open()
         await fulfillment(of: [finished], timeout: 5)

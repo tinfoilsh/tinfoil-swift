@@ -15,8 +15,9 @@ import FoundationNetworking
 /// Experimental: the gateway route is new, and this API may change or be
 /// removed in a later release.
 public final class GatewayHTTPClient: Sendable {
-    /// Tinfoil's gateway
-    public static let defaultURL = URL(string: "https://inference-gateway.tinfoil.sh/v1/")!
+    /// Tinfoil's gateway, at its origin. The OpenAI client adds the API
+    /// path, `/v1/` by default, under it.
+    public static let defaultURL = URL(string: "https://inference-gateway.tinfoil.sh/")!
 
     let router: GatewayRouter
 
@@ -30,18 +31,33 @@ public final class GatewayHTTPClient: Sendable {
     /// - Parameter options: The client's options; each one's default applies
     ///   when it is not set
     public convenience init(options: GatewayOptions) async throws {
+        try await self.init(options: options, get: nil, verifier: { try GoAttestationVerifier(trust: nil, policy: $0) })
+    }
+
+    /// - Parameters:
+    ///   - get: Fetches the catalog and the replicas' attestation documents;
+    ///     nil fetches them over the network
+    ///   - verifier: The verifier for a policy
+    convenience init(
+        options: GatewayOptions,
+        get: (@Sendable (URL) async throws -> Data)?,
+        verifier: @escaping (Policy) throws -> any AttestationVerifier
+    ) async throws {
         let verificationCheck = options.verificationCheck
-        let onVerification = options.onVerification
+        let onVerificationAttempt = options.onVerificationAttempt
         let base = Self.directory(options.url ?? Self.defaultURL)
         try EnclaveConnection.validateBaseURL(base, transportMode: .ehbp)
         guard base.scheme?.lowercased() == "https" else {
             throw TinfoilError.configuration("invalid gateway URL: the gateway URL must use HTTPS")
         }
-        guard let relay = Self.authority(of: base) else {
-            throw TinfoilError.configuration("invalid gateway URL: the gateway URL has no host")
+        guard let catalogURL = URL(string: joined(base, path: "catalog")) else {
+            throw TinfoilError.configuration("invalid gateway URL: cannot form the catalog URL under \(base.absoluteString)")
         }
+        // Attestation documents are relayed through the gateway, under the
+        // URL that it is mounted at.
+        let relay = AttestationFetcher.relay(base, get: get ?? { try await DocumentFetcher().fetch($0) })
         let attestor = { (policy: Policy) throws -> Attestor in
-            Attestor(verifier: try GoAttestationVerifier(trust: nil, policy: policy), verificationCheck: verificationCheck)
+            Attestor(verifier: try verifier(policy), verificationCheck: verificationCheck, fetchAttestation: relay)
         }
         let policy = try GatewayPolicy(
             pins: options.modelPins.mapValues { pin in (repo: pin.repo, attestor: try pin.policy.map { try attestor($0) }) },
@@ -51,7 +67,12 @@ public final class GatewayHTTPClient: Sendable {
         if let catalog = options.catalog {
             source = { catalog() }
         } else {
-            let cache = CatalogCache(fetch: { try await GatewayCatalog.fetch(host: relay) })
+            let cache = CatalogCache(fetch: {
+                if let get {
+                    return try await GatewayCatalog.fetch(url: catalogURL, fetch: get)
+                }
+                return try await GatewayCatalog.fetch(url: catalogURL)
+            })
             source = { try await cache.get() }
         }
         try await self.init(router: GatewayRouter(
@@ -66,9 +87,9 @@ public final class GatewayHTTPClient: Sendable {
                     handle: EnclaveHandle(
                         enclave: replica.host,
                         pin: pin,
-                        attestationRelay: relay,
+                        attestationRelay: nil,
                         attestor: attestor,
-                        onVerification: onVerification,
+                        onVerificationAttempt: onVerificationAttempt,
                         requiresHPKEKey: true
                     ),
                     transportMode: .ehbp,
@@ -91,16 +112,6 @@ public final class GatewayHTTPClient: Sendable {
         return URL(string: url.absoluteString + "/") ?? url
     }
 
-    /// The host and any port of base, which attestation and the catalog are
-    /// fetched through, with an IPv6 address in brackets
-    static func authority(of base: URL) -> String? {
-        guard let host = base.host, !host.isEmpty else {
-            return nil
-        }
-        let bracketed = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
-        return base.port.map { "\(bracketed):\($0)" } ?? bracketed
-    }
-
     /// Reads the catalog through router before the client is handed out.
     init(router: GatewayRouter) async throws {
         _ = try await router.models()
@@ -114,8 +125,10 @@ public final class GatewayHTTPClient: Sendable {
     }
 
     /// The gateway's URL, which requests are sent to: the `url` option, with
-    /// a trailing slash on its path, or Tinfoil's gateway. Relative URLs
-    /// passed to `data(for:)` resolve against it.
+    /// a trailing slash on its path, or Tinfoil's gateway. It is the
+    /// gateway's origin, or the URL that the gateway is mounted under, never
+    /// the API path: relative URLs passed to `data(for:)` resolve against
+    /// it, so name the API path in them, as in `v1/chat/completions`.
     public var baseURL: URL { router.baseURL }
 
     /// The catalog's models that the client's policy serves, sorted, without
@@ -132,15 +145,38 @@ public final class GatewayHTTPClient: Sendable {
         try await router.ensureVerified(model: model)
     }
 
+    /// Verifies again the replica that `ensureVerified(model:)` would
+    /// return, even if its cached verification is still valid, and returns
+    /// the new report. It tries the model's replicas in the order that
+    /// `ensureVerified(model:)` tries them, verifying each again, and stops
+    /// at the first that passes, or that fails but keeps a valid
+    /// verification, which requests for model still use; it then throws that
+    /// failure. Each failure follows the rule that
+    /// `EnclaveHTTPClient.reverify()` describes, for its replica: a
+    /// `TinfoilError.attestationError` discards the replica's cached
+    /// verification, so that `reverify(model:)` moves on to the next replica,
+    /// as `ensureVerified(model:)` then does, and a failure of any other
+    /// category keeps it while it is still valid. When no replica passes or
+    /// keeps a valid verification, it throws the last failure. A model that
+    /// isn't pinned fails with `TinfoilError.configurationError`, and no
+    /// replica is verified.
+    @discardableResult
+    public func reverify(model: String) async throws -> VerificationReport {
+        try await router.reverify(model: model)
+    }
+
     /// One entry for each replica that the client has tried to verify and
-    /// whose attempt has finished, failed replicas included, without I/O,
-    /// each holding that replica's last attempt: its report if the attempt passed, and otherwise its
-    /// error, as `EnclaveHTTPClient.lastVerification` describes. A replica's
-    /// earlier success is not kept once a later attempt for it fails.
-    /// Reports may have expired or been discarded since; a discarded
-    /// replica's next request verifies it again.
-    public var lastVerification: [ReplicaVerification] {
-        get async { await router.lastVerification }
+    /// whose attempt has finished, failed replicas included, sorted by host,
+    /// without I/O. An entry's `current` follows the rule of
+    /// `EnclaveHTTPClient.currentVerification` for that replica: the report
+    /// of the replica's verification while it is fresh and has not been
+    /// discarded, and otherwise nil. Its `lastAttempt` holds the replica's
+    /// most recent attempt, as `EnclaveHTTPClient.lastVerificationAttempt`
+    /// describes: a failed attempt replaces an earlier success there, though
+    /// `current` keeps that success while the failure leaves it valid. A
+    /// discarded replica's next request verifies it again.
+    public var replicas: [ReplicaVerification] {
+        get async { await router.replicaVerifications }
     }
 
     /// Closes the client: later requests and verifications fail with
@@ -194,10 +230,14 @@ public final class GatewayHTTPClient: Sendable {
 /// removed in a later release.
 public struct GatewayOptions: Sendable {
     /// The gateway's URL, which requests are sent to; nil selects Tinfoil's
-    /// gateway. It must be HTTPS, and is treated as a directory: a path
-    /// without a trailing slash gets one. Request paths join under it, so a
-    /// URL with credentials, a query or a fragment, even an empty one, is
-    /// refused.
+    /// gateway, `https://inference-gateway.tinfoil.sh/`. It is the gateway's
+    /// origin, or the URL that the gateway is mounted under, not the API
+    /// path: the catalog (`{url}/catalog`), the attestation relay
+    /// (`{url}/.well-known/tinfoil-attestation`) and an `OpenAIClient`'s API
+    /// path join under it, whether or not it ends with a slash. It must be
+    /// HTTPS, and is treated as a directory: a path without a trailing slash
+    /// gets one. Request paths join under it, so a URL with credentials, a
+    /// query or a fragment, even an empty one, is refused.
     public var url: URL?
     /// Pins models to repositories. The client serves only the models that
     /// it has pins for, so at least one pin is required, and a request for
@@ -224,10 +264,10 @@ public struct GatewayOptions: Sendable {
     /// throw to reject it, and the next
     /// replica of the model is tried.
     public var verificationCheck: VerificationCheck?
-    /// Called once for every attempt to verify a replica, with the replica's
-    /// host and the attempt's report or error. It only observes.
-    /// `VerificationCallback` describes when it runs.
-    public var onVerification: VerificationCallback?
+    /// Called once for every attempt to verify a replica, failed attempts
+    /// included, with the replica's host and the attempt's report or error.
+    /// It only observes. `VerificationCallback` describes when it runs.
+    public var onVerificationAttempt: VerificationCallback?
     /// Read on every request in place of the gateway's catalog. Nil fetches
     /// the gateway's catalog when the client is created and refreshes it every
     /// 10 seconds while the client is used; a failed refresh keeps the last
@@ -240,7 +280,7 @@ public struct GatewayOptions: Sendable {
         policy: Policy = Policy(),
         userCacheSecret: String? = nil,
         verificationCheck: VerificationCheck? = nil,
-        onVerification: VerificationCallback? = nil,
+        onVerificationAttempt: VerificationCallback? = nil,
         catalog: (@Sendable () -> Catalog)? = nil
     ) {
         self.url = url
@@ -248,7 +288,7 @@ public struct GatewayOptions: Sendable {
         self.policy = policy
         self.userCacheSecret = userCacheSecret
         self.verificationCheck = verificationCheck
-        self.onVerification = onVerification
+        self.onVerificationAttempt = onVerificationAttempt
         self.catalog = catalog
     }
 }

@@ -30,7 +30,7 @@ final class VerificationCheckTests: XCTestCase {
     /// An EHBP client for enclave.example that sends to the local server
     private func client(
         verificationCheck: @escaping VerificationCheck = { _ in },
-        onVerification: VerificationCallback? = nil,
+        onVerificationAttempt: VerificationCallback? = nil,
         path: String = ""
     ) async throws -> EnclaveHTTPClient {
         let network = FakeNetwork { url, _ in FakeNetwork.document("ok", for: url) }
@@ -45,7 +45,7 @@ final class VerificationCheckTests: XCTestCase {
                     retryDelay: 0,
                     verificationCheck: verificationCheck
                 ),
-                onVerification: onVerification
+                onVerificationAttempt: onVerificationAttempt
             ),
             transportMode: .ehbp,
             baseURL: URL(string: server.baseURL + path)!,
@@ -109,12 +109,13 @@ final class VerificationCheckTests: XCTestCase {
 
     func testTheBasePathComesFromTheNormalizedBaseURL() throws {
         // A base URL without a scheme is read as HTTPS; its path must be read
-        // from that same URL, not the raw string.
-        for (baseURL, expected) in [("proxy.example/api/", "/api"), ("https://proxy.example/api/", "/api"), ("proxy.example", "/v1")] {
+        // from that same URL, not the raw string. An empty path stays empty,
+        // as for the API path "/" under an origin, rather than becoming /v1.
+        for (baseURL, expected) in [("proxy.example/api/", "/api"), ("https://proxy.example/api/", "/api"), ("https://proxy.example/", "")] {
             let openAI = try OpenAI.sealed(
                 apiKey: "test-key",
                 apiKeyProvider: nil,
-                baseURL: baseURL,
+                baseURL: URL(string: baseURL)!,
                 session: EHBPURLSession(baseURL: baseURL, verifiedState: EHBPVerifiedState(endpoint: EHBPVerifiedEndpoint(enclaveURL: "https://enclave.example", publicKey: Data(repeating: 1, count: 32))), userCacheSecret: ""),
                 streamingFactory: EHBPURLSessionFactory(baseURL: baseURL, verifiedState: EHBPVerifiedState(endpoint: EHBPVerifiedEndpoint(enclaveURL: "https://enclave.example", publicKey: Data(repeating: 1, count: 32))), userCacheSecret: ""),
                 parsingOptions: .relaxed,
@@ -138,7 +139,7 @@ final class VerificationCheckTests: XCTestCase {
         ]
         for (path, apiPath, expected) in cases {
             server.requestStore.clear()
-            let client = try await OpenAIClient(httpClient: client(path: path), options: .init(apiPath: apiPath), apiKey: "test-key")
+            let client = try await OpenAIClient(httpClient: client(path: path), apiPath: apiPath ?? OpenAIClient.defaultAPIPath, apiKey: "test-key")
             // The stub server can't seal a response, so the request fails;
             // what matters is where it was sent.
             _ = try? await chat(client)
@@ -153,7 +154,7 @@ final class VerificationCheckTests: XCTestCase {
             _ = try await OpenAIClient(
                 httpClient: try client(
                     verificationCheck: { _ in throw Refusal() },
-                    onVerification: { _, result in reported.value = result }
+                    onVerificationAttempt: { _, result in reported.value = result }
                 ),
                 apiKey: "test-key"
             )
@@ -175,7 +176,7 @@ final class VerificationCheckTests: XCTestCase {
         _ = try await OpenAIClient(
             httpClient: client(
                 verificationCheck: { _ in events.record("enclave verified") },
-                onVerification: { _, _ in events.record("result") }
+                onVerificationAttempt: { _, _ in events.record("result") }
             ),
             apiKey: "test-key"
         )

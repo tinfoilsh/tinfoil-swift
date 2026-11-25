@@ -38,7 +38,7 @@ let client = try await OpenAIClient(apiKey: key)
 | `baseURL` (a proxy) and `attestationBundleURL` | the HTTP client's `options: .init(transport: .ehbp(proxyURL:), fetchAttestation: .relay(_:))`; see below |
 | `parsingOptions`, `customHeaders`, `tinfoilEvents` | the same, on `OpenAIClient` |
 | `userCacheSecret` | the `userCacheSecret` option of `RouterHTTPClient` and `GatewayHTTPClient`; see "Prompt cache" |
-| `onVerification: (VerificationDocument?) -> Void` | `onVerification: (String, Result<VerificationReport, TinfoilError>) -> Void`, which observes each attempt, and `verificationCheck: (VerifiedFacts) throws -> Void`, which can reject an enclave |
+| `onVerification: (VerificationDocument?) -> Void` | `onVerificationAttempt: (String, Result<VerificationReport, TinfoilError>) -> Void`, which observes each attempt, and `verificationCheck: (VerifiedFacts) throws -> Void`, which can reject an enclave |
 
 ### Proxies and attestation
 
@@ -84,7 +84,7 @@ initializer returns, so there is no separate `verify()`.
 | `SecureClient(githubRepo:enclaveURL:)` | `try await EnclaveHTTPClient(enclave:trust:)` (the enclave is a host, not a URL) |
 | `SecureClient(githubRepo:attestationBundleURL:)` | `try await RouterHTTPClient()`, or `try await EnclaveHTTPClient(enclave:trust:options: .init(fetchAttestation: .relay(_:)))` |
 | `verify()` | `ensureVerified()` (valid now, verifying only if needed) or `reverify()` |
-| `verificationDocument`, `verifiedGroundTruth` | `lastVerification`, a `Result<VerificationReport, TinfoilError>?` |
+| `verificationDocument`, `verifiedGroundTruth` | `currentVerification`, the `VerificationReport?` of the verification that requests use now, or `lastVerificationAttempt`, the most recent attempt as a `Result<VerificationReport, TinfoilError>?` |
 | `verifiedEnclaveURL` | `enclave` and `baseURL` |
 | `get(url:headers:)`, `post(url:headers:body:)` → `SecureResponse` | `data(from:)`, `data(for:)` → `(Data, HTTPURLResponse)` |
 
@@ -135,8 +135,8 @@ task is cancelled, and the OpenAI SDK's own errors for an API failure.
 
 `EHBPURLSession`, `EHBPURLSessionFactory`, `TinfoilConstants`, `SecureResponse`
 and the 0.8.x `VerificationCallback` are no longer public; the
-`VerificationCallback` of this release is the type of the `onVerification`
-option. Send requests of your own with
+`VerificationCallback` of this release is the type of the
+`onVerificationAttempt` option. Send requests of your own with
 an HTTP client's `data(for:)`, or with `recoverableBytes(for:)` for a streamed
 EHBP response and its session recovery token.
 
@@ -181,7 +181,9 @@ least one, are still checked before any network I/O.
 | `Verifier(freshnessSigningKeys: k)` | `Policy(artifacts: .endorsed(freshnessKeys: k))` |
 | `Verifier(embeddedReferences: .init(runtime: r, platform: p))` | `Policy(artifacts: .embedded(runtime: r, platform: p))` |
 | `ModelPin(repo: r, verifier: v)` | `ModelPin(repo: r, policy: p)` |
-| `GatewayHTTPClient(baseURL: u)`, `GatewayHTTPClient.defaultBaseURL` | `GatewayHTTPClient(options: .init(url: u))`, `GatewayHTTPClient.defaultURL` |
+| `GatewayHTTPClient(baseURL: u)`, `GatewayHTTPClient.defaultBaseURL` | `GatewayHTTPClient(options: .init(url: u))`, `GatewayHTTPClient.defaultURL`. The URL is the gateway's origin, or the URL that it is mounted under, without the API path: `https://inference-gateway.tinfoil.sh/v1/` becomes `https://inference-gateway.tinfoil.sh/`, and the OpenAI client adds the API path under it |
+| the gateway's catalog and attestation relay at the URL's origin | under the URL's path: `{url}/catalog` and `{url}/.well-known/tinfoil-attestation` |
+| a gateway client's relative request URL, such as `chat/completions`, resolved under `/v1/` | resolved under the gateway's URL: write `v1/chat/completions` |
 | `transportMode: .tls` | `transport: .tls`, or unset |
 | `transportMode: .ehbp` | `transport: .ehbp()` |
 | `transportMode: .ehbp, baseURL: proxy` | `transport: .ehbp(proxyURL: proxy)`; the OpenAI client adds the API path under it, so `https://proxy.example/v1/` becomes `https://proxy.example/` |
@@ -191,7 +193,7 @@ least one, are still checked before any network I/O.
 | `EnclaveOpenAIClient(enclave:pin:…apiKey:)` | `OpenAIClient(httpClient: try await EnclaveHTTPClient(enclave:trust:options:), apiKey:)` |
 | `RouterOpenAIClient(…)`, `GatewayOpenAIClient(…)` | `OpenAIClient(httpClient:apiKey:)` over a `RouterHTTPClient` or a `GatewayHTTPClient` |
 | `Client(apiKey:)` | `OpenAIClient(apiKey:)` |
-| the OpenAI client's base URL from the HTTP client's `baseURL` | set by the SDK: `OpenAIOptions.apiPath`, `/v1/` by default, under the proxy URL or the enclave's origin; the gateway's URL for a gateway client |
+| the OpenAI client's base URL from the HTTP client's `baseURL`, whose path was the API path, or `/v1` for a bare origin | set by the SDK: the `apiPath` argument of `OpenAIClient`, `/v1/` by default, joined under the proxy URL, the enclave's origin or the gateway's URL, whose path is where the proxy or gateway is mounted. An empty or invalid API path is a configuration error |
 | `userCacheSecret` on an enclave client | gone: the enclave client sends bodies as they are; set `user_cache_secret` per request |
 | `attestationRelay: "relay.example"`, a host that serves `/.well-known/tinfoil-attestation?nonce=…&enclave=…` | `fetchAttestation: .relay(URL(string: "https://relay.example")!)`, a URL whose path is where the relay is mounted, or `AttestationFetcher { host, nonce in … }` |
 | a router client with `attestationRelay`, which skipped discovery and asked the relay for the fallback router | discovery always runs, and fetches every router's document through `fetchAttestation`; set `fetchRouterList: .relay(url)` to fetch the list through `{url}/routers` too |
@@ -215,9 +217,10 @@ other version.
 | `Verification` | `VerifiedFacts`, the `verifiedFacts` of a `VerificationReport`; `metadata` moved to the report |
 | `Verification.Measurement` | `VerifiedFacts.Measurement` |
 | `ensureVerified()`, `reverify()`, the gateway's `ensureVerified(model:)` returning a `Verification` | the same calls, returning a `VerificationReport` |
-| `current`, the last successful verification, kept after a later failure | `lastVerification`: the most recent attempt, as a `Result<VerificationReport, TinfoilError>?`, so a failure replaces an earlier success |
-| `GatewayHTTPClient.current`, with each replica's last successful `verification` | `GatewayHTTPClient.lastVerification`, with each replica tried, failed ones included, and its `lastVerification` attempt |
-| `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, called once per verification run | `onVerification: (String, Result<VerificationReport, TinfoilError>) -> Void`, called once for every attempt, retries and each router that discovery tries included, with the host that the attempt verified |
+| `current`, the last successful verification, kept after a later failure | `currentVerification`: the report of the verification that requests are bound to now, nil once it has expired or an attestation failure or a key rejection discarded it; and `lastVerificationAttempt`: the most recent attempt, as a `Result<VerificationReport, TinfoilError>?`, so a failure replaces an earlier success |
+| `GatewayHTTPClient.current`, with each replica's last successful `verification` | `GatewayHTTPClient.replicas`, with each replica tried, failed ones included, its `current` verification and its `lastAttempt` |
+| — | `GatewayHTTPClient.reverify(model:)`, which verifies again the replica that `ensureVerified(model:)` would return |
+| `onVerificationResult: (Result<Verification, TinfoilError>) -> Void`, called once per verification run | `onVerificationAttempt: (String, Result<VerificationReport, TinfoilError>) -> Void`, called once for every attempt, retries and each router that discovery tries included, with the host that the attempt verified |
 | `VerificationResultCallback` | `VerificationCallback` |
 | `VerificationCheck` receiving a `Verification` | `VerificationCheck` receiving the `VerifiedFacts` |
 | `Verification.Measurement`, `Verification.CryptoMaterial` conforming to `Decodable` | `VerifiedFacts.Measurement`, `VerifiedFacts.CryptoMaterial` conforming to `Encodable` only |
@@ -230,7 +233,9 @@ RFC 3339 times in UTC, `"schema_version": 1`, and no member that is null or
 unconstrained, and the TLS and HPKE keys appear only in
 `verified_facts.crypto_material`. The types are `Encodable` but not
 `Decodable`: nothing reads the form back into a report, since anyone can write
-verified facts in JSON, so the form never authorizes a channel.
+verified facts in JSON, so the form never authorizes a channel. A report that
+a client hands out names the host that the client contacted, as
+`metadata.host` (`VerificationMetadata.host`); it is not attested.
 
 ### Gateway model pins (after 0.9.0-rc.6)
 

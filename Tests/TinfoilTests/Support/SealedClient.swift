@@ -33,10 +33,14 @@ final class SealedClient: OpenAICompatibleClient, Sendable {
             refresh: refreshEndpoint
         )
         self.verifiedState = verifiedState
+        // The API path joins under the base URL, as OpenAIClient joins it.
+        guard let root = URL(string: baseURL) else {
+            throw TinfoilError.configuration("invalid base URL \(baseURL)")
+        }
         self.openAI = try OpenAI.sealed(
             apiKey: apiKey,
             apiKeyProvider: apiKeyProvider,
-            baseURL: baseURL,
+            baseURL: OpenAIClient.join(root, apiPath: OpenAIClient.defaultAPIPath),
             session: EHBPURLSession(baseURL: baseURL, verifiedState: verifiedState, userCacheSecret: userCacheSecret),
             streamingFactory: EHBPURLSessionFactory(baseURL: baseURL, verifiedState: verifiedState, userCacheSecret: userCacheSecret),
             parsingOptions: parsingOptions,

@@ -157,7 +157,7 @@ final class PolicyTests: XCTestCase {
                     XCTFail("fetched \(url) despite a pin the verifier refuses")
                     throw TinfoilError.network("unreachable")
                 }),
-                onVerification: nil
+                onVerificationAttempt: nil
             ),
             containing: "config authorizer cannot authenticate"
         )

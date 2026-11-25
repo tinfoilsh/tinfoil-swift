@@ -51,7 +51,7 @@ final class UserCacheSecretTests: XCTestCase {
             transportMode: .tls,
             baseURL: nil,
             attestor: Attestor(verifier: FakeVerifier(), fetch: { _ in throw TinfoilError.network("no network in this test") }),
-            onVerification: nil
+            onVerificationAttempt: nil
         )
         XCTAssertEqual(connection.userCacheSecret, "", "Only Tinfoil's routers read the secret, so none is added for another enclave.")
         // With no client secret, an eligible body is sent as written, an
@@ -72,7 +72,7 @@ final class UserCacheSecretTests: XCTestCase {
             transportMode: .ehbp,
             baseURL: nil,
             userCacheSecret: nil,
-            onVerification: nil
+            onVerificationAttempt: nil
         )
         XCTAssertEqual(connection.userCacheSecret, UserCacheSecret.processSecret)
     }
