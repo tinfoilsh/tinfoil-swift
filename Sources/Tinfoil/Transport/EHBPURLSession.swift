@@ -31,6 +31,7 @@ private func prepareEHBPRequest(
 ) async throws -> PreparedEHBPRequest {
     try Task.checkCancellation()
     try refuseUnsealedTraffic(request)
+    try refuseStreamedBody(request)
     guard let url = request.url else {
         throw EHBPError(.invalidInput, "request has no URL")
     }
@@ -80,6 +81,14 @@ func refuseUnsealedTraffic(_ request: URLRequest) throws {
         throw TinfoilError.configuration(
             "EHBP seals only request and response bodies, so it can't protect a protocol upgrade, such as a WebSocket, or a CONNECT tunnel"
         )
+    }
+}
+
+/// Refuses a request whose body is a stream. Only `httpBody` is sealed, so a
+/// streamed body would be left out and the request sent without one.
+func refuseStreamedBody(_ request: URLRequest) throws {
+    guard request.httpBodyStream == nil else {
+        throw TinfoilError.configuration("EHBP needs a request's body as httpBody, not a stream")
     }
 }
 
