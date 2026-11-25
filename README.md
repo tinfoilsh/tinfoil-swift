@@ -15,7 +15,7 @@ Requires iOS 17 or macOS 14, and Swift 5.9.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", .upToNextMinor(from: "0.9.0-rc.6"))
+    .package(url: "https://github.com/tinfoilsh/tinfoil-swift.git", .upToNextMinor(from: "0.9.0-rc.7"))
 ],
 targets: [
     .target(name: "YourApp", dependencies: [.product(name: "Tinfoil", package: "tinfoil-swift")])
